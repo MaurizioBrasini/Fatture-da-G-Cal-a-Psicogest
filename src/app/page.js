@@ -74,14 +74,23 @@ export default function DashboardPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: s }, { data: pb }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: pb }, { data: cc }] = await Promise.all([
       supabase.from("patients").select("*").order("id"),
       supabase.from("settings").select("*").maybeSingle(),
       supabase.from("pending_batch").select("*").maybeSingle(),
+      supabase.from("calendar_cache").select("*").maybeSingle(),
     ]);
     setPatients(p || []);
     if (s) setSettings(s);
     setPendingBatch(pb || null);
+    if (cc) {
+      setEvents(cc.events || []);
+      setEventsMeta({ from: cc.from_date, to: cc.to_date, fetchedAt: cc.fetched_at });
+      setFromDate(cc.from_date);
+      setToDate(cc.to_date);
+      if (cc.from_hour) setFromHour(cc.from_hour);
+      if (cc.to_hour) setToHour(cc.to_hour);
+    }
     setLoading(false);
   }, [supabase]);
 
@@ -109,7 +118,18 @@ export default function DashboardPage() {
         filtered = filtered.filter((e) => !e.ora || (e.ora >= lo && e.ora <= hi));
       }
       setEvents(filtered);
-      setEventsMeta({ from: fromDate, to: toDate, fetchedAt: new Date().toISOString() });
+      const fetchedAt = new Date().toISOString();
+      setEventsMeta({ from: fromDate, to: toDate, fetchedAt });
+      const { data: userData } = await supabase.auth.getUser();
+      await supabase.from("calendar_cache").upsert({
+        user_id: userData.user.id,
+        from_date: fromDate,
+        to_date: toDate,
+        from_hour: fromHour || null,
+        to_hour: toHour || null,
+        events: filtered,
+        fetched_at: fetchedAt,
+      });
     } catch (e) {
       setSyncError(e.message);
     } finally {
