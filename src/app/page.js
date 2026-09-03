@@ -194,6 +194,18 @@ export default function DashboardPage() {
     setPendingBatch(null);
   }
 
+  async function postponeReview(id, currentGiorniStale) {
+    const input = window.prompt("Tra quanti giorni vuoi essere riavvisato per questo paziente?", "45");
+    if (input === null) return;
+    const extra = parseInt(input);
+    if (!extra || extra <= 0) return;
+    const c = computed[id];
+    const giaTrascorsi = c.ultimaData ? daysBetween(c.ultimaData, todayISO()) : 0;
+    const nuovaSoglia = giaTrascorsi + extra;
+    await supabase.from("patients").update({ giorni_stale_override: nuovaSoglia }).eq("id", id);
+    load();
+  }
+
   async function forceClose(id) {
     await generateBatch([id]);
   }
@@ -352,6 +364,9 @@ export default function DashboardPage() {
                         <td>
                           <button className="btn btn-small" disabled={disabled || !p.codice_fiscale} onClick={() => forceClose(p.id)}>
                             Chiudi e fattura ora
+                          </button>{" "}
+                          <button className="btn btn-small btn-ghost" disabled={disabled} onClick={() => postponeReview(p.id, p.giorni_stale_override)}>
+                            Posticipa
                           </button>
                         </td>
                       </tr>

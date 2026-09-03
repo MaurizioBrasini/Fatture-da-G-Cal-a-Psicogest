@@ -13,12 +13,48 @@ const TIPOLOGIE = [
 const TIPOLOGIA_LABEL = { individuale: "Individuale", coppia: "Coppia", consulenza: "Consulenza" };
 const TIPOLOGIA_FROM_LABEL = { INDIVIDUALE: "individuale", COPPIA: "coppia", CONSULENZA: "consulenza" };
 
+function SortableTh({ label, sortKey, sort, setSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      onClick={() => setSort((s) => (s.key === sortKey ? { key: sortKey, dir: s.dir === "asc" ? "desc" : "asc" } : { key: sortKey, dir: "asc" }))}
+      style={{ cursor: "pointer", userSelect: "none" }}
+    >
+      {label} {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+    </th>
+  );
+}
+
+function sortRows(list, sort) {
+  const arr = [...list];
+  const getVal = (p) => {
+    switch (sort.key) {
+      case "nome_calendario": return (p.nome_calendario || "").toUpperCase();
+      case "fatturare_a": return (p.fatturare_a || "").toUpperCase();
+      case "tipologia": return p.tipologia || "";
+      case "costo_unitario": return p.costo_unitario || 0;
+      case "soglia_fatturazione": return p.soglia_fatturazione || 0;
+      case "ancora_data": return p.ancora_data || "";
+      case "stato": return p.stato || "";
+      default: return "";
+    }
+  };
+  arr.sort((a, b) => {
+    const va = getVal(a), vb = getVal(b);
+    if (va < vb) return sort.dir === "asc" ? -1 : 1;
+    if (va > vb) return sort.dir === "asc" ? 1 : -1;
+    return 0;
+  });
+  return arr;
+}
+
 export default function PazientiPage() {
   const supabase = createClient();
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
+  const [sort, setSort] = useState({ key: "fatturare_a", dir: "asc" });
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -167,9 +203,12 @@ export default function PazientiPage() {
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
-  const filtered = patients
-    .filter((p) => normalizeName((p.nome_calendario || "") + " " + (p.fatturare_a || "")).includes(normalizeName(query)))
-    .filter((p) => !onlyIncomplete || !p.nome_calendario || !p.codice_fiscale);
+  const filtered = sortRows(
+    patients
+      .filter((p) => normalizeName((p.nome_calendario || "") + " " + (p.fatturare_a || "")).includes(normalizeName(query)))
+      .filter((p) => !onlyIncomplete || !p.nome_calendario || !p.codice_fiscale),
+    sort
+  );
 
   return (
     <div className="app-root">
@@ -211,16 +250,16 @@ export default function PazientiPage() {
           <table className="tbl editable">
             <thead>
               <tr>
-                <th>Nome in calendario</th>
-                <th>Fatturare a</th>
+                <SortableTh label="Nome in calendario" sortKey="nome_calendario" sort={sort} setSort={setSort} />
+                <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />
                 <th>Codice fiscale</th>
-                <th>Tipologia</th>
-                <th>Tariffa €</th>
-                <th>Soglia</th>
+                <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />
+                <SortableTh label="Tariffa €" sortKey="costo_unitario" sort={sort} setSort={setSort} />
+                <SortableTh label="Soglia" sortKey="soglia_fatturazione" sort={sort} setSort={setSort} />
                 <th>Giorni inattività</th>
-                <th>Ancora: data</th>
+                <SortableTh label="Ancora: data" sortKey="ancora_data" sort={sort} setSort={setSort} />
                 <th>Ancora: valore</th>
-                <th>Stato</th>
+                <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />
                 <th>Pagamento</th>
                 <th></th>
               </tr>
