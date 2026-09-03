@@ -27,6 +27,15 @@ export function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 
+// Converte una stringa "YYYY-MM-DD" in un vero oggetto Date a mezzanotte
+// locale (non UTC, per evitare che il giorno scali indietro di uno in
+// alcuni fusi orari). Serve per scrivere celle di tipo data reali nel file
+// Excel — Psicogest si aspetta una data vera, non una stringa di testo.
+export function toDateObj(dateStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function matchPatientForEvent(title, patients) {
   const norm = normalizeName(title);
   const exact = patients.find((p) => normalizeName(p.nome_calendario) === norm);
@@ -100,7 +109,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura) {
     fatturaTIPODOCUMENTO: "fattura",
     fatturaNUMERO: "",
     fatturaANNO: new Date(dataFattura).getFullYear(),
-    fatturaDATA: dataFattura,
+    fatturaDATA: toDateObj(dataFattura),
     fatturaMODOPAGAMENTO: patient.modalita_pagamento || "Bonifico",
     fatturaPRESTAZIONE: prestazione,
     "fatturaIMPONIBILE SANITARIO": onorario,
