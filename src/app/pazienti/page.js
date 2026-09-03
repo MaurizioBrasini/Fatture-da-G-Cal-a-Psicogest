@@ -47,7 +47,8 @@ export default function PazientiPage() {
     if (data) setPatients((ps) => [...ps, data]);
   }
 
-  async function removePatient(id) {
+  async function removePatient(id, label) {
+    if (!window.confirm(`Eliminare definitivamente "${label || "questo paziente"}"? L'operazione non si può annullare.`)) return;
     setPatients((ps) => ps.filter((p) => p.id !== id));
     await supabase.from("patients").delete().eq("id", id);
   }
@@ -219,7 +220,7 @@ export default function PazientiPage() {
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>
                     </select>
                   </td>
-                  <td><button className="btn-icon" onClick={() => removePatient(p.id)}>×</button></td>
+                  <td><button className="btn-icon" onClick={() => removePatient(p.id, p.fatturare_a || p.nome_calendario)}>×</button></td>
                 </tr>
               ))}
             </tbody>
