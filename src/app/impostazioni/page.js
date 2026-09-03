@@ -78,6 +78,38 @@ export default function ImpostazioniPage() {
             <input value={settings.prestazione_consulenza} onChange={(e) => set("prestazione_consulenza", e.target.value)} />
           </label>
         </div>
+
+        <h2 className="sub-heading">Tariffe standard (€ a seduta)</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Usate per compilare in automatico la tariffa quando imposti tipologia e regime di un paziente in
+          "Pazienti" — resta comunque modificabile a mano per i casi valutati caso per caso.
+        </p>
+        <div className="settings-grid">
+          <label>
+            Individuale — regolare
+            <input type="number" step="0.01" className="num" value={settings.tariffa_individuale_regolare} onChange={(e) => set("tariffa_individuale_regolare", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Individuale — agevolata
+            <input type="number" step="0.01" className="num" value={settings.tariffa_individuale_agevolata} onChange={(e) => set("tariffa_individuale_agevolata", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Coppia — regolare
+            <input type="number" step="0.01" className="num" value={settings.tariffa_coppia_regolare} onChange={(e) => set("tariffa_coppia_regolare", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Coppia — agevolata
+            <input type="number" step="0.01" className="num" value={settings.tariffa_coppia_agevolata} onChange={(e) => set("tariffa_coppia_agevolata", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Consulenza — regolare
+            <input type="number" step="0.01" className="num" value={settings.tariffa_consulenza_regolare} onChange={(e) => set("tariffa_consulenza_regolare", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Consulenza — agevolata
+            <input type="number" step="0.01" className="num" value={settings.tariffa_consulenza_agevolata} onChange={(e) => set("tariffa_consulenza_agevolata", parseFloat(e.target.value) || 0)} />
+          </label>
+        </div>
       </main>
     </div>
   );

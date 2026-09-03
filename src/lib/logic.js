@@ -132,4 +132,15 @@ export const DEFAULT_SETTINGS = {
   prestazione_individuale: "psicoterapia individuale",
   prestazione_coppia: "psicoterapia di coppia",
   prestazione_consulenza: "consulenza psicologica",
+  tariffa_individuale_regolare: 80,
+  tariffa_individuale_agevolata: 50,
+  tariffa_coppia_regolare: 100,
+  tariffa_coppia_agevolata: 60,
+  tariffa_consulenza_regolare: 80,
+  tariffa_consulenza_agevolata: 50,
 };
+
+export function tariffaStandard(tipologia, regime, settings) {
+  const key = `tariffa_${tipologia}_${regime === "agevolata" ? "agevolata" : "regolare"}`;
+  return settings[key] ?? 0;
+}

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
-import { normalizeName, todayISO } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, DEFAULT_SETTINGS } from "@/lib/logic";
 
 const TIPOLOGIE = [
   { value: "individuale", label: "Individuale" },
@@ -55,12 +55,17 @@ export default function PazientiPage() {
   const [query, setQuery] = useState("");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
   const [sort, setSort] = useState({ key: "fatturare_a", dir: "asc" });
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from("patients").select("*").order("id");
+    const [{ data }, { data: s }] = await Promise.all([
+      supabase.from("patients").select("*").order("id"),
+      supabase.from("settings").select("*").maybeSingle(),
+    ]);
     setPatients(data || []);
+    if (s) setSettings(s);
     setLoading(false);
   }, [supabase]);
 
@@ -70,13 +75,22 @@ export default function PazientiPage() {
 
   const [saveStatus, setSaveStatus] = useState("");
 
-  async function updateField(id, field, value) {
-    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    await supabase.from("patients").update({ [field]: value }).eq("id", id);
+  async function updateTipologiaORegime(id, field, value) {
+    const p = patients.find((pp) => pp.id === id);
+    const nextTipologia = field === "tipologia" ? value : p.tipologia;
+    const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
+    const nuovaTariffa = tariffaStandard(nextTipologia, nextRegime, settings);
+    setPatients((ps) => ps.map((pp) => (pp.id === id ? { ...pp, [field]: value, costo_unitario: nuovaTariffa } : pp)));
+    await supabase.from("patients").update({ [field]: value, costo_unitario: nuovaTariffa }).eq("id", id);
   }
 
   function updateLocal(id, field, value) {
     setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+  }
+
+  async function updateField(id, field, value) {
+    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    await supabase.from("patients").update({ [field]: value }).eq("id", id);
   }
 
   async function persistField(id, field, value) {
@@ -102,7 +116,8 @@ export default function PazientiPage() {
       .insert({
         user_id: userData.user.id,
         tipologia: "individuale",
-        costo_unitario: 80,
+        regime_tariffario: "regolare",
+        costo_unitario: tariffaStandard("individuale", "regolare", settings),
         soglia_fatturazione: 5,
         modalita_pagamento: "Bonifico",
         ancora_data: nextMonday.toISOString().slice(0, 10),
@@ -125,6 +140,7 @@ export default function PazientiPage() {
       "Fatturare a": p.fatturare_a,
       "Codice fiscale": p.codice_fiscale,
       Tipologia: TIPOLOGIA_LABEL[p.tipologia] || p.tipologia,
+      Regime: p.regime_tariffario === "agevolata" ? "Agevolata" : "Regolare",
       Tariffa: p.costo_unitario,
       "Soglia fatturazione": p.soglia_fatturazione,
       "Giorni inattività": p.giorni_stale_override || "",
@@ -164,6 +180,7 @@ export default function PazientiPage() {
           (cf && patients.find((p) => p.codice_fiscale && p.codice_fiscale === cf)) ||
           patients.find((p) => normalizeName(p.fatturare_a || p.nome_calendario) === key);
         const tipologia = TIPOLOGIA_FROM_LABEL[String(row["Tipologia"] || "").toUpperCase()] || (existing ? existing.tipologia : "individuale");
+        const regime = String(row["Regime"] || "").trim().toUpperCase() === "AGEVOLATA" ? "agevolata" : (existing ? existing.regime_tariffario : "regolare");
         const rawGiorniStale = row["Giorni inattività"];
         const rawSoglia = row["Soglia fatturazione"];
         const rawTariffa = row["Tariffa"];
@@ -173,6 +190,7 @@ export default function PazientiPage() {
             nome_calendario: nomeCal || existing.nome_calendario,
             fatturare_a: fatturareA,
             tipologia,
+            regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || existing.costo_unitario,
             codice_fiscale: cf || existing.codice_fiscale,
             soglia_fatturazione: rawSoglia ? parseInt(rawSoglia) || existing.soglia_fatturazione : existing.soglia_fatturazione,
@@ -186,6 +204,7 @@ export default function PazientiPage() {
             nome_calendario: nomeCal,
             fatturare_a: fatturareA,
             tipologia,
+            regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || 80,
             codice_fiscale: cf,
             soglia_fatturazione: parseInt(rawSoglia) || 5,
@@ -254,6 +273,7 @@ export default function PazientiPage() {
                 <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />
                 <th>Codice fiscale</th>
                 <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />
+                <th>Regime</th>
                 <SortableTh label="Tariffa €" sortKey="costo_unitario" sort={sort} setSort={setSort} />
                 <SortableTh label="Soglia" sortKey="soglia_fatturazione" sort={sort} setSort={setSort} />
                 <th>Giorni inattività</th>
@@ -281,8 +301,14 @@ export default function PazientiPage() {
                     />
                   </td>
                   <td>
-                    <select value={p.tipologia} onChange={(e) => updateField(p.id, "tipologia", e.target.value)}>
+                    <select value={p.tipologia} onChange={(e) => updateTipologiaORegime(p.id, "tipologia", e.target.value)}>
                       {TIPOLOGIE.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select value={p.regime_tariffario || "regolare"} onChange={(e) => updateTipologiaORegime(p.id, "regime_tariffario", e.target.value)}>
+                      <option value="regolare">Regolare</option>
+                      <option value="agevolata">Agevolata</option>
                     </select>
                   </td>
                   <td><input type="number" step="0.01" className="num" value={p.costo_unitario} onChange={(e) => updateLocal(p.id, "costo_unitario", e.target.value)} onBlur={(e) => persistField(p.id, "costo_unitario", parseFloat(e.target.value) || 0)} /></td>
