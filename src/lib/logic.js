@@ -101,7 +101,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura) {
   const dal = date[0] || computed.ultimaData || dataFattura;
   const al = date[date.length - 1] || computed.ultimaData || dataFattura;
 
-  return {
+  const row = {
     pazienteID: patient.codice_fiscale || "",
     // fatturaID e fatturaNUMERO li assegna Psicogest stesso (numerazione
     // progressiva nnn/anno) — vanno lasciati vuoti.
@@ -120,11 +120,16 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura) {
     fatturaTOTALE: totale,
     fatturaTOTALEDAPAGARE: totale,
     fatturaNOTE: `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
-    fatturaDATAPAGAMENTO: "",
+    // fatturaDATAPAGAMENTO va omessa (non scritta come stringa vuota):
+    // Psicogest tenta di interpretare come data qualsiasi cella presente in
+    // questa colonna, anche se contiene solo una stringa vuota, e questo
+    // manda in errore l'importazione (NullPointerException su java.util.Date).
     _onorario: onorario,
     _count: count,
     _tariffa: tariffa,
   };
+
+  return row;
 }
 
 export const COLUMN_ORDER = [
