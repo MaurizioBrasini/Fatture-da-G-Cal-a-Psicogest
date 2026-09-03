@@ -77,7 +77,7 @@ export function computePatientState(patient, events, settings) {
   return { count, soglia, ultimaData, prossimaData, usati, stato };
 }
 
-export function buildInvoiceRow(patient, computed, settings, dataFattura) {
+export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID) {
   const count = computed.count;
 
   // Tariffa tonda (es. 80€, 100€) = costo_unitario × numero sedute.
@@ -103,9 +103,11 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura) {
 
   const row = {
     pazienteID: patient.codice_fiscale || "",
-    // fatturaID e fatturaNUMERO li assegna Psicogest stesso (numerazione
-    // progressiva nnn/anno) — vanno lasciati vuoti.
-    fatturaID: "",
+    // fatturaID è un numero progressivo ≥1 richiesto dal validatore di
+    // Psicogest (riferimento interno al file di import, non il numero di
+    // fattura definitivo). fatturaNUMERO invece resta vuoto: quello lo
+    // assegna Psicogest stesso in formato nnn/anno.
+    fatturaID,
     fatturaTIPODOCUMENTO: "fattura",
     fatturaNUMERO: "",
     fatturaANNO: new Date(dataFattura).getFullYear(),
@@ -120,10 +122,10 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura) {
     fatturaTOTALE: totale,
     fatturaTOTALEDAPAGARE: totale,
     fatturaNOTE: `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
-    // fatturaDATAPAGAMENTO va omessa (non scritta come stringa vuota):
-    // Psicogest tenta di interpretare come data qualsiasi cella presente in
-    // questa colonna, anche se contiene solo una stringa vuota, e questo
-    // manda in errore l'importazione (NullPointerException su java.util.Date).
+    // fatturaDATAPAGAMENTO va compilata solo quando il paziente ha
+    // effettivamente pagato; per ora resta omessa (non stringa vuota, che
+    // manderebbe in errore il parser data di Psicogest) e andrà valorizzata
+    // in futuro quando implementeremo la gestione dei pagamenti.
     _onorario: onorario,
     _count: count,
     _tariffa: tariffa,

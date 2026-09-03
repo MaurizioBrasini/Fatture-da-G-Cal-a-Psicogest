@@ -161,10 +161,11 @@ export default function DashboardPage() {
 
   async function generateBatch(patientIds) {
     const dataFattura = todayISO();
+    let fid = 1;
     const rows = patientIds.map((id) => {
       const p = patients.find((pp) => pp.id === id);
       const c = computed[id];
-      return buildInvoiceRow(p, c, settings, dataFattura);
+      return buildInvoiceRow(p, c, settings, dataFattura, fid++);
     });
 
     const exportRows = rows.map(({ _onorario, _count, _tariffa, ...r }) => r);
