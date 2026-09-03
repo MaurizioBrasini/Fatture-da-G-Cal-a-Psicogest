@@ -160,18 +160,18 @@ export default function DashboardPage() {
 
   async function generateBatch(patientIds) {
     const dataFattura = todayISO();
-    let fid = 1;
     const rows = patientIds.map((id) => {
       const p = patients.find((pp) => pp.id === id);
       const c = computed[id];
-      return buildInvoiceRow(p, c, settings, dataFattura, fid++);
+      return buildInvoiceRow(p, c, settings, dataFattura);
     });
 
-    const exportRows = rows.map(({ _onorario, _count, ...r }) => r);
+    const exportRows = rows.map(({ _onorario, _count, _tariffa, ...r }) => r);
     const ws = XLSX.utils.json_to_sheet(exportRows, { header: COLUMN_ORDER });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Foglio1");
-    XLSX.writeFile(wb, `import_fatture_${dataFattura}.xlsx`);
+    // Psicogest richiede il vecchio formato .xls (BIFF8), non .xlsx
+    XLSX.writeFile(wb, `import_fatture_${dataFattura}.xls`, { bookType: "xls" });
 
     const { data: userData } = await supabase.auth.getUser();
     const batch = {

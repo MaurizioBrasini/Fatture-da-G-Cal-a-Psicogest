@@ -68,10 +68,20 @@ export function computePatientState(patient, events, settings) {
   return { count, soglia, ultimaData, prossimaData, usati, stato };
 }
 
-export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID) {
+export function buildInvoiceRow(patient, computed, settings, dataFattura) {
   const count = computed.count;
-  const onorario = Math.round(patient.costo_unitario * count * 100) / 100;
-  const bolloDovuto = onorario > settings.bollo_soglia;
+
+  // Tariffa tonda (es. 80€, 100€) = costo_unitario × numero sedute.
+  // Da qui si scorpora l'onorario (imponibile sanitario) in modo che
+  // onorario + ENPAP torni esattamente alla cifra tonda, ed eventualmente
+  // il bollo (2€ fisso) si aggiunge sopra, senza toccare lo scorporo.
+  const tariffa = Math.round(patient.costo_unitario * count * 100) / 100;
+  const onorario = Math.round((tariffa / 1.02) * 100) / 100;
+  const enpap = Math.round((tariffa - onorario) * 100) / 100;
+  const bolloDovuto = tariffa > settings.bollo_soglia;
+  const bollo = bolloDovuto ? 2 : 0;
+  const totale = Math.round((tariffa + bollo) * 100) / 100;
+
   const prestazioneMap = {
     individuale: settings.prestazione_individuale,
     coppia: settings.prestazione_coppia,
@@ -84,7 +94,9 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
 
   return {
     pazienteID: patient.codice_fiscale || "",
-    fatturaID,
+    // fatturaID e fatturaNUMERO li assegna Psicogest stesso (numerazione
+    // progressiva nnn/anno) — vanno lasciati vuoti.
+    fatturaID: "",
     fatturaTIPODOCUMENTO: "fattura",
     fatturaNUMERO: "",
     fatturaANNO: new Date(dataFattura).getFullYear(),
@@ -93,15 +105,16 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     fatturaPRESTAZIONE: prestazione,
     "fatturaIMPONIBILE SANITARIO": onorario,
     fatturaONORARIO: onorario,
-    fatturaENPAP: "",
-    fatturaBOLLO: "",
+    fatturaENPAP: enpap,
+    fatturaBOLLO: bollo,
     fatturaBOLLOACARICOPAZ: bolloDovuto ? "si" : "no",
-    fatturaTOTALE: "",
-    fatturaTOTALEDAPAGARE: "",
+    fatturaTOTALE: totale,
+    fatturaTOTALEDAPAGARE: totale,
     fatturaNOTE: `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
     fatturaDATAPAGAMENTO: "",
     _onorario: onorario,
     _count: count,
+    _tariffa: tariffa,
   };
 }
 
