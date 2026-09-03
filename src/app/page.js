@@ -12,6 +12,45 @@ import {
   daysBetween,
 } from "@/lib/logic";
 
+function SortableTh({ label, sortKey, sort, setSort }) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      onClick={() => setSort((s) => (s.key === sortKey ? { key: sortKey, dir: s.dir === "asc" ? "desc" : "asc" } : { key: sortKey, dir: "asc" }))}
+      style={{ cursor: "pointer", userSelect: "none" }}
+    >
+      {label} {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+    </th>
+  );
+}
+
+function sortPatients(list, computed, sort) {
+  const arr = [...list];
+  arr.sort((a, b) => {
+    let va, vb;
+    if (sort.key === "nome") {
+      va = (a.fatturare_a || a.nome_calendario || "").toUpperCase();
+      vb = (b.fatturare_a || b.nome_calendario || "").toUpperCase();
+    } else if (sort.key === "tipologia") {
+      va = a.tipologia || "";
+      vb = b.tipologia || "";
+    } else if (sort.key === "ultimaData") {
+      va = computed[a.id]?.ultimaData || "";
+      vb = computed[b.id]?.ultimaData || "";
+    } else if (sort.key === "prossimaData") {
+      va = computed[a.id]?.prossimaData || "";
+      vb = computed[b.id]?.prossimaData || "";
+    } else if (sort.key === "sedute") {
+      va = computed[a.id]?.count || 0;
+      vb = computed[b.id]?.count || 0;
+    }
+    if (va < vb) return sort.dir === "asc" ? -1 : 1;
+    if (va > vb) return sort.dir === "asc" ? 1 : -1;
+    return 0;
+  });
+  return arr;
+}
+
 export default function DashboardPage() {
   const supabase = createClient();
   const [loading, setLoading] = useState(true);
@@ -23,6 +62,7 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState(null);
   const [selected, setSelected] = useState({});
+  const [sortInCorso, setSortInCorso] = useState({ key: "nome", dir: "asc" });
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 120);
@@ -86,7 +126,7 @@ export default function DashboardPage() {
   }, [patients, events, settings]);
 
   const groups = useMemo(() => {
-    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [] };
+    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [] };
     patients.forEach((p) => {
       const st = computed[p.id];
       if (st) g[st.stato].push(p);
@@ -325,27 +365,68 @@ export default function DashboardPage() {
 
         <section className="section">
           <div className="section-head">
+            <h2>In sospeso — fatturazione non automatica ({groups.sospeso.length})</h2>
+          </div>
+          <div className="section-body">
+            {groups.sospeso.length === 0 ? (
+              <div className="empty-row">Nessun paziente in sospeso.</div>
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Paziente</th>
+                    <th>Sedute accumulate</th>
+                    <th>Ultima seduta</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.sospeso.map((p) => {
+                    const c = computed[p.id];
+                    return (
+                      <tr key={p.id}>
+                        <td className="name">{p.fatturare_a || p.nome_calendario}</td>
+                        <td className="mono">{c.count}</td>
+                        <td className="mono">{c.ultimaData}</td>
+                        <td>
+                          <button className="btn btn-small" disabled={disabled || !p.codice_fiscale} onClick={() => forceClose(p.id)}>
+                            Fattura ora
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-head">
             <h2>In corso ({groups.in_corso.length})</h2>
           </div>
           <div className="section-body">
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>Paziente</th>
-                  <th>Tipologia</th>
-                  <th>Sedute</th>
-                  <th>Ultima seduta</th>
+                  <SortableTh label="Paziente" sortKey="nome" sort={sortInCorso} setSort={setSortInCorso} />
+                  <SortableTh label="Tipologia" sortKey="tipologia" sort={sortInCorso} setSort={setSortInCorso} />
+                  <SortableTh label="Sedute" sortKey="sedute" sort={sortInCorso} setSort={setSortInCorso} />
+                  <SortableTh label="Ultima seduta" sortKey="ultimaData" sort={sortInCorso} setSort={setSortInCorso} />
+                  <SortableTh label="Prossima seduta" sortKey="prossimaData" sort={sortInCorso} setSort={setSortInCorso} />
                 </tr>
               </thead>
               <tbody>
-                {groups.in_corso.map((p) => {
+                {sortPatients(groups.in_corso, computed, sortInCorso).map((p) => {
                   const c = computed[p.id];
                   return (
                     <tr key={p.id}>
                       <td className="name">{p.fatturare_a || p.nome_calendario}</td>
                       <td className="mono">{p.tipologia}</td>
                       <td className="mono">{c.count} / {c.soglia}</td>
-                      <td className="mono">{c.ultimaData}</td>
+                      <td className="mono">{c.ultimaData || "—"}</td>
+                      <td className="mono">{c.prossimaData || "—"}</td>
                     </tr>
                   );
                 })}

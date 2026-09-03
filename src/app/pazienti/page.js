@@ -32,16 +32,46 @@ export default function PazientiPage() {
     load();
   }, [load]);
 
+  const [saveStatus, setSaveStatus] = useState("");
+
   async function updateField(id, field, value) {
     setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
     await supabase.from("patients").update({ [field]: value }).eq("id", id);
   }
 
+  function updateLocal(id, field, value) {
+    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+  }
+
+  async function persistField(id, field, value) {
+    await supabase.from("patients").update({ [field]: value }).eq("id", id);
+  }
+
+  async function saveAll() {
+    setSaveStatus("Salvataggio…");
+    for (const p of patients) {
+      const { id, ...fields } = p;
+      await supabase.from("patients").update(fields).eq("id", id);
+    }
+    setSaveStatus("Tutto salvato ✓");
+    setTimeout(() => setSaveStatus(""), 2500);
+  }
+
   async function addPatient() {
     const { data: userData } = await supabase.auth.getUser();
+    const nextMonday = new Date();
+    nextMonday.setDate(nextMonday.getDate() + ((8 - nextMonday.getDay()) % 7 || 7));
     const { data } = await supabase
       .from("patients")
-      .insert({ user_id: userData.user.id, tipologia: "individuale", costo_unitario: 80, soglia_fatturazione: 5, modalita_pagamento: "Bonifico" })
+      .insert({
+        user_id: userData.user.id,
+        tipologia: "individuale",
+        costo_unitario: 80,
+        soglia_fatturazione: 5,
+        modalita_pagamento: "Bonifico",
+        ancora_data: nextMonday.toISOString().slice(0, 10),
+        ancora_valore: 0,
+      })
       .select()
       .single();
     if (data) setPatients((ps) => [...ps, data]);
@@ -93,9 +123,11 @@ export default function PazientiPage() {
         }
         if (!nomeCal && !fatturareA) continue;
         const key = normalizeName(fatturareA || nomeCal);
-        const existing = patients.find((p) => normalizeName(p.fatturare_a || p.nome_calendario) === key);
-        const tipologia = TIPOLOGIA_FROM_LABEL[String(row["Tipologia"] || "").toUpperCase()] || (existing ? existing.tipologia : "individuale");
         const cf = String(row["Codice fiscale"] || row["Codice Fiscale"] || "").trim().toUpperCase();
+        const existing =
+          (cf && patients.find((p) => p.codice_fiscale && p.codice_fiscale === cf)) ||
+          patients.find((p) => normalizeName(p.fatturare_a || p.nome_calendario) === key);
+        const tipologia = TIPOLOGIA_FROM_LABEL[String(row["Tipologia"] || "").toUpperCase()] || (existing ? existing.tipologia : "individuale");
         const rawGiorniStale = row["Giorni inattività"];
         const rawSoglia = row["Soglia fatturazione"];
         const rawTariffa = row["Tariffa"];
@@ -149,6 +181,8 @@ export default function PazientiPage() {
             <p className="sub">Anagrafica usata per abbinare gli eventi del calendario e calcolare l&apos;importo.</p>
           </div>
           <div className="header-actions">
+            {saveStatus && <span className="muted small" style={{ alignSelf: "center" }}>{saveStatus}</span>}
+            <button className="btn btn-primary" onClick={saveAll}>Salva tutte le modifiche</button>
             <button className="btn btn-ghost" onClick={exportAnagrafica}>Scarica anagrafica (.xlsx)</button>
             <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>Carica anagrafica (.xlsx)</button>
             <input
@@ -186,6 +220,7 @@ export default function PazientiPage() {
                 <th>Giorni inattività</th>
                 <th>Ancora: data</th>
                 <th>Ancora: valore</th>
+                <th>Stato</th>
                 <th>Pagamento</th>
                 <th></th>
               </tr>
@@ -194,15 +229,16 @@ export default function PazientiPage() {
               {filtered.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateField(p.id, "nome_calendario", e.target.value)} />
+                    <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateLocal(p.id, "nome_calendario", e.target.value)} onBlur={(e) => persistField(p.id, "nome_calendario", e.target.value)} />
                   </td>
-                  <td><input value={p.fatturare_a || ""} onChange={(e) => updateField(p.id, "fatturare_a", e.target.value)} /></td>
+                  <td><input value={p.fatturare_a || ""} onChange={(e) => updateLocal(p.id, "fatturare_a", e.target.value)} onBlur={(e) => persistField(p.id, "fatturare_a", e.target.value)} /></td>
                   <td>
                     <input
                       className={!p.codice_fiscale ? "input-missing" : ""}
                       value={p.codice_fiscale || ""}
                       placeholder="manca"
-                      onChange={(e) => updateField(p.id, "codice_fiscale", e.target.value.toUpperCase())}
+                      onChange={(e) => updateLocal(p.id, "codice_fiscale", e.target.value.toUpperCase())}
+                      onBlur={(e) => persistField(p.id, "codice_fiscale", e.target.value.toUpperCase())}
                     />
                   </td>
                   <td>
@@ -210,11 +246,17 @@ export default function PazientiPage() {
                       {TIPOLOGIE.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </td>
-                  <td><input type="number" className="num" value={p.costo_unitario} onChange={(e) => updateField(p.id, "costo_unitario", parseFloat(e.target.value) || 0)} /></td>
-                  <td><input type="number" className="num" value={p.soglia_fatturazione} onChange={(e) => updateField(p.id, "soglia_fatturazione", parseInt(e.target.value) || 5)} /></td>
-                  <td><input type="number" className="num" placeholder="def." value={p.giorni_stale_override || ""} onChange={(e) => updateField(p.id, "giorni_stale_override", parseInt(e.target.value) || null)} /></td>
+                  <td><input type="number" step="0.01" className="num" value={p.costo_unitario} onChange={(e) => updateLocal(p.id, "costo_unitario", e.target.value)} onBlur={(e) => persistField(p.id, "costo_unitario", parseFloat(e.target.value) || 0)} /></td>
+                  <td><input type="number" className="num" value={p.soglia_fatturazione} onChange={(e) => updateLocal(p.id, "soglia_fatturazione", e.target.value)} onBlur={(e) => persistField(p.id, "soglia_fatturazione", parseInt(e.target.value) || 5)} /></td>
+                  <td><input type="number" className="num" placeholder="def." value={p.giorni_stale_override || ""} onChange={(e) => updateLocal(p.id, "giorni_stale_override", e.target.value)} onBlur={(e) => persistField(p.id, "giorni_stale_override", parseInt(e.target.value) || null)} /></td>
                   <td><input type="date" value={p.ancora_data || ""} onChange={(e) => updateField(p.id, "ancora_data", e.target.value)} /></td>
-                  <td><input type="number" className="num" value={p.ancora_valore} onChange={(e) => updateField(p.id, "ancora_valore", parseInt(e.target.value) || 0)} /></td>
+                  <td><input type="number" className="num" value={p.ancora_valore} onChange={(e) => updateLocal(p.id, "ancora_valore", e.target.value)} onBlur={(e) => persistField(p.id, "ancora_valore", parseInt(e.target.value) || 0)} /></td>
+                  <td>
+                    <select value={p.stato} onChange={(e) => updateField(p.id, "stato", e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura">
+                      <option value="attivo">Attivo</option>
+                      <option value="sospeso">In sospeso</option>
+                    </select>
+                  </td>
                   <td>
                     <select value={p.modalita_pagamento} onChange={(e) => updateField(p.id, "modalita_pagamento", e.target.value)}>
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>

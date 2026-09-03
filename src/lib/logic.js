@@ -21,6 +21,12 @@ export function daysBetween(a, b) {
   return Math.round((d2 - d1) / 86400000);
 }
 
+export function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 export function matchPatientForEvent(title, patients) {
   const norm = normalizeName(title);
   const exact = patients.find((p) => normalizeName(p.nome_calendario) === norm);
@@ -38,21 +44,28 @@ export function computePatientState(patient, events, settings) {
     const m = matchPatientForEvent(e.titolo, [patient]);
     return !!m;
   });
-  const usati = matched
-    .filter((e) => !patient.ancora_data || e.data > patient.ancora_data)
+  const oggi = todayISO();
+  const passate = matched.filter((e) => e.data <= oggi);
+  const future = matched.filter((e) => e.data > oggi);
+
+  const usati = passate
+    .filter((e) => !patient.ancora_data || e.data >= patient.ancora_data)
     .sort((a, b) => (a.data < b.data ? -1 : 1));
 
   const count = (patient.ancora_valore || 0) + usati.length;
-  const ultimaData = matched.length ? matched.map((e) => e.data).sort().slice(-1)[0] : null;
+  const ultimaData = passate.length ? passate.map((e) => e.data).sort().slice(-1)[0] : null;
+  const prossimaData = future.length ? future.map((e) => e.data).sort()[0] : null;
   const soglia = patient.soglia_fatturazione || settings.soglia_default;
   const giorniStale = patient.giorni_stale_override || settings.giorni_stale;
 
   let stato = "senza_sedute";
-  if (count > 0 && count >= soglia) stato = "pronto";
-  else if (count > 0 && ultimaData && daysBetween(ultimaData, todayISO()) >= giorniStale) stato = "da_valutare";
+  if (patient.stato === "sospeso") {
+    stato = count > 0 ? "sospeso" : "senza_sedute";
+  } else if (count > 0 && count >= soglia) stato = "pronto";
+  else if (count > 0 && ultimaData && daysBetween(ultimaData, oggi) >= giorniStale) stato = "da_valutare";
   else if (count > 0) stato = "in_corso";
 
-  return { count, soglia, ultimaData, usati, stato };
+  return { count, soglia, ultimaData, prossimaData, usati, stato };
 }
 
 export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID) {
