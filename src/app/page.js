@@ -29,6 +29,8 @@ export default function DashboardPage() {
     return d.toISOString().slice(0, 10);
   });
   const [toDate, setToDate] = useState(todayISO());
+  const [fromHour, setFromHour] = useState("");
+  const [toHour, setToHour] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,7 +60,15 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Errore sconosciuto");
-      setEvents(data.events);
+      let filtered = data.events;
+      // Esclude gli eventi fuori dalla fascia oraria indicata (es. gli appuntamenti "in lista d'attesa"
+      // segnati alle 7 del mattino). Gli eventi "tutto il giorno" (ora = null) passano sempre.
+      if (fromHour || toHour) {
+        const lo = fromHour || "00:00";
+        const hi = toHour || "23:59";
+        filtered = filtered.filter((e) => !e.ora || (e.ora >= lo && e.ora <= hi));
+      }
+      setEvents(filtered);
       setEventsMeta({ from: fromDate, to: toDate, fetchedAt: new Date().toISOString() });
     } catch (e) {
       setSyncError(e.message);
@@ -193,6 +203,14 @@ export default function DashboardPage() {
           <label>
             A
             <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+          <label>
+            Ora da <span className="muted small">(facoltativo)</span>
+            <input type="time" value={fromHour} onChange={(e) => setFromHour(e.target.value)} />
+          </label>
+          <label>
+            Ora a <span className="muted small">(facoltativo)</span>
+            <input type="time" value={toHour} onChange={(e) => setToHour(e.target.value)} />
           </label>
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
             {syncing ? "Lettura in corso…" : "Aggiorna dal calendario"}

@@ -44,10 +44,14 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
     }
     const data = await res.json();
     events = events.concat(
-      (data.items || []).map((ev) => ({
-        data: (ev.start?.date || ev.start?.dateTime || "").slice(0, 10),
-        titolo: ev.summary || "",
-      })).filter((e) => e.data)
+      (data.items || []).map((ev) => {
+        const startDateTime = ev.start?.dateTime || "";
+        return {
+          data: (ev.start?.date || startDateTime || "").slice(0, 10),
+          ora: startDateTime ? startDateTime.slice(11, 16) : null, // "HH:MM" oppure null se evento "tutto il giorno"
+          titolo: ev.summary || "",
+        };
+      }).filter((e) => e.data)
     );
     pageToken = data.nextPageToken;
   } while (pageToken);

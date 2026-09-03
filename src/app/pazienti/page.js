@@ -18,6 +18,7 @@ export default function PazientiPage() {
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [onlyIncomplete, setOnlyIncomplete] = useState(false);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -82,21 +83,28 @@ export default function PazientiPage() {
         updated = 0;
       for (const row of rows) {
         const nomeCal = String(row["Nome calendario"] || "").trim();
-        const fatturareA = String(row["Fatturare a"] || "").trim();
+        let fatturareA = String(row["Fatturare a"] || "").trim();
+        // Formato grezzo di export Psicogest: colonne separate "Nome" e "Cognome" invece di "Fatturare a"
+        if (!fatturareA) {
+          const nome = String(row["Nome"] || "").trim();
+          const cognome = String(row["Cognome"] || "").trim();
+          if (nome && cognome) fatturareA = `${cognome} ${nome}`;
+        }
         if (!nomeCal && !fatturareA) continue;
         const key = normalizeName(fatturareA || nomeCal);
         const existing = patients.find((p) => normalizeName(p.fatturare_a || p.nome_calendario) === key);
-        const tipologia = TIPOLOGIA_FROM_LABEL[String(row["Tipologia"] || "").toUpperCase()] || "individuale";
-        const cf = String(row["Codice fiscale"] || "").trim().toUpperCase();
+        const tipologia = TIPOLOGIA_FROM_LABEL[String(row["Tipologia"] || "").toUpperCase()] || (existing ? existing.tipologia : "individuale");
+        const cf = String(row["Codice fiscale"] || row["Codice Fiscale"] || "").trim().toUpperCase();
         const rawGiorniStale = row["Giorni inattività"];
         const rawSoglia = row["Soglia fatturazione"];
+        const rawTariffa = row["Tariffa"];
 
         if (existing) {
           const patch = {
             nome_calendario: nomeCal || existing.nome_calendario,
             fatturare_a: fatturareA,
             tipologia,
-            costo_unitario: parseFloat(row["Tariffa"]) || existing.costo_unitario,
+            costo_unitario: parseFloat(rawTariffa) || existing.costo_unitario,
             codice_fiscale: cf || existing.codice_fiscale,
             soglia_fatturazione: rawSoglia ? parseInt(rawSoglia) || existing.soglia_fatturazione : existing.soglia_fatturazione,
             giorni_stale_override: rawGiorniStale ? parseInt(rawGiorniStale) || existing.giorni_stale_override : existing.giorni_stale_override,
@@ -109,7 +117,7 @@ export default function PazientiPage() {
             nome_calendario: nomeCal,
             fatturare_a: fatturareA,
             tipologia,
-            costo_unitario: parseFloat(row["Tariffa"]) || 0,
+            costo_unitario: parseFloat(rawTariffa) || 80,
             codice_fiscale: cf,
             soglia_fatturazione: parseInt(rawSoglia) || 5,
             giorni_stale_override: parseInt(rawGiorniStale) || null,
@@ -126,9 +134,9 @@ export default function PazientiPage() {
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
-  const filtered = patients.filter((p) =>
-    normalizeName((p.nome_calendario || "") + " " + (p.fatturare_a || "")).includes(normalizeName(query))
-  );
+  const filtered = patients
+    .filter((p) => normalizeName((p.nome_calendario || "") + " " + (p.fatturare_a || "")).includes(normalizeName(query)))
+    .filter((p) => !onlyIncomplete || !p.nome_calendario || !p.codice_fiscale);
 
   return (
     <div className="app-root">
@@ -159,6 +167,10 @@ export default function PazientiPage() {
         </header>
 
         <input className="search" placeholder="Cerca per nome…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#55645D", marginBottom: 14, marginLeft: 16 }}>
+          <input type="checkbox" checked={onlyIncomplete} onChange={(e) => setOnlyIncomplete(e.target.checked)} />
+          Mostra solo da completare (manca nome calendario o CF)
+        </label>
 
         <div className="table-scroll">
           <table className="tbl editable">
@@ -180,7 +192,9 @@ export default function PazientiPage() {
             <tbody>
               {filtered.map((p) => (
                 <tr key={p.id}>
-                  <td><input value={p.nome_calendario || ""} onChange={(e) => updateField(p.id, "nome_calendario", e.target.value)} /></td>
+                  <td>
+                    <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateField(p.id, "nome_calendario", e.target.value)} />
+                  </td>
                   <td><input value={p.fatturare_a || ""} onChange={(e) => updateField(p.id, "fatturare_a", e.target.value)} /></td>
                   <td>
                     <input
