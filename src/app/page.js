@@ -10,6 +10,7 @@ import {
   DEFAULT_SETTINGS,
   todayISO,
   daysBetween,
+  addDays,
 } from "@/lib/logic";
 
 function SortableTh({ label, sortKey, sort, setSort }) {
@@ -191,7 +192,12 @@ export default function DashboardPage() {
       const p = patients.find((pp) => pp.id === id);
       const c = computed[id];
       const lastDate = c.usati.length ? c.usati[c.usati.length - 1].data : c.ultimaData || pendingBatch.data_fattura;
-      await supabase.from("patients").update({ ancora_data: lastDate, ancora_valore: 0 }).eq("id", id);
+      // L'ancora deve puntare al primo giorno NON ancora fatturato (confronto
+      // >= in computePatientState), quindi il giorno dopo l'ultima seduta
+      // inclusa in questa fattura — non la data della seduta stessa, altrimenti
+      // verrebbe ricontata al giro successivo.
+      const nuovaAncora = addDays(lastDate, 1);
+      await supabase.from("patients").update({ ancora_data: nuovaAncora, ancora_valore: 0 }).eq("id", id);
     }
     const histRows = pendingBatch.rows.map((r) => ({
       user_id: pendingBatch.user_id,
