@@ -172,6 +172,7 @@ export const DEFAULT_SETTINGS = {
   tariffa_coppia_agevolata: 60,
   tariffa_consulenza_regolare: 80,
   tariffa_consulenza_agevolata: 50,
+  ultimo_numero_fattura: null,
 };
 
 export function tariffaStandard(tipologia, regime, settings) {

@@ -161,9 +161,10 @@ export default function DashboardPage() {
 
   async function generateBatch(patientIds) {
     const dataFattura = todayISO();
+    const suggerito = settings.ultimo_numero_fattura ? String(settings.ultimo_numero_fattura) : "";
     const input = window.prompt(
-      "Numero della prima fattura di questo gruppo (quello suggerito da Psicogest):",
-      ""
+      "Numero della prima fattura di questo gruppo (verifica che corrisponda a quello suggerito da Psicogest):",
+      suggerito
     );
     if (input === null) return; // annullato
     const numeroPartenza = parseInt(input, 10);
@@ -223,6 +224,19 @@ export default function DashboardPage() {
     }));
     await supabase.from("invoice_history").insert(histRows);
     await supabase.from("pending_batch").delete().eq("user_id", pendingBatch.user_id);
+
+    // Ricorda il numero successivo suggerito per il prossimo batch, in base
+    // al più alto fatturaNUMERO effettivamente usato in questo giro.
+    const numeriUsati = pendingBatch.rows.map((r) => Number(r.fatturaNUMERO)).filter((n) => !isNaN(n) && n > 0);
+    if (numeriUsati.length) {
+      const prossimoNumero = Math.max(...numeriUsati) + 1;
+      await supabase
+        .from("settings")
+        .update({ ultimo_numero_fattura: prossimoNumero })
+        .eq("user_id", pendingBatch.user_id);
+      setSettings((prev) => ({ ...prev, ultimo_numero_fattura: prossimoNumero }));
+    }
+
     setPendingBatch(null);
     load();
   }
