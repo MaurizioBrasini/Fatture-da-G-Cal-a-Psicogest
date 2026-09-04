@@ -161,11 +161,22 @@ export default function DashboardPage() {
 
   async function generateBatch(patientIds) {
     const dataFattura = todayISO();
+    const input = window.prompt(
+      "Numero della prima fattura di questo gruppo (quello suggerito da Psicogest):",
+      ""
+    );
+    if (input === null) return; // annullato
+    const numeroPartenza = parseInt(input, 10);
+    if (!numeroPartenza || numeroPartenza < 1) {
+      alert("Numero fattura non valido.");
+      return;
+    }
     let fid = 1;
+    let numero = numeroPartenza;
     const rows = patientIds.map((id) => {
       const p = patients.find((pp) => pp.id === id);
       const c = computed[id];
-      return buildInvoiceRow(p, c, settings, dataFattura, fid++);
+      return buildInvoiceRow(p, c, settings, dataFattura, fid++, numero++);
     });
 
     const exportRows = rows.map(({ _onorario, _count, _tariffa, ...r }) => r);

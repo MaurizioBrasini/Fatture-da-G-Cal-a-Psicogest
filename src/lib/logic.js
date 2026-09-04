@@ -77,7 +77,7 @@ export function computePatientState(patient, events, settings) {
   return { count, soglia, ultimaData, prossimaData, usati, stato };
 }
 
-export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID) {
+export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID, fatturaNumero) {
   const count = computed.count;
 
   // Tariffa tonda (es. 80€, 100€) = costo_unitario × numero sedute.
@@ -109,11 +109,12 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     pazienteID: patient.codice_fiscale || "",
     // fatturaID è un numero progressivo ≥1 richiesto dal validatore di
     // Psicogest (riferimento interno al file di import, non il numero di
-    // fattura definitivo). fatturaNUMERO invece resta vuoto: quello lo
-    // assegna Psicogest stesso in formato nnn/anno.
+    // fattura definitivo). fatturaNUMERO invece è il vero numero di
+    // fattura, che a quanto pare va fornito da noi (Psicogest lo suggerisce
+    // ma non lo assegna in automatico durante l'import).
     fatturaID,
     fatturaTIPODOCUMENTO: "fattura",
-    fatturaNUMERO: "",
+    fatturaNUMERO: fatturaNumero,
     fatturaANNO: new Date(dataFattura).getFullYear(),
     fatturaDATA: toDateObj(dataFattura),
     fatturaMODOPAGAMENTO: patient.modalita_pagamento || "Bonifico",
