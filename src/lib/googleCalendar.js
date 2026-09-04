@@ -47,9 +47,17 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
       (data.items || []).map((ev) => {
         const startDateTime = ev.start?.dateTime || "";
         return {
+          id: ev.id,
           data: (ev.start?.date || startDateTime || "").slice(0, 10),
           ora: startDateTime ? startDateTime.slice(11, 16) : null, // "HH:MM" oppure null se evento "tutto il giorno"
           titolo: ev.summary || "",
+          // Testo attuale della nota dell'evento (necessario per poter
+          // sostituire solo il codice numerico, senza cancellare il resto:
+          // link Meet/Zoom, promemoria, ecc.)
+          descrizione: ev.description || "",
+          // Presente solo per le occorrenze di eventi ricorrenti: identifica
+          // a quale serie appartiene questa singola occorrenza.
+          recurringEventId: ev.recurringEventId || null,
         };
       }).filter((e) => e.data)
     );
@@ -57,4 +65,28 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
   } while (pageToken);
 
   return events;
+}
+
+// Aggiorna il testo della nota (descrizione) di un singolo evento del
+// calendario. Va usata passando la descrizione GIÀ COMPLETA che deve
+// risultare (compresa la parte da preservare, tipo link Meet/Zoom) — questa
+// funzione si limita a scrivere quel testo su Google, senza fare unione o
+// sostituzioni: quella logica va fatta prima di chiamarla.
+export async function updateGoogleCalendarEventDescription(refreshToken, eventId, newDescription) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ description: newDescription }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Scrittura sull'evento del calendario fallita: " + text);
+  }
+  return res.json();
 }
