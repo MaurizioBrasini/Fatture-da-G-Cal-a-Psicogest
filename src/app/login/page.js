@@ -10,7 +10,12 @@ export default function LoginPage() {
       provider: "google",
       options: {
         redirectTo,
-        scopes: "https://www.googleapis.com/auth/calendar.readonly",
+        // Prima era "calendar.readonly": bastava per leggere gli
+        // appuntamenti. Ora serve anche scrivere le note sugli eventi
+        // (numerazione sedute), quindi passiamo a "calendar.events": dà
+        // accesso in lettura+scrittura solo agli EVENTI del calendario, non
+        // alle impostazioni generali del calendario stesso.
+        scopes: "https://www.googleapis.com/auth/calendar.events",
         queryParams: {
           access_type: "offline",
           prompt: "consent",
