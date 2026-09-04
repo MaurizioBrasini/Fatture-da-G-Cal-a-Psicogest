@@ -83,6 +83,73 @@ export default function PazientiPage() {
 
   const [saveStatus, setSaveStatus] = useState("");
 
+  // --- Rinumerazione calendario (R/A/S + numero) ---
+  const [renumStep, setRenumStep] = useState(null); // null | 'loading' | 'preview' | 'writing' | 'done' | 'error'
+  const [renumTarget, setRenumTarget] = useState(null); // id paziente, o null = tutti
+  const [renumGiorni, setRenumGiorni] = useState(90);
+  const [renumData, setRenumData] = useState(null); // array [{pazienteId, nome, piano:[...]}]
+  const [renumWriteResult, setRenumWriteResult] = useState(null);
+  const [renumError, setRenumError] = useState("");
+
+  async function caricaAnteprimaRinumerazione(patientId, giorni) {
+    setRenumStep("loading");
+    setRenumError("");
+    try {
+      const res = await fetch("/api/calendar/renumber-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId, giorniAvanti: giorni }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRenumError(data.error || "Errore nel calcolo dell'anteprima.");
+        setRenumStep("error");
+        return;
+      }
+      setRenumData(data.pazienti || []);
+      setRenumStep("preview");
+    } catch (e) {
+      setRenumError(e.message);
+      setRenumStep("error");
+    }
+  }
+
+  function apriRinumerazione(patientId) {
+    setRenumTarget(patientId);
+    setRenumGiorni(90);
+    setRenumData(null);
+    setRenumWriteResult(null);
+    caricaAnteprimaRinumerazione(patientId, 90);
+  }
+
+  async function confermaRinumerazione() {
+    setRenumStep("writing");
+    const aggiornamenti = (renumData || []).flatMap((p) =>
+      p.piano.map((r) => ({ id: r.id, descrizioneNuova: r.descrizioneNuova }))
+    );
+    try {
+      const res = await fetch("/api/calendar/renumber-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aggiornamenti }),
+      });
+      const data = await res.json();
+      setRenumWriteResult(data);
+      setRenumStep("done");
+    } catch (e) {
+      setRenumError(e.message);
+      setRenumStep("error");
+    }
+  }
+
+  function chiudiRinumerazione() {
+    setRenumStep(null);
+    setRenumTarget(null);
+    setRenumData(null);
+    setRenumWriteResult(null);
+    setRenumError("");
+  }
+
   async function updateTipologiaORegime(id, field, value) {
     const p = patients.find((pp) => pp.id === id);
     const nextTipologia = field === "tipologia" ? value : p.tipologia;
@@ -264,6 +331,7 @@ export default function PazientiPage() {
               }}
             />
             <button className="btn btn-primary" onClick={addPatient}>+ Nuovo paziente</button>
+            <button className="btn btn-ghost" onClick={() => apriRinumerazione(null)}>Rinumera tutti (calendario)</button>
           </div>
         </header>
 
@@ -335,13 +403,98 @@ export default function PazientiPage() {
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>
                     </select>
                   </td>
-                  <td><button className="btn-icon" onClick={() => removePatient(p.id, p.fatturare_a || p.nome_calendario)}>×</button></td>
+                  <td>
+                    <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
+                    <button className="btn-icon" onClick={() => removePatient(p.id, p.fatturare_a || p.nome_calendario)}>×</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </main>
+
+      {renumStep && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 640, width: "90%", maxHeight: "80vh", overflowY: "auto" }}>
+            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Aggiorna numerazione calendario</h2>
+
+            {renumStep === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
+
+            {renumStep === "error" && (
+              <>
+                <p style={{ color: "crimson" }}>{renumError}</p>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Chiudi</button>
+                </div>
+              </>
+            )}
+
+            {renumStep === "preview" && (
+              <>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+                  <label className="muted small">Giorni futuri da considerare:</label>
+                  <input
+                    type="number" className="num" style={{ width: 70 }}
+                    value={renumGiorni}
+                    onChange={(e) => setRenumGiorni(parseInt(e.target.value) || 90)}
+                  />
+                  <button className="btn btn-ghost" onClick={() => caricaAnteprimaRinumerazione(renumTarget, renumGiorni)}>Ricalcola</button>
+                </div>
+
+                {(!renumData || renumData.length === 0) ? (
+                  <p className="muted">Nessuna modifica da fare: le note sono già aggiornate.</p>
+                ) : (
+                  renumData.map((p) => (
+                    <div key={p.pazienteId} style={{ marginBottom: 18 }}>
+                      <strong>{p.nome}</strong>
+                      <table style={{ width: "100%", fontSize: 13, marginTop: 4 }}>
+                        <tbody>
+                          {p.piano.map((r) => (
+                            <tr key={r.id}>
+                              <td style={{ padding: "2px 8px 2px 0", whiteSpace: "nowrap", color: "#55645D" }}>
+                                {r.data}{r.ora ? ` ${r.ora}` : ""}
+                              </td>
+                              <td style={{ padding: "2px 8px", fontWeight: r.fatturare ? 600 : 400 }}>{r.codice}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))
+                )}
+
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                  <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Annulla</button>
+                  {renumData && renumData.length > 0 && (
+                    <button className="btn btn-primary" onClick={confermaRinumerazione}>Conferma e scrivi su calendario</button>
+                  )}
+                </div>
+              </>
+            )}
+
+            {renumStep === "writing" && <p>Scrittura in corso su Google Calendar…</p>}
+
+            {renumStep === "done" && renumWriteResult && (
+              <>
+                <p>
+                  {renumWriteResult.ok
+                    ? `Fatto: ${renumWriteResult.scritti} eventi aggiornati.`
+                    : `${renumWriteResult.scritti} eventi aggiornati, ${renumWriteResult.falliti} falliti.`}
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button className="btn btn-primary" onClick={chiudiRinumerazione}>Chiudi</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
