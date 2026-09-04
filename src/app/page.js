@@ -172,8 +172,10 @@ export default function DashboardPage() {
     const ws = XLSX.utils.json_to_sheet(exportRows, { header: COLUMN_ORDER });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Foglio1");
-    // Psicogest richiede il vecchio formato .xls (BIFF8), non .xlsx
-    XLSX.writeFile(wb, `import_fatture_${dataFattura}.xls`, { bookType: "xls" });
+    // TEST: proviamo il formato .xlsx moderno invece di .xls (BIFF8), per
+    // isolare se il problema con fatturaID=0 dipenda dal writer del vecchio
+    // formato .xls piuttosto che dai dati stessi.
+    XLSX.writeFile(wb, `import_fatture_${dataFattura}.xlsx`);
 
     const { data: userData } = await supabase.auth.getUser();
     const batch = {
