@@ -22,9 +22,13 @@ export function daysBetween(a, b) {
 }
 
 export function addDays(dateStr, n) {
-  const d = new Date(dateStr + "T00:00:00");
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  // Aritmetica in UTC puro: evita che il fuso orario locale (l'Italia è
+  // sempre avanti rispetto a UTC) faccia "perdere" il giorno aggiunto
+  // quando si ritaglia la data con toISOString().slice(0,10).
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
 }
 
 // Converte una stringa "YYYY-MM-DD" in un vero oggetto Date a mezzanotte
