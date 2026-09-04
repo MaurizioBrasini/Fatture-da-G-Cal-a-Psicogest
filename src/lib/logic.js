@@ -96,7 +96,11 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     coppia: settings.prestazione_coppia,
     consulenza: settings.prestazione_consulenza,
   };
-  const prestazione = prestazioneMap[patient.tipologia] || patient.tipologia;
+  const prestazioneBase = prestazioneMap[patient.tipologia] || patient.tipologia;
+  // Se il paziente è in regime agevolato, lo indichiamo esplicitamente nel
+  // testo della prestazione, come già fatto su Psicogest.
+  const prestazione =
+    patient.regime_tariffario === "agevolata" ? `${prestazioneBase} - tariffa agevolata` : prestazioneBase;
   const date = computed.usati.map((e) => e.data).sort();
   const dal = date[0] || computed.ultimaData || dataFattura;
   const al = date[date.length - 1] || computed.ultimaData || dataFattura;
