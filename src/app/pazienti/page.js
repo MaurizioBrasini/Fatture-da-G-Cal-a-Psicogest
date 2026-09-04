@@ -32,6 +32,7 @@ function sortRows(list, sort) {
       case "nome_calendario": return (p.nome_calendario || "").toUpperCase();
       case "fatturare_a": return (p.fatturare_a || "").toUpperCase();
       case "tipologia": return p.tipologia || "";
+      case "regime_tariffario": return p.regime_tariffario || "regolare";
       case "costo_unitario": return p.costo_unitario || 0;
       case "soglia_fatturazione": return p.soglia_fatturazione || 0;
       case "ancora_data": return p.ancora_data || "";
@@ -39,10 +40,17 @@ function sortRows(list, sort) {
       default: return "";
     }
   };
+  // A parità di valore sulla chiave scelta, ordina in secondo luogo per
+  // nome (alfabetico) — utile soprattutto per "Regime", dove i pazienti si
+  // dividono solo in due gruppi.
+  const nomeOrdinamento = (p) => (p.fatturare_a || p.nome_calendario || "").toUpperCase();
   arr.sort((a, b) => {
     const va = getVal(a), vb = getVal(b);
     if (va < vb) return sort.dir === "asc" ? -1 : 1;
     if (va > vb) return sort.dir === "asc" ? 1 : -1;
+    const na = nomeOrdinamento(a), nb = nomeOrdinamento(b);
+    if (na < nb) return -1;
+    if (na > nb) return 1;
     return 0;
   });
   return arr;
@@ -273,7 +281,7 @@ export default function PazientiPage() {
                 <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />
                 <th>Codice fiscale</th>
                 <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />
-                <th>Regime</th>
+                <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />
                 <SortableTh label="Tariffa €" sortKey="costo_unitario" sort={sort} setSort={setSort} />
                 <SortableTh label="Soglia" sortKey="soglia_fatturazione" sort={sort} setSort={setSort} />
                 <th>Giorni inattività</th>
