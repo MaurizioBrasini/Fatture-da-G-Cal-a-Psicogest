@@ -108,7 +108,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .table-scroll::-webkit-scrollbar-track { background: var(--bg); }
 .table-scroll::-webkit-scrollbar-thumb { background: #B7C2BC; border-radius: 7px; border: 3px solid var(--bg); }
 .table-scroll::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-.editable { min-width: 1450px; }
+.editable { min-width: 1650px; }
 .editable input, .editable select { border: 1px solid transparent; background: none; padding: 4px 5px; font-size: 12.5px; border-radius: 5px; width: 100%; min-width: 90px; }
 .editable input:hover, .editable select:hover, .editable input:focus, .editable select:focus { border-color: var(--border); background: var(--bg); outline: none; }
 .editable .num { width: 60px; min-width: 60px; }

@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
-import { normalizeName, todayISO, tariffaStandard, DEFAULT_SETTINGS } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS } from "@/lib/logic";
+import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 
 const TIPOLOGIE = [
   { value: "individuale", label: "Individuale" },
@@ -27,6 +28,7 @@ function sortRows(list, sort) {
       case "soglia_fatturazione": return p.soglia_fatturazione || 0;
       case "ancora_data": return p.ancora_data || "";
       case "stato": return p.stato || "";
+      case "contante_dovuto": return p.contante_dovuto || 0;
       default: return "";
     }
   };
@@ -89,20 +91,52 @@ export default function PazientiPage() {
   // chiamata "tutto o niente").
   const RENUM_CHUNK_SIZE = 15;
 
-  // --- Storico fatture per paziente (contesto per correggere Ancora a mano) ---
-  const [storicoPaziente, setStoricoPaziente] = useState(null); // { nome, rows } | null
+  // --- Storico fatture + incassi contanti per paziente (contesto per
+  // correggere Ancora/saldo a mano) ---
+  const [storicoPaziente, setStoricoPaziente] = useState(null); // { nome, fatture, contanti } | null
   const [storicoLoading, setStoricoLoading] = useState(false);
 
   async function apriStorico(patient) {
     setStoricoLoading(true);
-    setStoricoPaziente({ nome: patient.fatturare_a || patient.nome_calendario, rows: [] });
-    const { data } = await supabase
-      .from("invoice_history")
-      .select("*")
-      .eq("patient_id", patient.id)
-      .order("data", { ascending: false });
-    setStoricoPaziente({ nome: patient.fatturare_a || patient.nome_calendario, rows: data || [] });
+    const nome = patient.fatturare_a || patient.nome_calendario;
+    setStoricoPaziente({ nome, fatture: [], contanti: [] });
+    const [{ data: fatture }, { data: contanti }] = await Promise.all([
+      supabase.from("invoice_history").select("*").eq("patient_id", patient.id).order("data", { ascending: false }),
+      supabase.from("contante_pagamenti").select("*").eq("patient_id", patient.id).order("data", { ascending: false }),
+    ]);
+    setStoricoPaziente({ nome, fatture: fatture || [], contanti: contanti || [] });
     setStoricoLoading(false);
+  }
+
+  // --- Incasso contanti (quota non fatturata, es. 10€/seduta a parte) ---
+  const [contantiModal, setContantiModal] = useState(null); // { patientId, nome, dovuto, value } | null
+
+  function apriContantiModal(patient) {
+    setContantiModal({
+      patientId: patient.id,
+      nome: patient.fatturare_a || patient.nome_calendario,
+      dovuto: patient.contante_dovuto,
+      value: String(patient.contante_dovuto),
+    });
+  }
+
+  async function confermaContanti() {
+    const { patientId, dovuto, value } = contantiModal;
+    const importoPagato = parseFloat(value.replace(",", "."));
+    if (!importoPagato || importoPagato <= 0) return;
+    setContantiModal(null);
+    const nuovoSaldo = saldaContante(dovuto, importoPagato);
+    await Promise.all([
+      supabase.from("patients").update({ contante_dovuto: nuovoSaldo }).eq("id", patientId),
+      supabase.from("contante_pagamenti").insert({
+        user_id: (await supabase.auth.getUser()).data.user.id,
+        patient_id: patientId,
+        importo: importoPagato,
+        data: todayISO(),
+      }),
+    ]);
+    patchLocal(patientId, { contante_dovuto: nuovoSaldo });
+    rinumeraPazienteSilenzioso(patientId).catch((e) => console.error("Rinumerazione automatica fallita:", e));
   }
 
   async function caricaAnteprimaRinumerazione(patientId, giorni) {
@@ -218,9 +252,18 @@ export default function PazientiPage() {
 
   async function updateTipologiaORegime(id, field, value) {
     const p = patients.find((pp) => pp.id === id);
-    const nextTipologia = field === "tipologia" ? value : p.tipologia;
-    const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
-    const patch = { [field]: value, costo_unitario: tariffaStandard(nextTipologia, nextRegime, settings) };
+    const patch = { [field]: value };
+    // Aggiorna la tariffa allo standard della nuova categoria SOLO se era già
+    // sullo standard della categoria precedente — se il paziente ha una
+    // tariffa concordata a parte (es. 60€ invece di 50€ per un individuale
+    // agevolato), cambiare tipologia/regime non deve sovrascriverla in
+    // silenzio: resta com'è, correggibile a mano.
+    const eraTariffaStandard = p.costo_unitario === tariffaStandard(p.tipologia, p.regime_tariffario, settings);
+    if (eraTariffaStandard) {
+      const nextTipologia = field === "tipologia" ? value : p.tipologia;
+      const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
+      patch.costo_unitario = tariffaStandard(nextTipologia, nextRegime, settings);
+    }
     patchLocal(id, patch);
     await persistPatch(id, patch);
   }
@@ -410,6 +453,8 @@ export default function PazientiPage() {
                 <th>Ancora: valore</th>
                 <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />
                 <th>Pagamento</th>
+                <th title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">Contante/seduta €</th>
+                <SortableTh label="Contanti dovuti" sortKey="contante_dovuto" sort={sort} setSort={setSort} />
                 <th></th>
               </tr>
             </thead>
@@ -455,6 +500,21 @@ export default function PazientiPage() {
                     <select value={p.modalita_pagamento} onChange={(e) => updateField(p.id, "modalita_pagamento", e.target.value)}>
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>
                     </select>
+                  </td>
+                  <td>
+                    <input
+                      type="number" step="0.01" className="num"
+                      value={p.quota_contante_seduta || 0}
+                      onChange={(e) => updateLocal(p.id, "quota_contante_seduta", e.target.value)}
+                      onBlur={(e) => persistField(p.id, "quota_contante_seduta", parseFloat(e.target.value) || 0)}
+                    />
+                  </td>
+                  <td>
+                    {p.contante_dovuto > 0 ? (
+                      <button className="btn-small" onClick={() => apriContantiModal(p)}>€ {p.contante_dovuto}</button>
+                    ) : (
+                      <span className="muted mono">—</span>
+                    )}
                   </td>
                   <td>
                     <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
@@ -567,31 +627,88 @@ export default function PazientiPage() {
       {storicoPaziente && (
         <Modal maxWidth={560}>
           <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
-            Storico fatture — {storicoPaziente.nome}
+            Storico — {storicoPaziente.nome}
           </h2>
           {storicoLoading ? (
             <p>Caricamento…</p>
-          ) : storicoPaziente.rows.length === 0 ? (
-            <p className="muted">Nessuna fattura confermata per questo paziente.</p>
           ) : (
-            <table className="tbl">
-              <thead>
-                <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
-              </thead>
-              <tbody>
-                {storicoPaziente.rows.map((h) => (
-                  <tr key={h.id}>
-                    <td className="mono">{h.data}</td>
-                    <td className="mono">{h.totale_sedute}</td>
-                    <td className="mono">€ {h.onorario}</td>
-                    <td>{h.note}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <h3 className="sub-heading" style={{ margin: "0 0 8px", fontSize: 14 }}>Fatture</h3>
+              {storicoPaziente.fatture.length === 0 ? (
+                <p className="muted">Nessuna fattura confermata per questo paziente.</p>
+              ) : (
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
+                  </thead>
+                  <tbody>
+                    {storicoPaziente.fatture.map((h) => (
+                      <tr key={h.id}>
+                        <td className="mono">{h.data}</td>
+                        <td className="mono">{h.totale_sedute}</td>
+                        <td className="mono">€ {h.onorario}</td>
+                        <td>{h.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <h3 className="sub-heading" style={{ margin: "20px 0 8px", fontSize: 14 }}>Incassi contanti (quota non fatturata)</h3>
+              {storicoPaziente.contanti.length === 0 ? (
+                <p className="muted">Nessun incasso contanti registrato per questo paziente.</p>
+              ) : (
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Data</th><th>Importo</th></tr>
+                  </thead>
+                  <tbody>
+                    {storicoPaziente.contanti.map((h) => (
+                      <tr key={h.id}>
+                        <td className="mono">{h.data}</td>
+                        <td className="mono">€ {h.importo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
           )}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
             <button className="btn btn-ghost" onClick={() => setStoricoPaziente(null)}>Chiudi</button>
+          </div>
+        </Modal>
+      )}
+
+      {contantiModal && (
+        <Modal maxWidth={400}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Contanti ricevuti</h2>
+          <p className="muted small">
+            {contantiModal.nome} — saldo dovuto: <strong>€ {contantiModal.dovuto}</strong>. Indica quanto ha
+            effettivamente portato (puoi modificare l&apos;importo per un pagamento parziale).
+          </p>
+          <input
+            type="number"
+            step="0.01"
+            className="num"
+            autoFocus
+            style={{ width: "100%", boxSizing: "border-box", marginTop: 8 }}
+            value={contantiModal.value}
+            onChange={(e) => setContantiModal((m) => ({ ...m, value: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confermaContanti();
+              if (e.key === "Escape") setContantiModal(null);
+            }}
+          />
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+            <button className="btn btn-ghost" onClick={() => setContantiModal(null)}>Annulla</button>
+            <button
+              className="btn btn-primary"
+              disabled={!contantiModal.value || parseFloat(contantiModal.value.replace(",", ".")) <= 0}
+              onClick={confermaContanti}
+            >
+              Conferma incasso
+            </button>
           </div>
         </Modal>
       )}

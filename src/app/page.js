@@ -13,7 +13,9 @@ import {
   todayISO,
   daysBetween,
   addDays,
+  accumulaContante,
 } from "@/lib/logic";
+import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 
 function sortPatients(list, computed, sort) {
   const arr = [...list];
@@ -194,6 +196,7 @@ export default function DashboardPage() {
 
   async function confirmBatch() {
     if (!pendingBatch) return;
+    const pazientiConContanteAggiornato = [];
     for (const id of pendingBatch.patient_ids) {
       const p = patients.find((pp) => pp.id === id);
       const c = computed[id];
@@ -203,7 +206,13 @@ export default function DashboardPage() {
       // inclusa in questa fattura — non la data della seduta stessa, altrimenti
       // verrebbe ricontata al giro successivo.
       const nuovaAncora = addDays(lastDate, 1);
-      await supabase.from("patients").update({ ancora_data: nuovaAncora, ancora_valore: 0 }).eq("id", id);
+      const patch = { ancora_data: nuovaAncora, ancora_valore: 0 };
+      if (p.quota_contante_seduta > 0) {
+        const row = pendingBatch.rows[pendingBatch.patient_ids.indexOf(id)];
+        patch.contante_dovuto = accumulaContante(p.contante_dovuto, p.quota_contante_seduta, row._count);
+        pazientiConContanteAggiornato.push(id);
+      }
+      await supabase.from("patients").update(patch).eq("id", id);
     }
     const histRows = pendingBatch.rows.map((r) => ({
       user_id: pendingBatch.user_id,
@@ -231,6 +240,14 @@ export default function DashboardPage() {
 
     setPendingBatch(null);
     load();
+
+    // Aggiorna subito la nota calendario dei pazienti il cui saldo contanti è
+    // cambiato, così il tag "(deve X€)" è già corretto senza dover premere
+    // "Rinumera" a mano. Se fallisce non blocca nulla: la fattura è già
+    // confermata e resta valida comunque.
+    for (const id of pazientiConContanteAggiornato) {
+      rinumeraPazienteSilenzioso(id).catch((e) => console.error("Rinumerazione automatica fallita:", e));
+    }
   }
 
   async function cancelBatch() {

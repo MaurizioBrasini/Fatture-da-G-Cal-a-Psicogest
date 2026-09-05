@@ -13,6 +13,8 @@ import {
   letteraCodice,
   formatCodice,
   stripCodiceEsistente,
+  accumulaContante,
+  saldaContante,
   buildNuovaDescrizione,
   eventiDiPazienteOrdinati,
   computeRinumerazione,
@@ -237,6 +239,33 @@ test("analizzaNotaPerAudit non segnala 'Deve 100' (parola di 4 lettere, non una 
 test("analizzaNotaPerAudit non segnala parole comuni brevi seguite da un numero (es. 'Ore 15')", () => {
   assert.equal(analizzaNotaPerAudit("Ore 15").sospetta, false);
   assert.equal(analizzaNotaPerAudit("Dal 3 al 5").sospetta, false);
+});
+
+// --- Quota contanti non fatturata ---
+test("formatCodice aggiunge il saldo contanti quando presente", () => {
+  assert.equal(formatCodice("R", 3, false, 150), "R3 (deve 150€)");
+  assert.equal(formatCodice("R", 3, false, 0), "R3");
+  assert.equal(formatCodice("R", 3, false, undefined), "R3");
+});
+test("stripCodiceEsistente riconosce e rimuove anche il tag del saldo contanti", () => {
+  assert.equal(stripCodiceEsistente("R3 (deve 150€) link zoom"), "link zoom");
+  assert.equal(stripCodiceEsistente("R3 fatturare (deve 50€)"), "");
+});
+test("computeRinumerazione include il saldo contanti nel codice quando il paziente ce l'ha", () => {
+  const patient = { nome_calendario: "Mario Rossi", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5, contante_dovuto: 150 };
+  const events = [{ id: "ev0", data: "2026-01-05", ora: "10:00", titolo: "Mario Rossi", descrizione: "" }];
+  const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
+  assert.equal(piano[0].codice, "R1 (deve 150€)");
+});
+test("accumulaContante somma la quota per il numero di sedute fatturate", () => {
+  assert.equal(accumulaContante(0, 10, 5), 50);
+  assert.equal(accumulaContante(50, 10, 5), 100);
+  assert.equal(accumulaContante(100, 0, 5), 100);
+});
+test("saldaContante sottrae un incasso, anche parziale, senza andare sotto zero", () => {
+  assert.equal(saldaContante(300, 150), 150);
+  assert.equal(saldaContante(150, 150), 0);
+  assert.equal(saldaContante(50, 150), 0);
 });
 
 console.log(`\n${passed} test superati.`);

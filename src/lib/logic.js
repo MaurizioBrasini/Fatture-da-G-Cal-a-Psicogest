@@ -196,17 +196,28 @@ export function letteraCodice(patient) {
   return patient.regime_tariffario === "agevolata" ? "A" : "R";
 }
 
-export function formatCodice(lettera, numero, fatturare) {
-  return `${lettera}${numero}${fatturare ? " fatturare" : ""}`;
+// contanteDovuto (facoltativo): quando il paziente ha un saldo contanti non
+// fatturato ancora da saldare, viene aggiunto in coda al codice — es.
+// "R3 (deve 150€)" — così resta visibile su Google Calendar senza doverlo
+// scrivere/cancellare a mano ad ogni seduta.
+export function formatCodice(lettera, numero, fatturare, contanteDovuto) {
+  const base = `${lettera}${numero}${fatturare ? " fatturare" : ""}`;
+  return contanteDovuto > 0 ? `${base} (deve ${formatEuro(contanteDovuto)}€)` : base;
+}
+
+function formatEuro(n) {
+  const arrotondato = Math.round(n * 100) / 100;
+  return Number.isInteger(arrotondato) ? String(arrotondato) : arrotondato.toFixed(2).replace(".", ",");
 }
 
 // Riconosce un codice scritto in nota, sia nel vecchio formato usato finora
 // a mano (np/npa/nf/pc, in un ordine o nell'altro, es. "Np 3", "3 nf",
 // "NpA4"), sia nel nuovo formato che scriverà l'app da qui in avanti
-// (es. "R4", "A5 fatturare", "S2") — utile per capire quanto testo
-// "vecchio" togliere quando si sovrascrive una nota già scritta in
-// precedenza (a mano o dall'app in un giro precedente).
-const VECCHIO_CODICE_REGEX = /^\s*(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\.?\s*/i;
+// (es. "R4", "A5 fatturare", "S2", con l'eventuale "(deve 150€)" in coda)
+// — utile per capire quanto testo "vecchio" togliere quando si sovrascrive
+// una nota già scritta in precedenza (a mano o dall'app in un giro
+// precedente).
+const VECCHIO_CODICE_REGEX = /^\s*(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\s*(?:\(deve\s*[\d.,]+\s*€?\))?\.?\s*/i;
 
 export function stripCodiceEsistente(descrizione) {
   return (descrizione || "").replace(VECCHIO_CODICE_REGEX, "");
@@ -282,7 +293,7 @@ export function computeRinumerazione(patient, allEvents, settings) {
   for (const ev of eventi) {
     contatore += 1;
     const fatturare = lettera !== "S" && contatore >= soglia;
-    const codice = formatCodice(lettera, contatore, fatturare);
+    const codice = formatCodice(lettera, contatore, fatturare, patient.contante_dovuto);
     const descrizioneNuova = buildNuovaDescrizione(ev.descrizione, codice);
     piano.push({
       id: ev.id,
@@ -300,4 +311,22 @@ export function computeRinumerazione(patient, allEvents, settings) {
   }
 
   return piano;
+}
+
+// ---------------------------------------------------------------------
+// Quota in contanti non fatturata (es. paziente che paga 60€ in fattura +
+// 10€ a parte in contanti, mai su Psicogest) — si accumula da sola ad ogni
+// fattura confermata, ed è saldabile anche parzialmente.
+// ---------------------------------------------------------------------
+
+// Quanto si aggiunge al saldo dovuto quando si conferma una fattura di
+// "sedute" sessioni per un paziente con una quota_contante_seduta fissa.
+export function accumulaContante(dovutoAttuale, quotaContanteSeduta, sedute) {
+  return Math.round(((dovutoAttuale || 0) + (quotaContanteSeduta || 0) * sedute) * 100) / 100;
+}
+
+// Sottrae un incasso (anche parziale) dal saldo dovuto, senza mai andare
+// sotto zero.
+export function saldaContante(dovutoAttuale, importoPagato) {
+  return Math.max(0, Math.round(((dovutoAttuale || 0) - (importoPagato || 0)) * 100) / 100);
 }
