@@ -73,6 +73,9 @@ export default function DashboardPage() {
   const [fromHour, setFromHour] = useState("");
   const [toHour, setToHour] = useState("");
 
+  // --- Modale numero fattura (sostituisce window.prompt) ---
+  const [numeroModal, setNumeroModal] = useState(null); // null | { patientIds, value }
+
   const load = useCallback(async () => {
     setLoading(true);
     const [{ data: p }, { data: s }, { data: pb }, { data: cc }] = await Promise.all([
@@ -159,19 +162,22 @@ export default function DashboardPage() {
     setSelected((s) => ({ ...s, [id]: !s[id] }));
   }
 
-  async function generateBatch(patientIds) {
-    const dataFattura = todayISO();
+  function generateBatch(patientIds) {
+    if (!patientIds.length) return;
     const suggerito = settings.ultimo_numero_fattura ? String(settings.ultimo_numero_fattura) : "";
-    const input = window.prompt(
-      "Numero della prima fattura di questo gruppo (verifica che corrisponda a quello suggerito da Psicogest):",
-      suggerito
-    );
-    if (input === null) return; // annullato
-    const numeroPartenza = parseInt(input, 10);
-    if (!numeroPartenza || numeroPartenza < 1) {
-      alert("Numero fattura non valido.");
-      return;
-    }
+    setNumeroModal({ patientIds, value: suggerito });
+  }
+
+  async function confermaNumeroModal() {
+    const { patientIds, value } = numeroModal;
+    const numeroPartenza = parseInt(value, 10);
+    if (!numeroPartenza || numeroPartenza < 1) return;
+    setNumeroModal(null);
+    await eseguiGenerazioneBatch(patientIds, numeroPartenza);
+  }
+
+  async function eseguiGenerazioneBatch(patientIds, numeroPartenza) {
+    const dataFattura = todayISO();
     let fid = 1;
     let numero = numeroPartenza;
     const rows = patientIds.map((id) => {
@@ -503,6 +509,54 @@ export default function DashboardPage() {
           </div>
         </section>
       </main>
+
+      {numeroModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 420, width: "90%" }}>
+            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Numero fattura</h2>
+            <p className="muted small">
+              Numero della prima fattura di questo gruppo ({numeroModal.patientIds.length}{" "}
+              {numeroModal.patientIds.length === 1 ? "paziente" : "pazienti"}). Verifica che corrisponda a quello
+              suggerito da Psicogest prima di confermare.
+            </p>
+            <input
+              type="number"
+              className="num"
+              autoFocus
+              style={{ width: "100%", boxSizing: "border-box", marginTop: 8 }}
+              value={numeroModal.value}
+              onChange={(e) => setNumeroModal((m) => ({ ...m, value: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") confermaNumeroModal();
+                if (e.key === "Escape") setNumeroModal(null);
+              }}
+            />
+            {settings.ultimo_numero_fattura &&
+              parseInt(numeroModal.value, 10) > 0 &&
+              parseInt(numeroModal.value, 10) < settings.ultimo_numero_fattura && (
+                <p style={{ color: "crimson", fontSize: 13, marginBottom: 0 }}>
+                  Attenzione: è più basso dell&apos;ultimo numero usato ({settings.ultimo_numero_fattura}) — potrebbe
+                  essere un doppione.
+                </p>
+              )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => setNumeroModal(null)}>Annulla</button>
+              <button
+                className="btn btn-primary"
+                disabled={!numeroModal.value || parseInt(numeroModal.value, 10) < 1}
+                onClick={confermaNumeroModal}
+              >
+                Conferma e genera Excel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -9,6 +9,36 @@ export default function ImpostazioniPage() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
 
+  // --- Prova a vuoto (sola lettura) sulle note del calendario ---
+  const [auditFrom, setAuditFrom] = useState("2015-01-01");
+  const [auditTo, setAuditTo] = useState(() => new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10));
+  const [auditStatus, setAuditStatus] = useState(null); // null | 'loading' | 'done' | 'error'
+  const [auditResult, setAuditResult] = useState(null);
+  const [auditError, setAuditError] = useState("");
+
+  async function eseguiAudit() {
+    setAuditStatus("loading");
+    setAuditError("");
+    try {
+      const res = await fetch("/api/calendar/audit-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: auditFrom, to: auditTo }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuditError(data.error || "Errore durante il controllo.");
+        setAuditStatus("error");
+        return;
+      }
+      setAuditResult(data);
+      setAuditStatus("done");
+    } catch (e) {
+      setAuditError(e.message);
+      setAuditStatus("error");
+    }
+  }
+
   useEffect(() => {
     (async () => {
       const { data: userData } = await supabase.auth.getUser();
@@ -110,6 +140,61 @@ export default function ImpostazioniPage() {
             <input type="number" step="0.01" className="num" value={settings.tariffa_consulenza_agevolata} onChange={(e) => set("tariffa_consulenza_agevolata", parseFloat(e.target.value) || 0)} />
           </label>
         </div>
+
+        <h2 className="sub-heading">Strumenti diagnostici</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Prova a vuoto (sola lettura, non scrive nulla su Google): controlla le note del calendario nell&apos;intervallo
+          scelto e segnala quelle che sembrano contenere un vecchio codice scritto a mano (es. &quot;Np 3&quot;) non
+          riconosciuto dalla funzione di rinumerazione. Utile da lanciare una volta prima di usare &quot;Rinumera
+          tutti&quot; con fiducia piena su tutto lo storico.
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 12 }}>
+          <label className="muted small">
+            Da<br />
+            <input type="date" value={auditFrom} onChange={(e) => setAuditFrom(e.target.value)} />
+          </label>
+          <label className="muted small">
+            A<br />
+            <input type="date" value={auditTo} onChange={(e) => setAuditTo(e.target.value)} />
+          </label>
+          <button className="btn btn-primary" onClick={eseguiAudit} disabled={auditStatus === "loading"}>
+            {auditStatus === "loading" ? "Controllo in corso…" : "Controlla note calendario"}
+          </button>
+        </div>
+
+        {auditStatus === "error" && <div className="error-box">{auditError}</div>}
+
+        {auditStatus === "done" && auditResult && (
+          <div>
+            <p className="muted small">
+              {auditResult.totaleEventi} eventi nell&apos;intervallo, {auditResult.eventiConNota} con una nota,{" "}
+              <strong>{auditResult.sospette}</strong> con un possibile codice non riconosciuto
+              {auditResult.troncato ? ` (mostrate le prime ${auditResult.flagged.length})` : ""}.
+            </p>
+            {auditResult.flagged.length > 0 && (
+              <div className="table-scroll" style={{ maxHeight: 400, overflowY: "auto" }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Titolo</th>
+                      <th>Nota</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditResult.flagged.map((f, i) => (
+                      <tr key={i}>
+                        <td className="mono">{f.data}{f.ora ? ` ${f.ora}` : ""}</td>
+                        <td>{f.titolo}</td>
+                        <td>{f.descrizione}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

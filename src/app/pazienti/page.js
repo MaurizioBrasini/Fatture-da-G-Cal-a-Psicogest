@@ -90,6 +90,30 @@ export default function PazientiPage() {
   const [renumData, setRenumData] = useState(null); // array [{pazienteId, nome, piano:[...]}]
   const [renumWriteResult, setRenumWriteResult] = useState(null);
   const [renumError, setRenumError] = useState("");
+  const [renumProgress, setRenumProgress] = useState(null); // { fatti, totale } durante la scrittura
+
+  // Dimensione dei blocchi di scrittura: mantiene ogni chiamata alla route
+  // di conferma ben al di sotto dei limiti di durata delle funzioni
+  // serverless di Vercel, ed è anche ciò che permette una barra di
+  // avanzamento reale (altrimenti l'intero batch sarebbe una singola
+  // chiamata "tutto o niente").
+  const RENUM_CHUNK_SIZE = 15;
+
+  // --- Storico fatture per paziente (contesto per correggere Ancora a mano) ---
+  const [storicoPaziente, setStoricoPaziente] = useState(null); // { nome, rows } | null
+  const [storicoLoading, setStoricoLoading] = useState(false);
+
+  async function apriStorico(patient) {
+    setStoricoLoading(true);
+    setStoricoPaziente({ nome: patient.fatturare_a || patient.nome_calendario, rows: [] });
+    const { data } = await supabase
+      .from("invoice_history")
+      .select("*")
+      .eq("patient_id", patient.id)
+      .order("data", { ascending: false });
+    setStoricoPaziente({ nome: patient.fatturare_a || patient.nome_calendario, rows: data || [] });
+    setStoricoLoading(false);
+  }
 
   async function caricaAnteprimaRinumerazione(patientId, giorni) {
     setRenumStep("loading");
@@ -127,14 +151,39 @@ export default function PazientiPage() {
     const aggiornamenti = (renumData || []).flatMap((p) =>
       p.piano.map((r) => ({ id: r.id, descrizioneNuova: r.descrizioneNuova }))
     );
+
+    // Scrive a blocchi invece che in un'unica chiamata: evita di superare i
+    // limiti di durata delle funzioni serverless su batch grandi (es.
+    // "Rinumera tutti" con molti pazienti) e permette di mostrare
+    // l'avanzamento reale invece di un'attesa cieca.
+    const blocchi = [];
+    for (let i = 0; i < aggiornamenti.length; i += RENUM_CHUNK_SIZE) {
+      blocchi.push(aggiornamenti.slice(i, i + RENUM_CHUNK_SIZE));
+    }
+
+    setRenumProgress({ fatti: 0, totale: aggiornamenti.length });
+    let scritti = 0;
+    let falliti = 0;
+    const dettagli = [];
     try {
-      const res = await fetch("/api/calendar/renumber-confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ aggiornamenti }),
-      });
-      const data = await res.json();
-      setRenumWriteResult(data);
+      for (const blocco of blocchi) {
+        const res = await fetch("/api/calendar/renumber-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ aggiornamenti: blocco }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setRenumError(data.error || "Errore durante la scrittura.");
+          setRenumStep("error");
+          return;
+        }
+        scritti += data.scritti || 0;
+        falliti += data.falliti || 0;
+        dettagli.push(...(data.dettagli || []));
+        setRenumProgress({ fatti: scritti + falliti, totale: aggiornamenti.length });
+      }
+      setRenumWriteResult({ ok: falliti === 0, scritti, falliti, dettagli });
       setRenumStep("done");
     } catch (e) {
       setRenumError(e.message);
@@ -148,6 +197,7 @@ export default function PazientiPage() {
     setRenumData(null);
     setRenumWriteResult(null);
     setRenumError("");
+    setRenumProgress(null);
   }
 
   async function updateTipologiaORegime(id, field, value) {
@@ -405,6 +455,7 @@ export default function PazientiPage() {
                   </td>
                   <td>
                     <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
+                    <button className="btn-icon" title="Storico fatture di questo paziente" onClick={() => apriStorico(p)}>§</button>
                     <button className="btn-icon" onClick={() => removePatient(p.id, p.fatturare_a || p.nome_calendario)}>×</button>
                   </td>
                 </tr>
@@ -478,7 +529,28 @@ export default function PazientiPage() {
               </>
             )}
 
-            {renumStep === "writing" && <p>Scrittura in corso su Google Calendar…</p>}
+            {renumStep === "writing" && (
+              <>
+                <p>Scrittura in corso su Google Calendar…</p>
+                {renumProgress && (
+                  <>
+                    <div style={{ background: "#EEF1EE", borderRadius: 6, overflow: "hidden", height: 10 }}>
+                      <div
+                        style={{
+                          width: `${Math.round((renumProgress.fatti / Math.max(renumProgress.totale, 1)) * 100)}%`,
+                          background: "#3E6B4F",
+                          height: "100%",
+                          transition: "width 150ms ease",
+                        }}
+                      />
+                    </div>
+                    <p className="muted small" style={{ marginTop: 6 }}>
+                      {renumProgress.fatti} / {renumProgress.totale} eventi aggiornati
+                    </p>
+                  </>
+                )}
+              </>
+            )}
 
             {renumStep === "done" && renumWriteResult && (
               <>
@@ -492,6 +564,45 @@ export default function PazientiPage() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {storicoPaziente && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 560, width: "90%", maxHeight: "80vh", overflowY: "auto" }}>
+            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
+              Storico fatture — {storicoPaziente.nome}
+            </h2>
+            {storicoLoading ? (
+              <p>Caricamento…</p>
+            ) : storicoPaziente.rows.length === 0 ? (
+              <p className="muted">Nessuna fattura confermata per questo paziente.</p>
+            ) : (
+              <table className="tbl">
+                <thead>
+                  <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
+                </thead>
+                <tbody>
+                  {storicoPaziente.rows.map((h) => (
+                    <tr key={h.id}>
+                      <td className="mono">{h.data}</td>
+                      <td className="mono">{h.totale_sedute}</td>
+                      <td className="mono">€ {h.onorario}</td>
+                      <td>{h.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button className="btn btn-ghost" onClick={() => setStoricoPaziente(null)}>Chiudi</button>
+            </div>
           </div>
         </div>
       )}

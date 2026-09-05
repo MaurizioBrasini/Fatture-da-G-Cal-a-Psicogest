@@ -232,6 +232,24 @@ export function eventiDiPazienteOrdinati(patient, allEvents) {
     });
 }
 
+// Riconoscimento "largo" di un possibile vecchio codice manuale non ancora
+// coperto da VECCHIO_CODICE_REGEX — usato SOLO per la prova a vuoto di
+// controllo (mai per decidere cosa scrivere): lettere+numero o numero+lettere
+// nelle primissime posizioni della nota, es. "NF2", "3pc", "Ctr 4".
+const POSSIBILE_CODICE_REGEX = /^\s*(?:[a-zA-Z]{1,4}\s*\d{1,3}\b|\d{1,3}\s*[a-zA-Z]{1,4}\b)/;
+
+// Applica stripCodiceEsistente a una nota e segnala se il testo sembra
+// contenere un codice all'inizio (pattern lettere+numero o numero+lettere)
+// che però non è stato riconosciuto/rimosso — utile per una prova a vuoto
+// (sola lettura) su tutto lo storico prima di fidarsi ciecamente di
+// "Rinumera tutti" su note mai controllate.
+export function analizzaNotaPerAudit(descrizioneOriginale) {
+  const originale = descrizioneOriginale || "";
+  const dopoStrip = stripCodiceEsistente(originale);
+  const sembraCodiceNonRiconosciuto = dopoStrip === originale && POSSIBILE_CODICE_REGEX.test(originale);
+  return { originale, dopoStrip, cambiata: dopoStrip !== originale, sospetta: sembraCodiceNonRiconosciuto };
+}
+
 // Calcola, per un paziente, il piano di aggiornamento delle note calendario:
 // una riga per ciascun evento (passato non ancora fatturato + futuro già
 // generato), con il codice che dovrebbe avere. Per i pazienti NON sospesi,
