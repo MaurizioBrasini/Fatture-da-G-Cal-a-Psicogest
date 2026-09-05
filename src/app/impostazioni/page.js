@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
-import { DEFAULT_SETTINGS, todayISO } from "@/lib/logic";
+import { DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 
 export default function ImpostazioniPage() {
   const supabase = createClient();
@@ -11,7 +11,7 @@ export default function ImpostazioniPage() {
 
   // --- Prova a vuoto (sola lettura) sulle note del calendario ---
   const [auditFrom, setAuditFrom] = useState("2015-01-01");
-  const [auditTo, setAuditTo] = useState(() => new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10));
+  const [auditTo, setAuditTo] = useState(() => addDays(todayISO(), 365));
   const [auditStatus, setAuditStatus] = useState(null); // null | 'loading' | 'done' | 'error'
   const [auditResult, setAuditResult] = useState(null);
   const [auditError, setAuditError] = useState("");

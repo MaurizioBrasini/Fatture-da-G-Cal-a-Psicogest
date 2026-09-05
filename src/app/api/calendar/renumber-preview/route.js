@@ -5,7 +5,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { computeRinumerazione, DEFAULT_SETTINGS, todayISO } from "@/lib/logic";
+import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -47,7 +47,7 @@ export async function POST(request) {
   // all'orizzonte scelto.
   const dataMinima =
     target.reduce((min, p) => (p.ancora_data && (!min || p.ancora_data < min) ? p.ancora_data : min), null) || oggi;
-  const dataMassima = new Date(Date.now() + giorniAvanti * 86400000).toISOString().slice(0, 10);
+  const dataMassima = addDays(todayISO(), giorniAvanti);
 
   try {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);

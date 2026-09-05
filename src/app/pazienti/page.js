@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import Modal from "@/components/Modal";
+import SortableTh from "@/components/SortableTh";
 import { normalizeName, todayISO, tariffaStandard, DEFAULT_SETTINGS } from "@/lib/logic";
 
 const TIPOLOGIE = [
@@ -12,18 +14,6 @@ const TIPOLOGIE = [
 ];
 const TIPOLOGIA_LABEL = { individuale: "Individuale", coppia: "Coppia", consulenza: "Consulenza" };
 const TIPOLOGIA_FROM_LABEL = { INDIVIDUALE: "individuale", COPPIA: "coppia", CONSULENZA: "consulenza" };
-
-function SortableTh({ label, sortKey, sort, setSort }) {
-  const active = sort.key === sortKey;
-  return (
-    <th
-      onClick={() => setSort((s) => (s.key === sortKey ? { key: sortKey, dir: s.dir === "asc" ? "desc" : "asc" } : { key: sortKey, dir: "asc" }))}
-      style={{ cursor: "pointer", userSelect: "none" }}
-    >
-      {label} {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
-    </th>
-  );
-}
 
 function sortRows(list, sort) {
   const arr = [...list];
@@ -200,26 +190,39 @@ export default function PazientiPage() {
     setRenumProgress(null);
   }
 
+  // Le quattro funzioni sotto erano prima ciascuna la propria copia di
+  // "aggiorna lo stato locale" / "salva su Supabase" — ora condividono le
+  // stesse due funzioni di base (patchLocal / persistPatch) e si limitano a
+  // decidere QUALI campi cambiano.
+  function patchLocal(id, patch) {
+    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  async function persistPatch(id, patch) {
+    await supabase.from("patients").update(patch).eq("id", id);
+  }
+
+  function updateLocal(id, field, value) {
+    patchLocal(id, { [field]: value });
+  }
+
+  async function persistField(id, field, value) {
+    await persistPatch(id, { [field]: value });
+  }
+
+  async function updateField(id, field, value) {
+    const patch = { [field]: value };
+    patchLocal(id, patch);
+    await persistPatch(id, patch);
+  }
+
   async function updateTipologiaORegime(id, field, value) {
     const p = patients.find((pp) => pp.id === id);
     const nextTipologia = field === "tipologia" ? value : p.tipologia;
     const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
-    const nuovaTariffa = tariffaStandard(nextTipologia, nextRegime, settings);
-    setPatients((ps) => ps.map((pp) => (pp.id === id ? { ...pp, [field]: value, costo_unitario: nuovaTariffa } : pp)));
-    await supabase.from("patients").update({ [field]: value, costo_unitario: nuovaTariffa }).eq("id", id);
-  }
-
-  function updateLocal(id, field, value) {
-    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-  }
-
-  async function updateField(id, field, value) {
-    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
-    await supabase.from("patients").update({ [field]: value }).eq("id", id);
-  }
-
-  async function persistField(id, field, value) {
-    await supabase.from("patients").update({ [field]: value }).eq("id", id);
+    const patch = { [field]: value, costo_unitario: tariffaStandard(nextTipologia, nextRegime, settings) };
+    patchLocal(id, patch);
+    await persistPatch(id, patch);
   }
 
   async function saveAll() {
@@ -466,145 +469,131 @@ export default function PazientiPage() {
       </main>
 
       {renumStep && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-          }}
-        >
-          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 640, width: "90%", maxHeight: "80vh", overflowY: "auto" }}>
-            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Aggiorna numerazione calendario</h2>
+        <Modal maxWidth={640}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Aggiorna numerazione calendario</h2>
 
-            {renumStep === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
+          {renumStep === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
 
-            {renumStep === "error" && (
-              <>
-                <p style={{ color: "crimson" }}>{renumError}</p>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Chiudi</button>
-                </div>
-              </>
-            )}
+          {renumStep === "error" && (
+            <>
+              <p style={{ color: "crimson" }}>{renumError}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Chiudi</button>
+              </div>
+            </>
+          )}
 
-            {renumStep === "preview" && (
-              <>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
-                  <label className="muted small">Giorni futuri da considerare:</label>
-                  <input
-                    type="number" className="num" style={{ width: 70 }}
-                    value={renumGiorni}
-                    onChange={(e) => setRenumGiorni(parseInt(e.target.value) || 90)}
-                  />
-                  <button className="btn btn-ghost" onClick={() => caricaAnteprimaRinumerazione(renumTarget, renumGiorni)}>Ricalcola</button>
-                </div>
+          {renumStep === "preview" && (
+            <>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+                <label className="muted small">Giorni futuri da considerare:</label>
+                <input
+                  type="number" className="num" style={{ width: 70 }}
+                  value={renumGiorni}
+                  onChange={(e) => setRenumGiorni(parseInt(e.target.value) || 90)}
+                />
+                <button className="btn btn-ghost" onClick={() => caricaAnteprimaRinumerazione(renumTarget, renumGiorni)}>Ricalcola</button>
+              </div>
 
-                {(!renumData || renumData.length === 0) ? (
-                  <p className="muted">Nessuna modifica da fare: le note sono già aggiornate.</p>
-                ) : (
-                  renumData.map((p) => (
-                    <div key={p.pazienteId} style={{ marginBottom: 18 }}>
-                      <strong>{p.nome}</strong>
-                      <table style={{ width: "100%", fontSize: 13, marginTop: 4 }}>
-                        <tbody>
-                          {p.piano.map((r) => (
-                            <tr key={r.id}>
-                              <td style={{ padding: "2px 8px 2px 0", whiteSpace: "nowrap", color: "#55645D" }}>
-                                {r.data}{r.ora ? ` ${r.ora}` : ""}
-                              </td>
-                              <td style={{ padding: "2px 8px", fontWeight: r.fatturare ? 600 : 400 }}>{r.codice}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))
+              {(!renumData || renumData.length === 0) ? (
+                <p className="muted">Nessuna modifica da fare: le note sono già aggiornate.</p>
+              ) : (
+                renumData.map((p) => (
+                  <div key={p.pazienteId} style={{ marginBottom: 18 }}>
+                    <strong>{p.nome}</strong>
+                    <table style={{ width: "100%", fontSize: 13, marginTop: 4 }}>
+                      <tbody>
+                        {p.piano.map((r) => (
+                          <tr key={r.id}>
+                            <td style={{ padding: "2px 8px 2px 0", whiteSpace: "nowrap", color: "#55645D" }}>
+                              {r.data}{r.ora ? ` ${r.ora}` : ""}
+                            </td>
+                            <td style={{ padding: "2px 8px", fontWeight: r.fatturare ? 600 : 400 }}>{r.codice}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Annulla</button>
+                {renumData && renumData.length > 0 && (
+                  <button className="btn btn-primary" onClick={confermaRinumerazione}>Conferma e scrivi su calendario</button>
                 )}
+              </div>
+            </>
+          )}
 
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                  <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Annulla</button>
-                  {renumData && renumData.length > 0 && (
-                    <button className="btn btn-primary" onClick={confermaRinumerazione}>Conferma e scrivi su calendario</button>
-                  )}
-                </div>
-              </>
-            )}
+          {renumStep === "writing" && (
+            <>
+              <p>Scrittura in corso su Google Calendar…</p>
+              {renumProgress && (
+                <>
+                  <div style={{ background: "#EEF1EE", borderRadius: 6, overflow: "hidden", height: 10 }}>
+                    <div
+                      style={{
+                        width: `${Math.round((renumProgress.fatti / Math.max(renumProgress.totale, 1)) * 100)}%`,
+                        background: "#3E6B4F",
+                        height: "100%",
+                        transition: "width 150ms ease",
+                      }}
+                    />
+                  </div>
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    {renumProgress.fatti} / {renumProgress.totale} eventi aggiornati
+                  </p>
+                </>
+              )}
+            </>
+          )}
 
-            {renumStep === "writing" && (
-              <>
-                <p>Scrittura in corso su Google Calendar…</p>
-                {renumProgress && (
-                  <>
-                    <div style={{ background: "#EEF1EE", borderRadius: 6, overflow: "hidden", height: 10 }}>
-                      <div
-                        style={{
-                          width: `${Math.round((renumProgress.fatti / Math.max(renumProgress.totale, 1)) * 100)}%`,
-                          background: "#3E6B4F",
-                          height: "100%",
-                          transition: "width 150ms ease",
-                        }}
-                      />
-                    </div>
-                    <p className="muted small" style={{ marginTop: 6 }}>
-                      {renumProgress.fatti} / {renumProgress.totale} eventi aggiornati
-                    </p>
-                  </>
-                )}
-              </>
-            )}
-
-            {renumStep === "done" && renumWriteResult && (
-              <>
-                <p>
-                  {renumWriteResult.ok
-                    ? `Fatto: ${renumWriteResult.scritti} eventi aggiornati.`
-                    : `${renumWriteResult.scritti} eventi aggiornati, ${renumWriteResult.falliti} falliti.`}
-                </p>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button className="btn btn-primary" onClick={chiudiRinumerazione}>Chiudi</button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+          {renumStep === "done" && renumWriteResult && (
+            <>
+              <p>
+                {renumWriteResult.ok
+                  ? `Fatto: ${renumWriteResult.scritti} eventi aggiornati.`
+                  : `${renumWriteResult.scritti} eventi aggiornati, ${renumWriteResult.falliti} falliti.`}
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-primary" onClick={chiudiRinumerazione}>Chiudi</button>
+              </div>
+            </>
+          )}
+        </Modal>
       )}
 
       {storicoPaziente && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-          }}
-        >
-          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 560, width: "90%", maxHeight: "80vh", overflowY: "auto" }}>
-            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
-              Storico fatture — {storicoPaziente.nome}
-            </h2>
-            {storicoLoading ? (
-              <p>Caricamento…</p>
-            ) : storicoPaziente.rows.length === 0 ? (
-              <p className="muted">Nessuna fattura confermata per questo paziente.</p>
-            ) : (
-              <table className="tbl">
-                <thead>
-                  <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
-                </thead>
-                <tbody>
-                  {storicoPaziente.rows.map((h) => (
-                    <tr key={h.id}>
-                      <td className="mono">{h.data}</td>
-                      <td className="mono">{h.totale_sedute}</td>
-                      <td className="mono">€ {h.onorario}</td>
-                      <td>{h.note}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={() => setStoricoPaziente(null)}>Chiudi</button>
-            </div>
+        <Modal maxWidth={560}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
+            Storico fatture — {storicoPaziente.nome}
+          </h2>
+          {storicoLoading ? (
+            <p>Caricamento…</p>
+          ) : storicoPaziente.rows.length === 0 ? (
+            <p className="muted">Nessuna fattura confermata per questo paziente.</p>
+          ) : (
+            <table className="tbl">
+              <thead>
+                <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
+              </thead>
+              <tbody>
+                {storicoPaziente.rows.map((h) => (
+                  <tr key={h.id}>
+                    <td className="mono">{h.data}</td>
+                    <td className="mono">{h.totale_sedute}</td>
+                    <td className="mono">€ {h.onorario}</td>
+                    <td>{h.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+            <button className="btn btn-ghost" onClick={() => setStoricoPaziente(null)}>Chiudi</button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

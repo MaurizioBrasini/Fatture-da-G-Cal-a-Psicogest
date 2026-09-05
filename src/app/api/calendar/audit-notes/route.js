@@ -6,7 +6,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { analizzaNotaPerAudit } from "@/lib/logic";
+import { analizzaNotaPerAudit, addDays, todayISO } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 const MAX_FLAGGED = 500;
@@ -20,7 +20,7 @@ export async function POST(request) {
 
   const body = await request.json().catch(() => ({}));
   const from = body.from || "2015-01-01";
-  const to = body.to || new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
+  const to = body.to || addDays(todayISO(), 365);
 
   const { data: tokenRow, error: tokenError } = await supabase
     .from("google_tokens")

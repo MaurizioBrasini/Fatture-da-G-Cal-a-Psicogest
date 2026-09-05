@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import Modal from "@/components/Modal";
+import SortableTh from "@/components/SortableTh";
 import {
   computePatientState,
   buildInvoiceRow,
@@ -12,18 +14,6 @@ import {
   daysBetween,
   addDays,
 } from "@/lib/logic";
-
-function SortableTh({ label, sortKey, sort, setSort }) {
-  const active = sort.key === sortKey;
-  return (
-    <th
-      onClick={() => setSort((s) => (s.key === sortKey ? { key: sortKey, dir: s.dir === "asc" ? "desc" : "asc" } : { key: sortKey, dir: "asc" }))}
-      style={{ cursor: "pointer", userSelect: "none" }}
-    >
-      {label} {active ? (sort.dir === "asc" ? "▲" : "▼") : ""}
-    </th>
-  );
-}
 
 function sortPatients(list, computed, sort) {
   const arr = [...list];
@@ -64,11 +54,7 @@ export default function DashboardPage() {
   const [syncError, setSyncError] = useState(null);
   const [selected, setSelected] = useState({});
   const [sortInCorso, setSortInCorso] = useState({ key: "nome", dir: "asc" });
-  const [fromDate, setFromDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 120);
-    return d.toISOString().slice(0, 10);
-  });
+  const [fromDate, setFromDate] = useState(() => addDays(todayISO(), -120));
   const [toDate, setToDate] = useState(todayISO());
   const [fromHour, setFromHour] = useState("");
   const [toHour, setToHour] = useState("");
@@ -511,51 +497,44 @@ export default function DashboardPage() {
       </main>
 
       {numeroModal && (
-        <div
-          style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
-          }}
-        >
-          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 420, width: "90%" }}>
-            <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Numero fattura</h2>
-            <p className="muted small">
-              Numero della prima fattura di questo gruppo ({numeroModal.patientIds.length}{" "}
-              {numeroModal.patientIds.length === 1 ? "paziente" : "pazienti"}). Verifica che corrisponda a quello
-              suggerito da Psicogest prima di confermare.
-            </p>
-            <input
-              type="number"
-              className="num"
-              autoFocus
-              style={{ width: "100%", boxSizing: "border-box", marginTop: 8 }}
-              value={numeroModal.value}
-              onChange={(e) => setNumeroModal((m) => ({ ...m, value: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") confermaNumeroModal();
-                if (e.key === "Escape") setNumeroModal(null);
-              }}
-            />
-            {settings.ultimo_numero_fattura &&
-              parseInt(numeroModal.value, 10) > 0 &&
-              parseInt(numeroModal.value, 10) < settings.ultimo_numero_fattura && (
-                <p style={{ color: "crimson", fontSize: 13, marginBottom: 0 }}>
-                  Attenzione: è più basso dell&apos;ultimo numero usato ({settings.ultimo_numero_fattura}) — potrebbe
-                  essere un doppione.
-                </p>
-              )}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button className="btn btn-ghost" onClick={() => setNumeroModal(null)}>Annulla</button>
-              <button
-                className="btn btn-primary"
-                disabled={!numeroModal.value || parseInt(numeroModal.value, 10) < 1}
-                onClick={confermaNumeroModal}
-              >
-                Conferma e genera Excel
-              </button>
-            </div>
+        <Modal maxWidth={420}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Numero fattura</h2>
+          <p className="muted small">
+            Numero della prima fattura di questo gruppo ({numeroModal.patientIds.length}{" "}
+            {numeroModal.patientIds.length === 1 ? "paziente" : "pazienti"}). Verifica che corrisponda a quello
+            suggerito da Psicogest prima di confermare.
+          </p>
+          <input
+            type="number"
+            className="num"
+            autoFocus
+            style={{ width: "100%", boxSizing: "border-box", marginTop: 8 }}
+            value={numeroModal.value}
+            onChange={(e) => setNumeroModal((m) => ({ ...m, value: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") confermaNumeroModal();
+              if (e.key === "Escape") setNumeroModal(null);
+            }}
+          />
+          {settings.ultimo_numero_fattura &&
+            parseInt(numeroModal.value, 10) > 0 &&
+            parseInt(numeroModal.value, 10) < settings.ultimo_numero_fattura && (
+              <p style={{ color: "crimson", fontSize: 13, marginBottom: 0 }}>
+                Attenzione: è più basso dell&apos;ultimo numero usato ({settings.ultimo_numero_fattura}) — potrebbe
+                essere un doppione.
+              </p>
+            )}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+            <button className="btn btn-ghost" onClick={() => setNumeroModal(null)}>Annulla</button>
+            <button
+              className="btn btn-primary"
+              disabled={!numeroModal.value || parseInt(numeroModal.value, 10) < 1}
+              onClick={confermaNumeroModal}
+            >
+              Conferma e genera Excel
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

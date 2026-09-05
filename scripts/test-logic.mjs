@@ -230,6 +230,14 @@ test("analizzaNotaPerAudit non segnala testo libero senza pattern codice", () =>
 test("analizzaNotaPerAudit non segnala una nota vuota", () => {
   assert.equal(analizzaNotaPerAudit("").sospetta, false);
 });
+test("analizzaNotaPerAudit non segnala 'Deve 100' (parola di 4 lettere, non una sigla)", () => {
+  assert.equal(analizzaNotaPerAudit("Deve 100").sospetta, false);
+  assert.equal(analizzaNotaPerAudit("Deve 100 euro").sospetta, false);
+});
+test("analizzaNotaPerAudit non segnala parole comuni brevi seguite da un numero (es. 'Ore 15')", () => {
+  assert.equal(analizzaNotaPerAudit("Ore 15").sospetta, false);
+  assert.equal(analizzaNotaPerAudit("Dal 3 al 5").sospetta, false);
+});
 
 console.log(`\n${passed} test superati.`);
 if (process.exitCode) {

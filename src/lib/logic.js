@@ -235,8 +235,19 @@ export function eventiDiPazienteOrdinati(patient, allEvents) {
 // Riconoscimento "largo" di un possibile vecchio codice manuale non ancora
 // coperto da VECCHIO_CODICE_REGEX — usato SOLO per la prova a vuoto di
 // controllo (mai per decidere cosa scrivere): lettere+numero o numero+lettere
-// nelle primissime posizioni della nota, es. "NF2", "3pc", "Ctr 4".
-const POSSIBILE_CODICE_REGEX = /^\s*(?:[a-zA-Z]{1,4}\s*\d{1,3}\b|\d{1,3}\s*[a-zA-Z]{1,4}\b)/;
+// nelle primissime posizioni della nota, es. "NF2", "3pc", "Ctr 4". Limitato a
+// 3 lettere (la sigla più lunga già in uso, "npa", ne ha 3) per non prendere
+// per un codice normali parole italiane brevi come "Deve" (4 lettere).
+const POSSIBILE_CODICE_REGEX = /^\s*(?:[a-zA-Z]{1,3}\s*\d{1,3}\b|\d{1,3}\s*[a-zA-Z]{1,3}\b)/;
+
+// Parole italiane comuni, brevi (≤3 lettere), che possono comparire a inizio
+// nota seguite da un numero in una frase normale (es. "Ore 15", "Dal 3") —
+// escluse esplicitamente perché altrimenti il pattern sopra le scambierebbe
+// per un codice.
+const PAROLE_COMUNI_ESCLUSE = new Set([
+  "il", "lo", "la", "un", "e", "di", "da", "in", "su", "al", "ai", "dal",
+  "dai", "col", "coi", "che", "chi", "ore", "ora", "sig", "dr",
+]);
 
 // Applica stripCodiceEsistente a una nota e segnala se il testo sembra
 // contenere un codice all'inizio (pattern lettere+numero o numero+lettere)
@@ -246,7 +257,10 @@ const POSSIBILE_CODICE_REGEX = /^\s*(?:[a-zA-Z]{1,4}\s*\d{1,3}\b|\d{1,3}\s*[a-zA
 export function analizzaNotaPerAudit(descrizioneOriginale) {
   const originale = descrizioneOriginale || "";
   const dopoStrip = stripCodiceEsistente(originale);
-  const sembraCodiceNonRiconosciuto = dopoStrip === originale && POSSIBILE_CODICE_REGEX.test(originale);
+  const primaParola = (originale.match(/^\s*([a-zA-Z]+)/) || [])[1];
+  const sembraParolaComune = primaParola && PAROLE_COMUNI_ESCLUSE.has(primaParola.toLowerCase());
+  const sembraCodiceNonRiconosciuto =
+    dopoStrip === originale && POSSIBILE_CODICE_REGEX.test(originale) && !sembraParolaComune;
   return { originale, dopoStrip, cambiata: dopoStrip !== originale, sospetta: sembraCodiceNonRiconosciuto };
 }
 
