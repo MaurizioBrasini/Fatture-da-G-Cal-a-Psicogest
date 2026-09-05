@@ -39,12 +39,33 @@ export async function POST(request) {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, from, to);
     const conNota = events.filter((e) => (e.descrizione || "").trim());
 
+    // Data del primo e dell'ultimo evento EFFETTIVAMENTE restituiti da
+    // Google in questa chiamata — prova concreta di quanto lontano è
+    // arrivata davvero la lettura, utile per scoprire se la paginazione si
+    // fosse fermata prima della fine dell'intervallo richiesto.
+    const dateEventi = events.map((e) => e.data).sort();
+    const primoEvento = dateEventi[0] || null;
+    const ultimoEvento = dateEventi[dateEventi.length - 1] || null;
+
+    // Riepilogo per anno: fa emergere subito eventuali "buchi" (anni con
+    // eventi ma zero note, o assenti del tutto) invece di un unico totale
+    // aggregato che nasconde la distribuzione nel tempo.
+    const perAnno = {};
+    for (const e of events) {
+      const anno = e.data.slice(0, 4);
+      if (!perAnno[anno]) perAnno[anno] = { eventi: 0, conNota: 0, sospette: 0 };
+      perAnno[anno].eventi++;
+    }
+
     const flagged = [];
     let sospette = 0;
     for (const ev of conNota) {
+      const anno = ev.data.slice(0, 4);
+      perAnno[anno].conNota++;
       const analisi = analizzaNotaPerAudit(ev.descrizione);
       if (analisi.sospetta) {
         sospette++;
+        perAnno[anno].sospette++;
         if (flagged.length < MAX_FLAGGED) {
           flagged.push({
             data: ev.data,
@@ -65,6 +86,9 @@ export async function POST(request) {
       sospette,
       flagged,
       troncato: sospette > flagged.length,
+      primoEvento,
+      ultimoEvento,
+      perAnno,
     });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });

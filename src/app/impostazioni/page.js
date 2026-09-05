@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
-import { DEFAULT_SETTINGS } from "@/lib/logic";
+import { DEFAULT_SETTINGS, todayISO } from "@/lib/logic";
 
 export default function ImpostazioniPage() {
   const supabase = createClient();
@@ -170,7 +170,35 @@ export default function ImpostazioniPage() {
               {auditResult.totaleEventi} eventi nell&apos;intervallo, {auditResult.eventiConNota} con una nota,{" "}
               <strong>{auditResult.sospette}</strong> con un possibile codice non riconosciuto
               {auditResult.troncato ? ` (mostrate le prime ${auditResult.flagged.length})` : ""}.
+              <br />
+              Eventi effettivamente letti: dal <strong>{auditResult.primoEvento || "—"}</strong> al{" "}
+              <strong>{auditResult.ultimoEvento || "—"}</strong>
+              {auditResult.ultimoEvento && auditResult.ultimoEvento < todayISO() && (
+                <span style={{ color: "crimson" }}>
+                  {" "}
+                  — attenzione, si ferma prima di oggi: la lettura non ha coperto tutto l&apos;intervallo richiesto.
+                </span>
+              )}
             </p>
+            {auditResult.perAnno && Object.keys(auditResult.perAnno).length > 0 && (
+              <div className="table-scroll" style={{ marginBottom: 16 }}>
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Anno</th><th>Eventi</th><th>Con nota</th><th>Sospette</th></tr>
+                  </thead>
+                  <tbody>
+                    {Object.keys(auditResult.perAnno).sort().map((anno) => (
+                      <tr key={anno}>
+                        <td className="mono">{anno}</td>
+                        <td className="mono">{auditResult.perAnno[anno].eventi}</td>
+                        <td className="mono">{auditResult.perAnno[anno].conNota}</td>
+                        <td className="mono">{auditResult.perAnno[anno].sospette}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {auditResult.flagged.length > 0 && (
               <div className="table-scroll" style={{ maxHeight: 400, overflowY: "auto" }}>
                 <table className="tbl">
