@@ -452,6 +452,7 @@ export default function PazientiPage() {
                 <SortableTh label="Ancora: data" sortKey="ancora_data" sort={sort} setSort={setSort} />
                 <th>Ancora: valore</th>
                 <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />
+                <th title="Paziente senza slot fisso nel piano generale: prenota di volta in volta uno slot libero">Fuori schema</th>
                 <th>Pagamento</th>
                 <th title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">Contante/seduta €</th>
                 <SortableTh label="Contanti dovuti" sortKey="contante_dovuto" sort={sort} setSort={setSort} />
@@ -495,6 +496,13 @@ export default function PazientiPage() {
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
                     </select>
+                  </td>
+                  <td style={{ textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={!!p.fuori_schema}
+                      onChange={(e) => updateField(p.id, "fuori_schema", e.target.checked)}
+                    />
                   </td>
                   <td>
                     <select value={p.modalita_pagamento} onChange={(e) => updateField(p.id, "modalita_pagamento", e.target.value)}>

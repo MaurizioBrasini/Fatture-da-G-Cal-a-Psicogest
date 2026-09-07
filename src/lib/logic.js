@@ -40,6 +40,132 @@ export function toDateObj(dateStr) {
   return new Date(y, m - 1, d);
 }
 
+// ---------------------------------------------------------------------
+// Generatore di occorrenze per patient_slot (motore appuntamenti,
+// sezione 5 di istruzioni-claude-code-appuntamenti.md): calcola le date
+// reali di uno slot fisso applicando in cascata le chiusure dello stesso
+// slot_key (weekday+ora) — una coppia quindicinale condivide la stessa
+// lista di chiusure, quindi la cascata si propaga identica a entrambi
+// senza logica differenziata per "chi tocca a chi".
+// ---------------------------------------------------------------------
+
+// patientSlot: { weekday, time_of_day, interval_days, anchor_date }
+// closures: tutte le righe di slot_closures (vengono filtrate qui per
+// weekday+time_of_day, non serve prefiltrarle prima di chiamare).
+// Ritorna le date reali (YYYY-MM-DD), ordinate, da oggi a oggi+orizzonteGiorni.
+export function occorrenzeFuture(patientSlot, closures, orizzonteGiorni = 60, oggi = todayISO()) {
+  const closureDates = (closures || [])
+    .filter((c) => c.weekday === patientSlot.weekday && c.time_of_day === patientSlot.time_of_day)
+    .map((c) => c.closure_date)
+    .sort();
+
+  const dataLimite = addDays(oggi, orizzonteGiorni);
+  const risultati = [];
+
+  let rawDate = patientSlot.anchor_date;
+  // La data reale è sempre >= alla grezza (le chiusure spostano solo in
+  // avanti): se la grezza supera già il limite possiamo fermarci, la reale
+  // lo supererebbe comunque. Il tetto sulle iterazioni è solo un fallback
+  // di sicurezza, non dovrebbe mai essere il vincolo attivo in pratica.
+  for (let i = 0; i < 1000 && rawDate <= dataLimite; i++) {
+    let dataReale = rawDate;
+    for (const closureDate of closureDates) {
+      if (closureDate <= dataReale) dataReale = addDays(dataReale, 7);
+    }
+    if (dataReale >= oggi && dataReale <= dataLimite) risultati.push(dataReale);
+    rawDate = addDays(rawDate, patientSlot.interval_days);
+  }
+
+  return risultati;
+}
+
+// ---------------------------------------------------------------------
+// Disdette/buche: rilevamento della nota "disdetto" e calcolo automatico
+// dello stato di fatturazione (charged/not_charged) dalla soglia di
+// preavviso di 48h.
+// ---------------------------------------------------------------------
+
+const DISDETTA_REGEX = /disdett/i; // copre "disdetto", "disdetta", "disdette"
+
+// Converte una data+ora "locale Italia" nell'istante UTC corrispondente,
+// gestendo correttamente il cambio CET/CEST (doppia conversione: si prova
+// un istante, si legge come Google/Intl lo vedrebbe in Europe/Rome, e si
+// corregge per la differenza) — necessario perché "updated" arriva da
+// Google come timestamp UTC preciso, e va confrontato con l'orario reale
+// dell'appuntamento per calcolare le 48h di preavviso, non solo la data.
+function romaLocaleToUTC(dateStr, oraStr) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [hh, mm] = (oraStr || "00:00").split(":").map(Number);
+  const guess = new Date(Date.UTC(y, m - 1, d, hh, mm));
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Rome",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(guess).map((p) => [p.type, p.value]));
+  const oraVista = parts.hour === "24" ? 0 : Number(parts.hour);
+  const comeSeUTC = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), oraVista, Number(parts.minute), Number(parts.second));
+  const offsetMs = comeSeUTC - guess.getTime();
+  return new Date(guess.getTime() - offsetMs);
+}
+
+// billing_status di una disdetta: not_charged se la nota è stata scritta
+// (cancelledAtISO) almeno 48h prima dell'orario reale della seduta,
+// altrimenti charged (include le "buche", cioè le disdette rilevate a
+// ridosso o dopo l'appuntamento).
+export function calcolaBillingStatus(originalDate, ora, cancelledAtISO) {
+  const appuntamento = romaLocaleToUTC(originalDate, ora);
+  const cancellato = new Date(cancelledAtISO);
+  const preavvisoMs = appuntamento.getTime() - cancellato.getTime();
+  return preavvisoMs >= 48 * 3600 * 1000 ? "not_charged" : "charged";
+}
+
+// Scandisce gli eventi alla ricerca di note "disdetto" non ancora
+// registrate in `cancellations` (dedup per patient_id+data, non sul testo
+// della nota — la nota resta sull'evento anche dopo la registrazione).
+// Non modifica nulla: restituisce solo i candidati da mostrare in anteprima
+// prima che l'utente confermi.
+export function computeAggiornamentoPreview(events, patients, cancellazioniEsistenti) {
+  const giaRegistrate = new Set((cancellazioniEsistenti || []).map((c) => `${c.patient_id}|${c.original_date}`));
+  const risultati = [];
+  for (const e of events) {
+    if (!DISDETTA_REGEX.test(e.descrizione || "")) continue;
+    const match = matchPatientForEvent(e.titolo, patients);
+    if (!match) continue; // evento non abbinabile a nessun paziente: da gestire a mano
+    const patient = match.patient;
+    if (giaRegistrate.has(`${patient.id}|${e.data}`)) continue;
+    const cancelledAt = e.updated || new Date().toISOString();
+    const billingStatus = calcolaBillingStatus(e.data, e.ora, cancelledAt);
+    risultati.push({
+      eventId: e.id,
+      patientId: patient.id,
+      nome: patient.fatturare_a || patient.nome_calendario,
+      data: e.data,
+      ora: e.ora,
+      cancelledAt,
+      billingStatus,
+    });
+  }
+  return risultati.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+}
+
+// Toglie un'eventuale iniziale di cognome finale ("Francesca F." ->
+// "Francesca", "Giovanni D.L." -> "Giovanni") — serve per riconoscere note
+// storiche scritte PRIMA che il nome calendario di un paziente venisse
+// uniformato al formato "Nome C." (es. pulizia fatta da Maurizio a
+// posteriori su più pazienti insieme, non solo su chi ne aveva davvero
+// bisogno). Non tocca nomi di coppia ("Nome1 e Nome2"): il pattern richiede
+// un token corto (1-6 caratteri, lettere/punti) staccato da uno spazio a
+// fine stringa, cosa che un secondo nome proprio normalmente non è.
+function baseSenzaInizialeCognome(nome) {
+  return normalizeName((nome || "").replace(/\s+[A-Za-zÀ-ÿ.]{1,6}\.?\s*$/, ""));
+}
+
 export function matchPatientForEvent(title, patients) {
   const norm = normalizeName(title);
   const exact = patients.find((p) => normalizeName(p.nome_calendario) === norm);
@@ -48,11 +174,25 @@ export function matchPatientForEvent(title, patients) {
     .filter((p) => p.nome_calendario && norm.includes(normalizeName(p.nome_calendario)))
     .sort((a, b) => normalizeName(b.nome_calendario).length - normalizeName(a.nome_calendario).length);
   if (candidates.length) return { patient: candidates[0], confidence: "parziale" };
+
+  // Titolo "corto": prova a riconoscerlo come lo stesso paziente scritto
+  // senza l'iniziale del cognome, ma SOLO se è l'unico paziente la cui base
+  // coincide — se più pazienti condividono la stessa base (es. due
+  // "Francesca" diverse, disambiguate solo dall'iniziale), non si indovina.
+  const deboli = patients.filter((p) => p.nome_calendario && baseSenzaInizialeCognome(p.nome_calendario) === norm);
+  if (deboli.length === 1) return { patient: deboli[0], confidence: "debole" };
+
   return null;
 }
 
 // events: [{data: 'YYYY-MM-DD', titolo: '...'}]
-export function computePatientState(patient, events, settings) {
+// cancellazioni: righe di `cancellations` per questo paziente (o per tutti,
+// vengono filtrate qui) — una data con billing_status='not_charged' non
+// conta come seduta, indipendentemente dal fatto che l'evento sia ancora
+// fisicamente presente a calendario o già stato rimosso (il pulsante
+// "Registra disdette" lo rimuove, ma il conteggio non deve dipendere da
+// quel dettaglio implementativo).
+export function computePatientState(patient, events, settings, cancellazioni = []) {
   const matched = events.filter((e) => {
     const m = matchPatientForEvent(e.titolo, [patient]);
     return !!m;
@@ -61,8 +201,15 @@ export function computePatientState(patient, events, settings) {
   const passate = matched.filter((e) => e.data <= oggi);
   const future = matched.filter((e) => e.data > oggi);
 
+  const nonAddebitate = new Set(
+    (cancellazioni || [])
+      .filter((c) => c.patient_id === patient.id && c.billing_status === "not_charged")
+      .map((c) => c.original_date)
+  );
+
   const usati = passate
     .filter((e) => !patient.ancora_data || e.data >= patient.ancora_data)
+    .filter((e) => !nonAddebitate.has(e.data))
     .sort((a, b) => (a.data < b.data ? -1 : 1));
 
   const count = (patient.ancora_valore || 0) + usati.length;

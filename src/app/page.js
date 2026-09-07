@@ -60,21 +60,31 @@ export default function DashboardPage() {
   const [toDate, setToDate] = useState(todayISO());
   const [fromHour, setFromHour] = useState("");
   const [toHour, setToHour] = useState("");
+  const [cancellazioni, setCancellazioni] = useState([]);
 
   // --- Modale numero fattura (sostituisce window.prompt) ---
   const [numeroModal, setNumeroModal] = useState(null); // null | { patientIds, value }
 
+  // --- Modale "Registra disdette" (nota "disdetto" -> cancellations) ---
+  const [aggStep, setAggStep] = useState(null); // null | 'loading' | 'preview' | 'writing' | 'done' | 'error'
+  const [aggCandidati, setAggCandidati] = useState(null);
+  const [aggEsclusi, setAggEsclusi] = useState({}); // { eventId: true } = deselezionato in anteprima
+  const [aggRisultato, setAggRisultato] = useState(null);
+  const [aggErrore, setAggErrore] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: s }, { data: pb }, { data: cc }] = await Promise.all([
+    const [{ data: p }, { data: s }, { data: pb }, { data: cc }, { data: canc }] = await Promise.all([
       supabase.from("patients").select("*").order("id"),
       supabase.from("settings").select("*").maybeSingle(),
       supabase.from("pending_batch").select("*").maybeSingle(),
       supabase.from("calendar_cache").select("*").maybeSingle(),
+      supabase.from("cancellations").select("patient_id, original_date, billing_status"),
     ]);
     setPatients(p || []);
     if (s) setSettings(s);
     setPendingBatch(pb || null);
+    setCancellazioni(canc || []);
     if (cc) {
       setEvents(cc.events || []);
       setEventsMeta({ from: cc.from_date, to: cc.to_date, fetchedAt: cc.fetched_at });
@@ -132,10 +142,10 @@ export default function DashboardPage() {
   const computed = useMemo(() => {
     const map = {};
     patients.forEach((p) => {
-      map[p.id] = computePatientState(p, events, settings);
+      map[p.id] = computePatientState(p, events, settings, cancellazioni);
     });
     return map;
-  }, [patients, events, settings]);
+  }, [patients, events, settings, cancellazioni]);
 
   const groups = useMemo(() => {
     const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [] };
@@ -272,6 +282,65 @@ export default function DashboardPage() {
     await generateBatch([id]);
   }
 
+  // --- Registra disdette (nota "disdetto" -> cancellations, preview+conferma) ---
+  async function apriRegistraDisdette() {
+    setAggStep("loading");
+    setAggErrore("");
+    setAggEsclusi({});
+    setAggRisultato(null);
+    try {
+      const res = await fetch("/api/calendar/aggiorna-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAggErrore(data.error || "Errore nel calcolo dell'anteprima.");
+        setAggStep("error");
+        return;
+      }
+      setAggCandidati(data.candidati || []);
+      setAggStep("preview");
+    } catch (e) {
+      setAggErrore(e.message);
+      setAggStep("error");
+    }
+  }
+
+  async function confermaRegistraDisdette() {
+    const daConfermare = (aggCandidati || []).filter((c) => !aggEsclusi[c.eventId]);
+    if (!daConfermare.length) return;
+    setAggStep("writing");
+    try {
+      const res = await fetch("/api/calendar/aggiorna-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidati: daConfermare }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAggErrore(data.error || "Errore durante la registrazione.");
+        setAggStep("error");
+        return;
+      }
+      setAggRisultato(data);
+      setAggStep("done");
+      load();
+    } catch (e) {
+      setAggErrore(e.message);
+      setAggStep("error");
+    }
+  }
+
+  function chiudiRegistraDisdette() {
+    setAggStep(null);
+    setAggCandidati(null);
+    setAggEsclusi({});
+    setAggRisultato(null);
+    setAggErrore("");
+  }
+
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
   const readyIds = groups.pronto.map((p) => p.id);
@@ -306,6 +375,11 @@ export default function DashboardPage() {
           <div>
             <h1>Da fatturare</h1>
             <p className="sub">Sedute contate dal calendario, confrontate con la soglia di ciascun paziente.</p>
+          </div>
+          <div className="header-actions">
+            <button className="btn btn-primary" onClick={apriRegistraDisdette}>
+              Registra disdette
+            </button>
           </div>
         </header>
 
@@ -551,6 +625,98 @@ export default function DashboardPage() {
               Conferma e genera Excel
             </button>
           </div>
+        </Modal>
+      )}
+
+      {aggStep && (
+        <Modal maxWidth={640}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Registra disdette</h2>
+
+          {aggStep === "loading" && <p>Ricerca delle note &quot;disdetto&quot; in corso…</p>}
+
+          {aggStep === "error" && (
+            <>
+              <p style={{ color: "crimson" }}>{aggErrore}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={chiudiRegistraDisdette}>Chiudi</button>
+              </div>
+            </>
+          )}
+
+          {aggStep === "preview" && (
+            <>
+              {(!aggCandidati || aggCandidati.length === 0) ? (
+                <p className="muted">Nessuna disdetta nuova da registrare.</p>
+              ) : (
+                <>
+                  <p className="muted small">
+                    Le righe <strong>non addebitate</strong> (preavviso ≥48h) rimuoveranno l&apos;evento dal
+                    calendario per liberare lo slot; le righe <strong>addebitate</strong> (buche) restano a
+                    calendario così come sono. Deseleziona una riga per lasciarla da gestire a mano.
+                  </p>
+                  <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th style={{ textAlign: "left" }}>Data</th>
+                        <th style={{ textAlign: "left" }}>Paziente</th>
+                        <th style={{ textAlign: "left" }}>Esito</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aggCandidati.map((c) => (
+                        <tr key={c.eventId}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={!aggEsclusi[c.eventId]}
+                              onChange={() =>
+                                setAggEsclusi((prev) => ({ ...prev, [c.eventId]: !prev[c.eventId] }))
+                              }
+                            />
+                          </td>
+                          <td className="mono" style={{ whiteSpace: "nowrap" }}>
+                            {c.data}{c.ora ? ` ${c.ora}` : ""}
+                          </td>
+                          <td>{c.nome}</td>
+                          <td>
+                            {c.billingStatus === "not_charged" ? (
+                              <span>Non addebitata — rimuove l&apos;evento</span>
+                            ) : (
+                              <span>Addebitata (buca) — evento invariato</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiRegistraDisdette}>Annulla</button>
+                {aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0 && (
+                  <button className="btn btn-primary" onClick={confermaRegistraDisdette}>
+                    Conferma e registra
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {aggStep === "writing" && <p>Registrazione in corso…</p>}
+
+          {aggStep === "done" && aggRisultato && (
+            <>
+              <p>
+                {aggRisultato.ok
+                  ? `Fatto: ${aggRisultato.registrati} disdette registrate.`
+                  : `${aggRisultato.registrati} registrate, ${aggRisultato.falliti} fallite.`}
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-primary" onClick={chiudiRegistraDisdette}>Chiudi</button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </div>

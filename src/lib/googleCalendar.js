@@ -58,6 +58,10 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
           // Presente solo per le occorrenze di eventi ricorrenti: identifica
           // a quale serie appartiene questa singola occorrenza.
           recurringEventId: ev.recurringEventId || null,
+          // Ultimo aggiornamento dell'evento (Google lo mantiene da solo).
+          // Usato come proxy di "quando è stata scritta la nota di disdetta"
+          // per calcolare il preavviso rispetto alla data della seduta.
+          updated: ev.updated || null,
         };
       }).filter((e) => e.data)
     );
@@ -87,6 +91,60 @@ export async function updateGoogleCalendarEventDescription(refreshToken, eventId
   if (!res.ok) {
     const text = await res.text();
     throw new Error("Scrittura sull'evento del calendario fallita: " + text);
+  }
+  return res.json();
+}
+
+// Rimuove un evento dal calendario. Usata SOLO per le disdette con
+// preavviso ≥48h (billing_status = not_charged): libera lo slot da subito.
+// Le buche (charged) non vanno mai cancellate da qui — restano a calendario
+// per pulizia storica, per costruzione del chiamante.
+export async function deleteGoogleCalendarEvent(refreshToken, eventId) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  // Google risponde 410 Gone se l'evento è già stato cancellato in
+  // precedenza (es. a mano, o da un giro precedente non completato) — non è
+  // un errore da bloccare, il risultato che vogliamo (evento assente) è già
+  // raggiunto.
+  if (!res.ok && res.status !== 410 && res.status !== 404) {
+    const text = await res.text();
+    throw new Error("Cancellazione dell'evento dal calendario fallita: " + text);
+  }
+}
+
+// Crea un singolo evento NON ricorrente (motore appuntamenti: il generatore
+// crea un evento per ciascuna occorrenza calcolata da patient_slots, invece
+// di affidarsi a una RRULE nativa — vedi "Perché non usare RRULE native" in
+// istruzioni-claude-code-appuntamenti.md). data: "YYYY-MM-DD", ora: "HH:MM".
+export async function createGoogleCalendarEvent(refreshToken, { data, ora, durataMinuti, titolo, descrizione }) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const inizio = `${data}T${ora}:00`;
+  const [h, m] = ora.split(":").map(Number);
+  const fineMinuti = h * 60 + m + durataMinuti;
+  const fine = `${data}T${String(Math.floor(fineMinuti / 60) % 24).padStart(2, "0")}:${String(fineMinuti % 60).padStart(2, "0")}:00`;
+
+  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      summary: titolo,
+      description: descrizione || "",
+      start: { dateTime: inizio, timeZone: "Europe/Rome" },
+      end: { dateTime: fine, timeZone: "Europe/Rome" },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Creazione dell'evento sul calendario fallita: " + text);
   }
   return res.json();
 }
