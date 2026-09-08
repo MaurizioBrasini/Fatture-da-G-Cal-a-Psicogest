@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import { importoLordoDaOnorario } from "@/lib/logic";
 
 export default function StoricoPage() {
   const supabase = createClient();
@@ -33,7 +34,7 @@ export default function StoricoPage() {
   // tonda che Maurizio vuole vedere in questa schermata (es. 250€, non
   // 245,10€), senza toccare il dato salvato.
   function importoLordo(h) {
-    return Math.round(h.onorario * 1.02 * 100) / 100;
+    return importoLordoDaOnorario(h.onorario);
   }
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;

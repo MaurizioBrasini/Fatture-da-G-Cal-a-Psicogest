@@ -228,6 +228,15 @@ export function computePatientState(patient, events, settings, cancellazioni = [
   return { count, soglia, ultimaData, prossimaData, usati, stato };
 }
 
+// Inverso dello scorporo qui sopra: da un onorario già scorporato del 2%
+// ENPAP (il valore salvato in invoice_history) ricostruisce la tariffa
+// tonda originale (es. 250€) per mostrarla nelle schermate di storico,
+// senza toccare il dato salvato. Unica fonte di verità per questo calcolo:
+// usata sia in storico/page.js sia in pazienti/page.js (storico paziente).
+export function importoLordoDaOnorario(onorario) {
+  return Math.round(onorario * 1.02 * 100) / 100;
+}
+
 export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID, fatturaNumero) {
   const count = computed.count;
 

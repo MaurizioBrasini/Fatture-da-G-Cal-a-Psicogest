@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
-import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 
 const TIPOLOGIE = [
@@ -983,7 +983,7 @@ export default function PazientiPage() {
                       <tr key={h.id}>
                         <td className="mono">{h.data}</td>
                         <td className="mono">{h.totale_sedute}</td>
-                        <td className="mono">€ {Math.round(h.onorario * 1.02 * 100) / 100}</td>
+                        <td className="mono">€ {importoLordoDaOnorario(h.onorario)}</td>
                         <td>{h.note}</td>
                       </tr>
                     ))}

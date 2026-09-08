@@ -52,11 +52,19 @@ export async function POST(request) {
       if (!patient || !patient.nome_calendario) continue;
 
       const date = occorrenzeFuture(slot, closures || [], giorniAvanti, oggi);
+      // Abbinamento sull'intera lista pazienti (non il singolo paziente):
+      // matchPatientForEvent usa l'ambiguita' tra TUTTI i pazienti per
+      // scartare i match "deboli" quando piu' di uno condivide la stessa
+      // base del nome (es. due "Francesca" diverse) — vedi collisioni di
+      // nome documentate nella riconciliazione del 2026-09-08. Passare qui
+      // un array con un solo paziente disattiverebbe quella disambiguazione
+      // e rischierebbe di abbinare l'evento di un altro paziente.
+      const eventoDiQuestoPaziente = (e) => matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id;
       // Mai rigenerare la data di oggi: se manca, è perché la seduta di oggi
       // è già stata gestita (svolta o disdetta), non un buco da riempire.
       const mancanti = date
         .filter((d) => d > oggi)
-        .filter((d) => !events.some((e) => e.data === d && matchPatientForEvent(e.titolo, [patient])))
+        .filter((d) => !events.some((e) => e.data === d && eventoDiQuestoPaziente(e)))
         .filter((d) => !skippedSet.has(`${patient.id}|${d}`));
       if (!mancanti.length) continue;
 
@@ -64,7 +72,7 @@ export async function POST(request) {
       // paziente, se lo trova (per non alterare sedute piu' lunghe del
       // solito, es. coppie/consulenze), altrimenti 60 minuti di default.
       const eventoRecente = events
-        .filter((e) => matchPatientForEvent(e.titolo, [patient]) && e.ora)
+        .filter((e) => eventoDiQuestoPaziente(e) && e.ora)
         .sort((a, b) => (a.data < b.data ? 1 : -1))[0];
       const durataMinuti = eventoRecente?.durataMinuti || 60;
 

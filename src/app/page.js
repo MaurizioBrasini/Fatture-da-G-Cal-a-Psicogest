@@ -144,14 +144,24 @@ export default function DashboardPage() {
   // un paziente, per il bottone confermato/da confermare — stessa logica di
   // abbinamento già usata da computePatientState, ma serve l'oggetto evento
   // intero (non solo la data) per poterlo modificare su Google Calendar.
+  // Abbinamento sull'intera lista pazienti (non un array con il solo
+  // paziente): matchPatientForEvent usa il confronto con TUTTI i pazienti
+  // per scartare i match "deboli" ambigui (es. due pazienti che condividono
+  // lo stesso nome di battesimo) — passare qui un singolo paziente
+  // disattiverebbe quella disambiguazione e rischierebbe di abbinare
+  // l'evento di un altro paziente.
   function prossimoEvento(patient, prossimaData) {
     if (!prossimaData) return null;
-    return events.find((e) => e.data === prossimaData && matchPatientForEvent(e.titolo, [patient])) || null;
+    return (
+      events.find((e) => e.data === prossimaData && matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id) ||
+      null
+    );
   }
 
   async function toggleConferma(eventId, eraConfermato) {
     const nuovoConfermato = !eraConfermato;
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, colorId: nuovoConfermato ? null : "6" } : e)));
+    const nuoviEventi = events.map((e) => (e.id === eventId ? { ...e, colorId: nuovoConfermato ? null : "6" } : e));
+    setEvents(nuoviEventi);
     try {
       const res = await fetch("/api/calendar/toggle-conferma", {
         method: "POST",
@@ -160,6 +170,23 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Errore sconosciuto");
+      // Aggiorna anche la cache persistita (calendar_cache): altrimenti, senza
+      // un nuovo "Sync", ricaricando la pagina lo stato confermato/da
+      // confermare tornerebbe quello vecchio letto dalla cache.
+      if (eventsMeta) {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user) {
+          await supabase.from("calendar_cache").upsert({
+            user_id: userData.user.id,
+            from_date: eventsMeta.from,
+            to_date: eventsMeta.to,
+            from_hour: fromHour || null,
+            to_hour: toHour || null,
+            events: nuoviEventi,
+            fetched_at: eventsMeta.fetchedAt,
+          });
+        }
+      }
     } catch (e) {
       // rollback ottimistico se la scrittura su Google Calendar fallisce
       setEvents((prev) => prev.map((ev) => (ev.id === eventId ? { ...ev, colorId: eraConfermato ? null : "6" } : ev)));
