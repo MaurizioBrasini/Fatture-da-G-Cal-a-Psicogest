@@ -1,6 +1,8 @@
 // Usa il refresh token salvato per ottenere un access token fresco da Google,
 // poi legge gli eventi del calendario nel periodo richiesto.
 
+import { addDays } from "./logic";
+
 async function getAccessToken(refreshToken) {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -161,8 +163,17 @@ export async function createGoogleCalendarEvent(refreshToken, { data, ora, durat
 
   const inizio = `${data}T${ora}:00`;
   const [h, m] = ora.split(":").map(Number);
-  const fineMinuti = h * 60 + m + durataMinuti;
-  const fine = `${data}T${String(Math.floor(fineMinuti / 60) % 24).padStart(2, "0")}:${String(fineMinuti % 60).padStart(2, "0")}:00`;
+  const fineMinutiTotali = h * 60 + m + durataMinuti;
+  // Se la seduta supera la mezzanotte (es. 23:30 + 60 min), l'orario di fine
+  // va scritto sul giorno SUCCESSIVO — senza questo, l'ora avvolge con %24 ma
+  // la data restava quella di partenza, producendo una fine precedente
+  // all'inizio (bug scoperto 2026-09-08, mai capitato finora perché nessuno
+  // slot esistente arriva così tardi, ma "Genera occorrenze future" ora crea
+  // eventi senza supervisione diretta).
+  const giorniOltre = Math.floor(fineMinutiTotali / (24 * 60));
+  const minutiNelGiorno = fineMinutiTotali % (24 * 60);
+  const dataFine = giorniOltre > 0 ? addDays(data, giorniOltre) : data;
+  const fine = `${dataFine}T${String(Math.floor(minutiNelGiorno / 60)).padStart(2, "0")}:${String(minutiNelGiorno % 60).padStart(2, "0")}:00`;
 
   const body = {
     summary: titolo,

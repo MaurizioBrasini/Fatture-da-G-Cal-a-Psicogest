@@ -126,7 +126,11 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   display: flex; flex-direction: column; gap: 7px; min-width: 200px; max-height: 60vh; overflow-y: auto;
 }
 .colonne-panel label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); white-space: nowrap; }
-.editable { min-width: 1650px; }
+/* Niente min-width fisso qui: la tabella deve restringersi quando l'utente
+   nasconde colonne dal pannello "Colonne" — la larghezza naturale viene
+   comunque dai min-width dei singoli input/select qui sotto, che bastano a
+   tenere leggibile ogni colonna visibile senza forzarne la somma totale
+   quando sono tutte accese. */
 .editable input, .editable select { border: 1px solid transparent; background: none; padding: 4px 5px; font-size: 12.5px; border-radius: 5px; width: 100%; min-width: 90px; }
 .editable input:hover, .editable select:hover, .editable input:focus, .editable select:focus { border-color: var(--border); background: var(--bg); outline: none; }
 .editable .num { width: 60px; min-width: 60px; }
