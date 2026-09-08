@@ -274,6 +274,108 @@ export default function PazientiPage() {
     setRenumProgress(null);
   }
 
+  // --- Genera occorrenze future mancanti (manutenzione settimanale) ---
+  const [genOccStep, setGenOccStep] = useState(null); // null | 'loading' | 'preview' | 'writing' | 'done' | 'error'
+  const [genOccGiorni, setGenOccGiorni] = useState(45);
+  const [genOccData, setGenOccData] = useState(null); // array [{patientId, nome, ora, durataMinuti, date:[...]}]
+  const [genOccWriteResult, setGenOccWriteResult] = useState(null);
+  const [genOccError, setGenOccError] = useState("");
+  const [genOccProgress, setGenOccProgress] = useState(null);
+  const [genOccEsclusi, setGenOccEsclusi] = useState(new Set()); // chiavi "patientId|data" deselezionate
+  const GENOCC_CHUNK_SIZE = 15;
+
+  function toggleGenOccData(patientId, data) {
+    const chiave = `${patientId}|${data}`;
+    setGenOccEsclusi((s) => {
+      const next = new Set(s);
+      if (next.has(chiave)) next.delete(chiave);
+      else next.add(chiave);
+      return next;
+    });
+  }
+
+  async function caricaAnteprimaGeneraOccorrenze(giorni) {
+    setGenOccStep("loading");
+    setGenOccError("");
+    try {
+      const res = await fetch("/api/calendar/genera-occorrenze-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ giorniAvanti: giorni }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGenOccError(data.error || "Errore nel calcolo dell'anteprima.");
+        setGenOccStep("error");
+        return;
+      }
+      setGenOccData(data.pazienti || []);
+      setGenOccEsclusi(new Set());
+      setGenOccStep("preview");
+    } catch (e) {
+      setGenOccError(e.message);
+      setGenOccStep("error");
+    }
+  }
+
+  function apriGeneraOccorrenze() {
+    setGenOccGiorni(45);
+    setGenOccData(null);
+    setGenOccWriteResult(null);
+    caricaAnteprimaGeneraOccorrenze(45);
+  }
+
+  async function confermaGeneraOccorrenze() {
+    setGenOccStep("writing");
+    const eventi = (genOccData || []).flatMap((p) =>
+      p.date
+        .filter((data) => !genOccEsclusi.has(`${p.patientId}|${data}`))
+        .map((data) => ({ patientId: p.patientId, data, ora: p.ora, durataMinuti: p.durataMinuti }))
+    );
+
+    const blocchi = [];
+    for (let i = 0; i < eventi.length; i += GENOCC_CHUNK_SIZE) {
+      blocchi.push(eventi.slice(i, i + GENOCC_CHUNK_SIZE));
+    }
+
+    setGenOccProgress({ fatti: 0, totale: eventi.length });
+    let creati = 0;
+    let falliti = 0;
+    const dettagli = [];
+    try {
+      for (const blocco of blocchi) {
+        const res = await fetch("/api/calendar/genera-occorrenze-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ eventi: blocco }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setGenOccError(data.error || "Errore durante la scrittura.");
+          setGenOccStep("error");
+          return;
+        }
+        creati += data.creati || 0;
+        falliti += data.falliti || 0;
+        dettagli.push(...(data.dettagli || []));
+        setGenOccProgress({ fatti: creati + falliti, totale: eventi.length });
+      }
+      setGenOccWriteResult({ ok: falliti === 0, creati, falliti, dettagli });
+      setGenOccStep("done");
+    } catch (e) {
+      setGenOccError(e.message);
+      setGenOccStep("error");
+    }
+  }
+
+  function chiudiGeneraOccorrenze() {
+    setGenOccStep(null);
+    setGenOccData(null);
+    setGenOccWriteResult(null);
+    setGenOccError("");
+    setGenOccProgress(null);
+  }
+
   // Le quattro funzioni sotto erano prima ciascuna la propria copia di
   // "aggiorna lo stato locale" / "salva su Supabase" — ora condividono le
   // stesse due funzioni di base (patchLocal / persistPatch) e si limitano a
@@ -482,6 +584,7 @@ export default function PazientiPage() {
             />
             <button className="btn btn-primary" onClick={addPatient}>+ Nuovo paziente</button>
             <button className="btn btn-ghost" onClick={() => apriRinumerazione(null)}>Rinumera tutti (calendario)</button>
+            <button className="btn btn-ghost" onClick={apriGeneraOccorrenze}>Genera occorrenze future</button>
           </div>
         </header>
 
@@ -734,6 +837,111 @@ export default function PazientiPage() {
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiRinumerazione}>Chiudi</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {genOccStep && (
+        <Modal maxWidth={640}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Genera occorrenze future</h2>
+
+          {genOccStep === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
+
+          {genOccStep === "error" && (
+            <>
+              <p style={{ color: "crimson" }}>{genOccError}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={chiudiGeneraOccorrenze}>Chiudi</button>
+              </div>
+            </>
+          )}
+
+          {genOccStep === "preview" && (
+            <>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+                <label className="muted small">Orizzonte (giorni da oggi):</label>
+                <input
+                  type="number" className="num" style={{ width: 70 }}
+                  value={genOccGiorni}
+                  onChange={(e) => setGenOccGiorni(parseInt(e.target.value) || 45)}
+                />
+                <button className="btn btn-ghost" onClick={() => caricaAnteprimaGeneraOccorrenze(genOccGiorni)}>Ricalcola</button>
+              </div>
+              <p className="muted small" style={{ marginTop: -8, marginBottom: 16 }}>
+                Ogni nuovo appuntamento nasce &quot;da confermare&quot; (arancione) — nessuna occorrenza già presente viene toccata o duplicata.
+              </p>
+
+              {(!genOccData || genOccData.length === 0) ? (
+                <p className="muted">Nessuna occorrenza mancante: il calendario copre già l&apos;orizzonte scelto per tutti.</p>
+              ) : (
+                <>
+                  <p className="muted small">
+                    Togli la spunta a una data se sai già che non va creata (es. una seduta che hai deciso di saltare/spostare).
+                  </p>
+                  {genOccData.map((p) => (
+                    <div key={p.patientId} style={{ marginBottom: 14 }}>
+                      <strong>{p.nome}</strong>{" "}
+                      <span className="muted small">(ore {p.ora})</span>
+                      <div style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                        {p.date.map((data) => {
+                          const chiave = `${p.patientId}|${data}`;
+                          const esclusa = genOccEsclusi.has(chiave);
+                          return (
+                            <label key={data} className="small" style={{ display: "inline-flex", alignItems: "center", gap: 5, opacity: esclusa ? 0.5 : 1 }}>
+                              <input type="checkbox" checked={!esclusa} onChange={() => toggleGenOccData(p.patientId, data)} />
+                              {data}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiGeneraOccorrenze}>Annulla</button>
+                {genOccData && genOccData.length > 0 && (
+                  <button className="btn btn-primary" onClick={confermaGeneraOccorrenze}>Conferma e crea sul calendario</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {genOccStep === "writing" && (
+            <>
+              <p>Creazione eventi in corso su Google Calendar…</p>
+              {genOccProgress && (
+                <>
+                  <div style={{ background: "#EEF1EE", borderRadius: 6, overflow: "hidden", height: 10 }}>
+                    <div
+                      style={{
+                        width: `${Math.round((genOccProgress.fatti / Math.max(genOccProgress.totale, 1)) * 100)}%`,
+                        background: "#3E6B4F",
+                        height: "100%",
+                        transition: "width 150ms ease",
+                      }}
+                    />
+                  </div>
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    {genOccProgress.fatti} / {genOccProgress.totale} eventi creati
+                  </p>
+                </>
+              )}
+            </>
+          )}
+
+          {genOccStep === "done" && genOccWriteResult && (
+            <>
+              <p>
+                {genOccWriteResult.ok
+                  ? `Fatto: ${genOccWriteResult.creati} eventi creati.`
+                  : `${genOccWriteResult.creati} eventi creati, ${genOccWriteResult.falliti} falliti.`}
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-primary" onClick={chiudiGeneraOccorrenze}>Chiudi</button>
               </div>
             </>
           )}

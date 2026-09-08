@@ -46,10 +46,19 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
     events = events.concat(
       (data.items || []).map((ev) => {
         const startDateTime = ev.start?.dateTime || "";
+        const endDateTime = ev.end?.dateTime || "";
+        const durataMinuti =
+          startDateTime && endDateTime
+            ? Math.round((new Date(endDateTime) - new Date(startDateTime)) / 60000)
+            : null;
         return {
           id: ev.id,
           data: (ev.start?.date || startDateTime || "").slice(0, 10),
           ora: startDateTime ? startDateTime.slice(11, 16) : null, // "HH:MM" oppure null se evento "tutto il giorno"
+          // Durata in minuti (null se evento "tutto il giorno") — usata per
+          // riproporre la stessa durata quando si genera una nuova
+          // occorrenza futura per lo stesso paziente.
+          durataMinuti,
           titolo: ev.summary || "",
           // Testo attuale della nota dell'evento (necessario per poter
           // sostituire solo il codice numerico, senza cancellare il resto:
