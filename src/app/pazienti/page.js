@@ -16,6 +16,40 @@ const TIPOLOGIE = [
 const TIPOLOGIA_LABEL = { individuale: "Individuale", coppia: "Coppia", consulenza: "Consulenza" };
 const TIPOLOGIA_FROM_LABEL = { INDIVIDUALE: "individuale", COPPIA: "coppia", CONSULENZA: "consulenza" };
 
+// Colonne nascondibili dall'utente (spunte "Colonne visibili"). "Nome in
+// calendario" e la colonna azioni restano sempre visibili: servono sempre
+// per identificare la riga e per agire su di essa.
+const COLONNE_OPZIONALI = [
+  { key: "nome", label: "Nome" },
+  { key: "cognome", label: "Cognome" },
+  { key: "fatturare_a", label: "Fatturare a" },
+  { key: "codice_fiscale", label: "Codice fiscale" },
+  { key: "tipologia", label: "Tipologia" },
+  { key: "regime_tariffario", label: "Regime" },
+  { key: "costo_unitario", label: "Tariffa €" },
+  { key: "soglia_fatturazione", label: "Soglia" },
+  { key: "giorni_stale_override", label: "Giorni inattività" },
+  { key: "ancora_data", label: "Ancora: data" },
+  { key: "ancora_valore", label: "Ancora: valore" },
+  { key: "stato", label: "Stato" },
+  { key: "fuori_schema", label: "Fuori schema" },
+  { key: "modalita_pagamento", label: "Pagamento" },
+  { key: "quota_contante_seduta", label: "Contante/seduta €" },
+  { key: "contante_dovuto", label: "Contanti dovuti" },
+];
+const COLONNE_STORAGE_KEY = "pazienti-colonne-visibili";
+
+function caricaColonneVisibili() {
+  const tutte = Object.fromEntries(COLONNE_OPZIONALI.map((c) => [c.key, true]));
+  if (typeof window === "undefined") return tutte;
+  try {
+    const salvate = JSON.parse(window.localStorage.getItem(COLONNE_STORAGE_KEY) || "{}");
+    return { ...tutte, ...salvate };
+  } catch {
+    return tutte;
+  }
+}
+
 function sortRows(list, sort) {
   const arr = [...list];
   const getVal = (p) => {
@@ -57,6 +91,22 @@ export default function PazientiPage() {
   const [sort, setSort] = useState({ key: "fatturare_a", dir: "asc" });
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const fileInputRef = useRef(null);
+  const [visibleCols, setVisibleCols] = useState(() => Object.fromEntries(COLONNE_OPZIONALI.map((c) => [c.key, true])));
+  const [colonnePanelOpen, setColonnePanelOpen] = useState(false);
+
+  useEffect(() => {
+    setVisibleCols(caricaColonneVisibili());
+  }, []);
+
+  function toggleColonna(key) {
+    setVisibleCols((v) => {
+      const next = { ...v, [key]: !v[key] };
+      try {
+        window.localStorage.setItem(COLONNE_STORAGE_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -308,6 +358,8 @@ export default function PazientiPage() {
   function exportAnagrafica() {
     const rows = patients.map((p) => ({
       "Nome calendario": p.nome_calendario,
+      Nome: p.nome || "",
+      Cognome: p.cognome || "",
       "Fatturare a": p.fatturare_a,
       "Codice fiscale": p.codice_fiscale,
       Tipologia: TIPOLOGIA_LABEL[p.tipologia] || p.tipologia,
@@ -337,13 +389,11 @@ export default function PazientiPage() {
         updated = 0;
       for (const row of rows) {
         const nomeCal = String(row["Nome calendario"] || "").trim();
+        const nomeCol = String(row["Nome"] || "").trim();
+        const cognomeCol = String(row["Cognome"] || "").trim();
         let fatturareA = String(row["Fatturare a"] || "").trim();
         // Formato grezzo di export Psicogest: colonne separate "Nome" e "Cognome" invece di "Fatturare a"
-        if (!fatturareA) {
-          const nome = String(row["Nome"] || "").trim();
-          const cognome = String(row["Cognome"] || "").trim();
-          if (nome && cognome) fatturareA = `${cognome} ${nome}`;
-        }
+        if (!fatturareA && nomeCol && cognomeCol) fatturareA = `${cognomeCol} ${nomeCol}`;
         if (!nomeCal && !fatturareA) continue;
         const key = normalizeName(fatturareA || nomeCal);
         const cf = String(row["Codice fiscale"] || row["Codice Fiscale"] || "").trim().toUpperCase();
@@ -359,6 +409,8 @@ export default function PazientiPage() {
         if (existing) {
           const patch = {
             nome_calendario: nomeCal || existing.nome_calendario,
+            nome: nomeCol || existing.nome,
+            cognome: cognomeCol || existing.cognome,
             fatturare_a: fatturareA,
             tipologia,
             regime_tariffario: regime,
@@ -373,6 +425,8 @@ export default function PazientiPage() {
           await supabase.from("patients").insert({
             user_id: userData.user.id,
             nome_calendario: nomeCal,
+            nome: nomeCol,
+            cognome: cognomeCol,
             fatturare_a: fatturareA,
             tipologia,
             regime_tariffario: regime,
@@ -403,7 +457,7 @@ export default function PazientiPage() {
   return (
     <div className="app-root">
       <Sidebar readyCount={0} />
-      <main className="main">
+      <main className="main pazienti-main">
         <header className="view-header">
           <div>
             <h1>Pazienti</h1>
@@ -431,31 +485,51 @@ export default function PazientiPage() {
           </div>
         </header>
 
-        <input className="search" placeholder="Cerca per nome…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#55645D", marginBottom: 14, marginLeft: 16 }}>
-          <input type="checkbox" checked={onlyIncomplete} onChange={(e) => setOnlyIncomplete(e.target.checked)} />
-          Mostra solo da completare (manca nome calendario o CF)
-        </label>
+        <div className="pazienti-toolbar">
+          <input className="search" placeholder="Cerca per nome…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#55645D" }}>
+            <input type="checkbox" checked={onlyIncomplete} onChange={(e) => setOnlyIncomplete(e.target.checked)} />
+            Mostra solo da completare (manca nome calendario o CF)
+          </label>
+          <div className="colonne-picker">
+            <button className="btn btn-ghost" onClick={() => setColonnePanelOpen((v) => !v)}>Colonne ▾</button>
+            {colonnePanelOpen && (
+              <>
+                <div className="colonne-panel-backdrop" onClick={() => setColonnePanelOpen(false)} />
+                <div className="colonne-panel">
+                  {COLONNE_OPZIONALI.map((c) => (
+                    <label key={c.key}>
+                      <input type="checkbox" checked={visibleCols[c.key] !== false} onChange={() => toggleColonna(c.key)} />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
         <div className="table-scroll">
           <table className="tbl editable">
             <thead>
               <tr>
                 <SortableTh label="Nome in calendario" sortKey="nome_calendario" sort={sort} setSort={setSort} />
-                <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />
-                <th>Codice fiscale</th>
-                <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />
-                <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />
-                <SortableTh label="Tariffa €" sortKey="costo_unitario" sort={sort} setSort={setSort} />
-                <SortableTh label="Soglia" sortKey="soglia_fatturazione" sort={sort} setSort={setSort} />
-                <th>Giorni inattività</th>
-                <SortableTh label="Ancora: data" sortKey="ancora_data" sort={sort} setSort={setSort} />
-                <th>Ancora: valore</th>
-                <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />
-                <th title="Paziente senza slot fisso nel piano generale: prenota di volta in volta uno slot libero">Fuori schema</th>
-                <th>Pagamento</th>
-                <th title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">Contante/seduta €</th>
-                <SortableTh label="Contanti dovuti" sortKey="contante_dovuto" sort={sort} setSort={setSort} />
+                {visibleCols.nome && <th>Nome</th>}
+                {visibleCols.cognome && <th>Cognome</th>}
+                {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
+                {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
+                {visibleCols.tipologia && <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />}
+                {visibleCols.regime_tariffario && <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />}
+                {visibleCols.costo_unitario && <SortableTh label="Tariffa €" sortKey="costo_unitario" sort={sort} setSort={setSort} />}
+                {visibleCols.soglia_fatturazione && <SortableTh label="Soglia" sortKey="soglia_fatturazione" sort={sort} setSort={setSort} />}
+                {visibleCols.giorni_stale_override && <th>Giorni inattività</th>}
+                {visibleCols.ancora_data && <SortableTh label="Ancora: data" sortKey="ancora_data" sort={sort} setSort={setSort} />}
+                {visibleCols.ancora_valore && <th>Ancora: valore</th>}
+                {visibleCols.stato && <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />}
+                {visibleCols.fuori_schema && <th title="Paziente senza slot fisso nel piano generale: prenota di volta in volta uno slot libero">Fuori schema</th>}
+                {visibleCols.modalita_pagamento && <th>Pagamento</th>}
+                {visibleCols.quota_contante_seduta && <th title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">Contante/seduta €</th>}
+                {visibleCols.contante_dovuto && <SortableTh label="Contanti dovuti" sortKey="contante_dovuto" sort={sort} setSort={setSort} />}
                 <th></th>
               </tr>
             </thead>
@@ -465,7 +539,16 @@ export default function PazientiPage() {
                   <td>
                     <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateLocal(p.id, "nome_calendario", e.target.value)} onBlur={(e) => persistField(p.id, "nome_calendario", e.target.value)} />
                   </td>
-                  <td><input value={p.fatturare_a || ""} onChange={(e) => updateLocal(p.id, "fatturare_a", e.target.value)} onBlur={(e) => persistField(p.id, "fatturare_a", e.target.value)} /></td>
+                  {visibleCols.nome && (
+                    <td><input value={p.nome || ""} onChange={(e) => updateLocal(p.id, "nome", e.target.value)} onBlur={(e) => persistField(p.id, "nome", e.target.value)} /></td>
+                  )}
+                  {visibleCols.cognome && (
+                    <td><input value={p.cognome || ""} onChange={(e) => updateLocal(p.id, "cognome", e.target.value)} onBlur={(e) => persistField(p.id, "cognome", e.target.value)} /></td>
+                  )}
+                  {visibleCols.fatturare_a && (
+                    <td><input value={p.fatturare_a || ""} onChange={(e) => updateLocal(p.id, "fatturare_a", e.target.value)} onBlur={(e) => persistField(p.id, "fatturare_a", e.target.value)} /></td>
+                  )}
+                  {visibleCols.codice_fiscale && (
                   <td>
                     <input
                       className={!p.codice_fiscale ? "input-missing" : ""}
@@ -475,28 +558,46 @@ export default function PazientiPage() {
                       onBlur={(e) => persistField(p.id, "codice_fiscale", e.target.value.toUpperCase())}
                     />
                   </td>
+                  )}
+                  {visibleCols.tipologia && (
                   <td>
                     <select value={p.tipologia} onChange={(e) => updateTipologiaORegime(p.id, "tipologia", e.target.value)}>
                       {TIPOLOGIE.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
                   </td>
+                  )}
+                  {visibleCols.regime_tariffario && (
                   <td>
                     <select value={p.regime_tariffario || "regolare"} onChange={(e) => updateTipologiaORegime(p.id, "regime_tariffario", e.target.value)}>
                       <option value="regolare">Regolare</option>
                       <option value="agevolata">Agevolata</option>
                     </select>
                   </td>
+                  )}
+                  {visibleCols.costo_unitario && (
                   <td><input type="number" step="0.01" className="num" value={p.costo_unitario} onChange={(e) => updateLocal(p.id, "costo_unitario", e.target.value)} onBlur={(e) => persistField(p.id, "costo_unitario", parseFloat(e.target.value) || 0)} /></td>
+                  )}
+                  {visibleCols.soglia_fatturazione && (
                   <td><input type="number" className="num" value={p.soglia_fatturazione} onChange={(e) => updateLocal(p.id, "soglia_fatturazione", e.target.value)} onBlur={(e) => persistField(p.id, "soglia_fatturazione", parseInt(e.target.value) || 5)} /></td>
+                  )}
+                  {visibleCols.giorni_stale_override && (
                   <td><input type="number" className="num" placeholder="def." value={p.giorni_stale_override || ""} onChange={(e) => updateLocal(p.id, "giorni_stale_override", e.target.value)} onBlur={(e) => persistField(p.id, "giorni_stale_override", parseInt(e.target.value) || null)} /></td>
+                  )}
+                  {visibleCols.ancora_data && (
                   <td><input type="date" value={p.ancora_data || ""} onChange={(e) => updateField(p.id, "ancora_data", e.target.value)} /></td>
+                  )}
+                  {visibleCols.ancora_valore && (
                   <td><input type="number" className="num" value={p.ancora_valore} onChange={(e) => updateLocal(p.id, "ancora_valore", e.target.value)} onBlur={(e) => persistField(p.id, "ancora_valore", parseInt(e.target.value) || 0)} /></td>
+                  )}
+                  {visibleCols.stato && (
                   <td>
                     <select value={p.stato} onChange={(e) => updateField(p.id, "stato", e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura">
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
                     </select>
                   </td>
+                  )}
+                  {visibleCols.fuori_schema && (
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
@@ -504,11 +605,15 @@ export default function PazientiPage() {
                       onChange={(e) => updateField(p.id, "fuori_schema", e.target.checked)}
                     />
                   </td>
+                  )}
+                  {visibleCols.modalita_pagamento && (
                   <td>
                     <select value={p.modalita_pagamento} onChange={(e) => updateField(p.id, "modalita_pagamento", e.target.value)}>
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>
                     </select>
                   </td>
+                  )}
+                  {visibleCols.quota_contante_seduta && (
                   <td>
                     <input
                       type="number" step="0.01" className="num"
@@ -517,6 +622,8 @@ export default function PazientiPage() {
                       onBlur={(e) => persistField(p.id, "quota_contante_seduta", parseFloat(e.target.value) || 0)}
                     />
                   </td>
+                  )}
+                  {visibleCols.contante_dovuto && (
                   <td>
                     {p.contante_dovuto > 0 ? (
                       <button className="btn-small" onClick={() => apriContantiModal(p)}>€ {p.contante_dovuto}</button>
@@ -524,6 +631,7 @@ export default function PazientiPage() {
                       <span className="muted mono">—</span>
                     )}
                   </td>
+                  )}
                   <td>
                     <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
                     <button className="btn-icon" title="Storico fatture di questo paziente" onClick={() => apriStorico(p)}>§</button>

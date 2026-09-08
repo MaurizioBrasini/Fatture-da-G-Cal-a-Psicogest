@@ -62,6 +62,9 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
           // Usato come proxy di "quando è stata scritta la nota di disdetta"
           // per calcolare il preavviso rispetto alla data della seduta.
           updated: ev.updated || null,
+          // null/assente = colore di default (confermato); "6" = Tangerine/
+          // mandarino (da confermare) — vedi updateGoogleCalendarEventColor.
+          colorId: ev.colorId || null,
         };
       }).filter((e) => e.data)
     );
@@ -91,6 +94,29 @@ export async function updateGoogleCalendarEventDescription(refreshToken, eventId
   if (!res.ok) {
     const text = await res.text();
     throw new Error("Scrittura sull'evento del calendario fallita: " + text);
+  }
+  return res.json();
+}
+
+// Aggiorna solo il titolo (summary) di un evento esistente — es. per
+// correggere la grafia del nome paziente (TUTTO MAIUSCOLO -> Prima
+// maiuscola) su eventi già creati con la grafia sbagliata. Non tocca
+// nessun altro campo dell'evento.
+export async function updateGoogleCalendarEventTitle(refreshToken, eventId, newTitle) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ summary: newTitle }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Scrittura del titolo sull'evento del calendario fallita: " + text);
   }
   return res.json();
 }

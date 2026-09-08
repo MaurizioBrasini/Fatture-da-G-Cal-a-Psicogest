@@ -14,6 +14,7 @@ import {
   daysBetween,
   addDays,
   accumulaContante,
+  matchPatientForEvent,
 } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 
@@ -136,6 +137,33 @@ export default function DashboardPage() {
       setSyncError(e.message);
     } finally {
       setSyncing(false);
+    }
+  }
+
+  // Trova l'evento reale (id + colorId) della prossima seduta pianificata di
+  // un paziente, per il bottone confermato/da confermare — stessa logica di
+  // abbinamento già usata da computePatientState, ma serve l'oggetto evento
+  // intero (non solo la data) per poterlo modificare su Google Calendar.
+  function prossimoEvento(patient, prossimaData) {
+    if (!prossimaData) return null;
+    return events.find((e) => e.data === prossimaData && matchPatientForEvent(e.titolo, [patient])) || null;
+  }
+
+  async function toggleConferma(eventId, eraConfermato) {
+    const nuovoConfermato = !eraConfermato;
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, colorId: nuovoConfermato ? null : "6" } : e)));
+    try {
+      const res = await fetch("/api/calendar/toggle-conferma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, confermato: nuovoConfermato }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Errore sconosciuto");
+    } catch (e) {
+      // rollback ottimistico se la scrittura su Google Calendar fallisce
+      setEvents((prev) => prev.map((ev) => (ev.id === eventId ? { ...ev, colorId: eraConfermato ? null : "6" } : ev)));
+      alert("Errore nel cambiare lo stato dell'appuntamento: " + e.message);
     }
   }
 
@@ -571,13 +599,36 @@ export default function DashboardPage() {
               <tbody>
                 {sortPatients(groups.in_corso, computed, sortInCorso).map((p) => {
                   const c = computed[p.id];
+                  const evProssimo = prossimoEvento(p, c.prossimaData);
+                  const confermato = !!evProssimo && !evProssimo.colorId;
                   return (
                     <tr key={p.id}>
                       <td className="name">{p.fatturare_a || p.nome_calendario}</td>
                       <td className="mono">{p.tipologia}</td>
                       <td className="mono">{c.count} / {c.soglia}</td>
                       <td className="mono">{c.ultimaData || "—"}</td>
-                      <td className="mono">{c.prossimaData || "—"}</td>
+                      <td className="mono">
+                        {c.prossimaData || "—"}
+                        {evProssimo && (
+                          <button
+                            type="button"
+                            onClick={() => toggleConferma(evProssimo.id, confermato)}
+                            title={confermato ? "Confermato — clicca per segnare da confermare" : "Da confermare — clicca per confermare"}
+                            style={{
+                              marginLeft: 8,
+                              border: "none",
+                              borderRadius: 4,
+                              padding: "2px 6px",
+                              fontSize: 11,
+                              cursor: "pointer",
+                              color: "#fff",
+                              background: confermato ? "#4285f4" : "#e67c00",
+                            }}
+                          >
+                            {confermato ? "confermato" : "da confermare"}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
