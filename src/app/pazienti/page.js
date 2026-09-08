@@ -23,6 +23,7 @@ const COLONNE_OPZIONALI = [
   { key: "nome", label: "Nome" },
   { key: "cognome", label: "Cognome" },
   { key: "fatturare_a", label: "Fatturare a" },
+  { key: "frequenza", label: "Frequenza" },
   { key: "codice_fiscale", label: "Codice fiscale" },
   { key: "tipologia", label: "Tipologia" },
   { key: "regime_tariffario", label: "Regime" },
@@ -108,14 +109,18 @@ export default function PazientiPage() {
     });
   }
 
+  const [slotsByPatientId, setSlotsByPatientId] = useState({});
+
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data }, { data: s }] = await Promise.all([
+    const [{ data }, { data: s }, { data: slots }] = await Promise.all([
       supabase.from("patients").select("*").order("id"),
       supabase.from("settings").select("*").maybeSingle(),
+      supabase.from("patient_slots").select("*").eq("active", true),
     ]);
     setPatients(data || []);
     if (s) setSettings(s);
+    setSlotsByPatientId(Object.fromEntries((slots || []).map((sl) => [sl.patient_id, sl])));
     setLoading(false);
   }, [supabase]);
 
@@ -389,6 +394,77 @@ export default function PazientiPage() {
     setGenOccProgress(null);
   }
 
+  // --- Cambio frequenza (patient_slots.interval_days) ---
+  const [freqModal, setFreqModal] = useState(null);
+  // { step:'loading'|'preview'|'writing'|'done'|'error', patientId, nome, nuovoIntervalDays,
+  //   intervalDaysAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
+
+  const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Ogni 4 settimane" };
+
+  async function apriCambiaFrequenza(patient, nuovoIntervalDays) {
+    setFreqModal({ step: "loading", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, nuovoIntervalDays });
+    try {
+      const res = await fetch("/api/calendar/cambia-frequenza-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId: patient.id, intervalDays: nuovoIntervalDays }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore nel calcolo dell'anteprima." }));
+        return;
+      }
+      setFreqModal((m) => ({
+        ...m,
+        step: "preview",
+        intervalDaysAttuale: data.intervalDaysAttuale,
+        daRimuovere: data.daRimuovere,
+        invariati: data.invariati,
+        eventiEsclusi: new Set(), // eventi che l'utente sceglie di NON cancellare, pur fuori dal nuovo ritmo
+      }));
+    } catch (e) {
+      setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
+    }
+  }
+
+  function toggleFreqEsclusione(eventId) {
+    setFreqModal((m) => {
+      const next = new Set(m.eventiEsclusi);
+      if (next.has(eventId)) next.delete(eventId);
+      else next.add(eventId);
+      return { ...m, eventiEsclusi: next };
+    });
+  }
+
+  async function confermaCambiaFrequenza() {
+    const { patientId, nuovoIntervalDays, daRimuovere, eventiEsclusi } = freqModal;
+    setFreqModal((m) => ({ ...m, step: "writing" }));
+    try {
+      const res = await fetch("/api/calendar/cambia-frequenza-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId,
+          intervalDays: nuovoIntervalDays,
+          eventIdsDaRimuovere: daRimuovere.filter((e) => !eventiEsclusi.has(e.eventId)).map((e) => e.eventId),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore durante la scrittura." }));
+        return;
+      }
+      setSlotsByPatientId((s) => ({ ...s, [patientId]: { ...s[patientId], interval_days: nuovoIntervalDays } }));
+      setFreqModal((m) => ({ ...m, step: "done", result: data }));
+    } catch (e) {
+      setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
+    }
+  }
+
+  function chiudiFreqModal() {
+    setFreqModal(null);
+  }
+
   // Le quattro funzioni sotto erano prima ciascuna la propria copia di
   // "aggiorna lo stato locale" / "salva su Supabase" — ora condividono le
   // stesse due funzioni di base (patchLocal / persistPatch) e si limitano a
@@ -633,6 +709,7 @@ export default function PazientiPage() {
                 {visibleCols.nome && <th>Nome</th>}
                 {visibleCols.cognome && <th>Cognome</th>}
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
+                {visibleCols.frequenza && <th title="Cadenza dello slot fisso — vuoto per i pazienti fuori schema, senza slot fisso">Frequenza</th>}
                 {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
                 {visibleCols.tipologia && <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />}
                 {visibleCols.regime_tariffario && <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />}
@@ -663,6 +740,22 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.fatturare_a && (
                     <td><input value={p.fatturare_a || ""} onChange={(e) => updateLocal(p.id, "fatturare_a", e.target.value)} onBlur={(e) => persistField(p.id, "fatturare_a", e.target.value)} /></td>
+                  )}
+                  {visibleCols.frequenza && (
+                    <td>
+                      {slotsByPatientId[p.id] ? (
+                        <select
+                          value={slotsByPatientId[p.id].interval_days}
+                          onChange={(e) => apriCambiaFrequenza(p, parseInt(e.target.value, 10))}
+                        >
+                          <option value={7}>Settimanale</option>
+                          <option value={14}>Quindicinale</option>
+                          <option value={28}>Ogni 4 settimane</option>
+                        </select>
+                      ) : (
+                        <span className="muted mono">—</span>
+                      )}
+                    </td>
                   )}
                   {visibleCols.codice_fiscale && (
                   <td>
@@ -955,6 +1048,80 @@ export default function PazientiPage() {
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiGeneraOccorrenze}>Chiudi</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {freqModal && (
+        <Modal maxWidth={640}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
+            Cambio frequenza — {freqModal.nome}
+          </h2>
+
+          {freqModal.step === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
+
+          {freqModal.step === "error" && (
+            <>
+              <p style={{ color: "crimson" }}>{freqModal.error}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Chiudi</button>
+              </div>
+            </>
+          )}
+
+          {freqModal.step === "preview" && (
+            <>
+              <p className="muted small">
+                Da <strong>{FREQ_LABEL[freqModal.intervalDaysAttuale] || freqModal.intervalDaysAttuale + " gg"}</strong> a{" "}
+                <strong>{FREQ_LABEL[freqModal.nuovoIntervalDays]}</strong>.
+              </p>
+
+              {freqModal.daRimuovere.length === 0 ? (
+                <p className="muted">Nessun appuntamento già sul calendario è fuori dal nuovo ritmo — verrà solo aggiornata la cadenza per le prossime occorrenze.</p>
+              ) : (
+                <>
+                  <p className="muted small">
+                    Questi appuntamenti già sul calendario non rientrano più nel nuovo ritmo e verranno <strong>cancellati</strong> — togli la spunta a quelli che vuoi tenere comunque:
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+                    {freqModal.daRimuovere.map((e) => {
+                      const esclusa = freqModal.eventiEsclusi.has(e.eventId);
+                      return (
+                        <label key={e.eventId} className="small" style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: esclusa ? 0.5 : 1 }}>
+                          <input type="checkbox" checked={!esclusa} onChange={() => toggleFreqEsclusione(e.eventId)} />
+                          {e.data} {e.ora} {e.descrizione ? `— "${e.descrizione}"` : ""}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {freqModal.invariati.length > 0 && (
+                <p className="muted small">
+                  Restano invariati: {freqModal.invariati.join(", ")}.
+                </p>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Annulla</button>
+                <button className="btn btn-primary" onClick={confermaCambiaFrequenza}>Conferma</button>
+              </div>
+            </>
+          )}
+
+          {freqModal.step === "writing" && <p>Applico la nuova cadenza…</p>}
+
+          {freqModal.step === "done" && freqModal.result && (
+            <>
+              <p>
+                Fatto: cadenza aggiornata, {freqModal.result.cancellati} appuntamenti fuori ritmo cancellati,{" "}
+                {freqModal.result.noteAggiornate} note ricalcolate.
+              </p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-primary" onClick={() => { chiudiFreqModal(); load(); }}>Chiudi</button>
               </div>
             </>
           )}
