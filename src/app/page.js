@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
@@ -17,6 +18,7 @@ import {
   matchPatientForEvent,
 } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
+import { leggiRoutine, segnaRoutine } from "@/lib/routineChecklist";
 
 function sortPatients(list, computed, sort) {
   const arr = [...list];
@@ -62,6 +64,15 @@ export default function DashboardPage() {
   const [fromHour, setFromHour] = useState("");
   const [toHour, setToHour] = useState("");
   const [cancellazioni, setCancellazioni] = useState([]);
+
+  // --- Routine di fine giornata (checklist persistita per oggi) ---
+  const [routine, setRoutine] = useState(() => leggiRoutine(todayISO()));
+  useEffect(() => {
+    setRoutine(leggiRoutine(todayISO()));
+  }, []);
+  function segna(step, valore = true) {
+    setRoutine(segnaRoutine(todayISO(), step, valore));
+  }
 
   // --- Modale numero fattura (sostituisce window.prompt) ---
   const [numeroModal, setNumeroModal] = useState(null); // null | { patientIds, value }
@@ -133,6 +144,7 @@ export default function DashboardPage() {
         events: filtered,
         fetched_at: fetchedAt,
       });
+      segna("sync");
     } catch (e) {
       setSyncError(e.message);
     } finally {
@@ -357,6 +369,9 @@ export default function DashboardPage() {
       }
       setAggCandidati(data.candidati || []);
       setAggStep("preview");
+      // Se non c'è nulla da registrare, il passaggio è comunque "fatto":
+      // l'utente ha controllato, non c'era nessuna disdetta da gestire oggi.
+      if (!data.candidati?.length) segna("disdette");
     } catch (e) {
       setAggErrore(e.message);
       setAggStep("error");
@@ -381,6 +396,7 @@ export default function DashboardPage() {
       }
       setAggRisultato(data);
       setAggStep("done");
+      segna("disdette");
       load();
     } catch (e) {
       setAggErrore(e.message);
@@ -406,6 +422,44 @@ export default function DashboardPage() {
     <div className="app-root">
       <Sidebar readyCount={groups.pronto.length} />
       <main className="main">
+        <div className="section" style={{ padding: "14px 18px", marginBottom: 18 }}>
+          <h2 style={{ fontFamily: "Georgia, serif", fontSize: 15.5, fontWeight: 500, margin: "0 0 12px" }}>
+            Routine di fine giornata
+          </h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
+              <span className="small" style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}>
+                1. Aggiorna dal calendario
+              </span>
+              <button className="btn-small" onClick={handleSync} disabled={syncing}>
+                {syncing ? "Lettura…" : "Fai ora"}
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
+              <span className="small" style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}>
+                2. Registra disdette
+              </span>
+              <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
+              <span className="small" style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}>
+                3. Rinumera tutti (pagina Pazienti)
+              </span>
+              <Link href="/pazienti" className="btn-small" style={{ textDecoration: "none", display: "inline-block" }}>
+                Vai a Pazienti
+              </Link>
+            </div>
+          </div>
+          {groups.pronto.length > 0 && (
+            <p className="muted small" style={{ marginTop: 12, marginBottom: 0 }}>
+              + {groups.pronto.length} {groups.pronto.length === 1 ? "paziente pronto" : "pazienti pronti"} per la fattura qui sotto.
+            </p>
+          )}
+        </div>
+
         {pendingBatch && (
           <div className="pending-banner">
             <div>

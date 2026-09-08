@@ -7,6 +7,7 @@ import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
 import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
+import { segnaRoutine } from "@/lib/routineChecklist";
 
 const TIPOLOGIE = [
   { value: "individuale", label: "Individuale" },
@@ -264,6 +265,10 @@ export default function PazientiPage() {
       }
       setRenumWriteResult({ ok: falliti === 0, scritti, falliti, dettagli });
       setRenumStep("done");
+      // Segna il passaggio 3 della routine di fine giornata (Dashboard) solo
+      // per "Rinumera tutti" (renumTarget nullo) — un rilancio su un singolo
+      // paziente non conta come "fatto il giro di oggi".
+      if (renumTarget === null) segnaRoutine(todayISO(), "rinumera");
     } catch (e) {
       setRenumError(e.message);
       setRenumStep("error");
