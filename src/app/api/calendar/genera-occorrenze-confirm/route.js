@@ -17,9 +17,19 @@ export async function POST(request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
-  const { eventi } = await request.json().catch(() => ({}));
-  if (!Array.isArray(eventi) || !eventi.length) {
-    return NextResponse.json({ error: "Nessun evento da creare." }, { status: 400 });
+  const { eventi, esclusioni } = await request.json().catch(() => ({}));
+  if ((!Array.isArray(eventi) || !eventi.length) && (!Array.isArray(esclusioni) || !esclusioni.length)) {
+    return NextResponse.json({ error: "Nessun evento da creare o escludere." }, { status: 400 });
+  }
+
+  // Le date deselezionate in anteprima vengono ricordate (upsert, non fallisce
+  // se già presenti da un giro precedente), così "Genera occorrenze future"
+  // non le riproporrà più ai prossimi giri.
+  if (Array.isArray(esclusioni) && esclusioni.length) {
+    await supabase.from("skipped_occurrences").upsert(
+      esclusioni.map((e) => ({ user_id: user.id, patient_id: e.patientId, data: e.data })),
+      { onConflict: "patient_id,data", ignoreDuplicates: true }
+    );
   }
 
   const [{ data: tokenRow, error: tokenError }, { data: patients }] = await Promise.all([
@@ -35,7 +45,7 @@ export async function POST(request) {
   const patientsById = Object.fromEntries((patients || []).map((p) => [p.id, p]));
 
   const risultati = [];
-  for (const ev of eventi) {
+  for (const ev of eventi || []) {
     const patient = patientsById[ev.patientId];
     try {
       if (!patient) throw new Error("Paziente non trovato");

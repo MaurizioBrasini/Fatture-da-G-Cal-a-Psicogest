@@ -332,22 +332,35 @@ export default function PazientiPage() {
         .filter((data) => !genOccEsclusi.has(`${p.patientId}|${data}`))
         .map((data) => ({ patientId: p.patientId, data, ora: p.ora, durataMinuti: p.durataMinuti }))
     );
+    // Le date deselezionate vengono ricordate lato server (skipped_occurrences),
+    // cosi' i prossimi giri non le riproporranno piu'.
+    const esclusioni = (genOccData || []).flatMap((p) =>
+      p.date
+        .filter((data) => genOccEsclusi.has(`${p.patientId}|${data}`))
+        .map((data) => ({ patientId: p.patientId, data }))
+    );
 
     const blocchi = [];
     for (let i = 0; i < eventi.length; i += GENOCC_CHUNK_SIZE) {
       blocchi.push(eventi.slice(i, i + GENOCC_CHUNK_SIZE));
     }
+    // Se non c'e' nulla da creare (tutto escluso) serve comunque un giro per
+    // salvare le esclusioni.
+    if (!blocchi.length && esclusioni.length) blocchi.push([]);
 
     setGenOccProgress({ fatti: 0, totale: eventi.length });
     let creati = 0;
     let falliti = 0;
     const dettagli = [];
     try {
-      for (const blocco of blocchi) {
+      for (let i = 0; i < blocchi.length; i++) {
         const res = await fetch("/api/calendar/genera-occorrenze-confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ eventi: blocco }),
+          // Le esclusioni si mandano solo nella prima chiamata: repeaterle
+          // in ogni blocco non farebbe danni (upsert idempotente) ma è
+          // inutile.
+          body: JSON.stringify({ eventi: blocchi[i], esclusioni: i === 0 ? esclusioni : [] }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -878,7 +891,7 @@ export default function PazientiPage() {
               ) : (
                 <>
                   <p className="muted small">
-                    Togli la spunta a una data se sai già che non va creata (es. una seduta che hai deciso di saltare/spostare).
+                    Togli la spunta a una data se sai già che non va creata (es. una seduta che hai deciso di saltare/spostare) — viene ricordato, non te la riproporrà più ai prossimi giri.
                   </p>
                   {genOccData.map((p) => (
                     <div key={p.patientId} style={{ marginBottom: 14 }}>

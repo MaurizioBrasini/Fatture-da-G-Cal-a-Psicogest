@@ -20,12 +20,14 @@ export async function POST(request) {
   const body = await request.json().catch(() => ({}));
   const giorniAvanti = Number(body.giorniAvanti) || 45;
 
-  const [{ data: slots }, { data: patients }, { data: closures }, { data: tokenRow, error: tokenError }] = await Promise.all([
+  const [{ data: slots }, { data: patients }, { data: closures }, { data: skipped }, { data: tokenRow, error: tokenError }] = await Promise.all([
     supabase.from("patient_slots").select("*").eq("active", true),
     supabase.from("patients").select("*"),
     supabase.from("slot_closures").select("*"),
+    supabase.from("skipped_occurrences").select("patient_id, data"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
   ]);
+  const skippedSet = new Set((skipped || []).map((s) => `${s.patient_id}|${s.data}`));
 
   if (tokenError || !tokenRow) {
     return NextResponse.json(
@@ -54,7 +56,8 @@ export async function POST(request) {
       // è già stata gestita (svolta o disdetta), non un buco da riempire.
       const mancanti = date
         .filter((d) => d > oggi)
-        .filter((d) => !events.some((e) => e.data === d && matchPatientForEvent(e.titolo, [patient])));
+        .filter((d) => !events.some((e) => e.data === d && matchPatientForEvent(e.titolo, [patient])))
+        .filter((d) => !skippedSet.has(`${patient.id}|${d}`));
       if (!mancanti.length) continue;
 
       // Durata: prende quella dell'evento reale piu' recente di questo
