@@ -23,8 +23,8 @@ function sortPatients(list, computed, sort) {
   arr.sort((a, b) => {
     let va, vb;
     if (sort.key === "nome") {
-      va = (a.fatturare_a || a.nome_calendario || "").toUpperCase();
-      vb = (b.fatturare_a || b.nome_calendario || "").toUpperCase();
+      va = (a.nome_calendario || a.fatturare_a || "").toUpperCase();
+      vb = (b.nome_calendario || b.fatturare_a || "").toUpperCase();
     } else if (sort.key === "tipologia") {
       va = a.tipologia || "";
       vb = b.tipologia || "";
@@ -467,7 +467,7 @@ export default function DashboardPage() {
                             <input type="checkbox" checked={selected[p.id] !== false} onChange={() => toggleSelect(p.id)} />
                           </td>
                           <td>
-                            <div className="name">{p.fatturare_a || p.nome_calendario}</div>
+                            <div className="name">{p.nome_calendario || p.fatturare_a}</div>
                             {!p.codice_fiscale && <div className="tag tag-danger">manca CF</div>}
                           </td>
                           <td className="mono">{p.tipologia}</td>
@@ -521,7 +521,7 @@ export default function DashboardPage() {
                     const c = computed[p.id];
                     return (
                       <tr key={p.id}>
-                        <td className="name">{p.fatturare_a || p.nome_calendario}</td>
+                        <td className="name">{p.nome_calendario || p.fatturare_a}</td>
                         <td className="mono">{c.count} / {c.soglia}</td>
                         <td className="mono">{c.ultimaData}</td>
                         <td className="mono">{daysBetween(c.ultimaData, todayISO())}</td>
@@ -564,7 +564,7 @@ export default function DashboardPage() {
                     const c = computed[p.id];
                     return (
                       <tr key={p.id}>
-                        <td className="name">{p.fatturare_a || p.nome_calendario}</td>
+                        <td className="name">{p.nome_calendario || p.fatturare_a}</td>
                         <td className="mono">{c.count}</td>
                         <td className="mono">{c.ultimaData}</td>
                         <td>
@@ -603,7 +603,7 @@ export default function DashboardPage() {
                   const confermato = !!evProssimo && !evProssimo.colorId;
                   return (
                     <tr key={p.id}>
-                      <td className="name">{p.fatturare_a || p.nome_calendario}</td>
+                      <td className="name">{p.nome_calendario || p.fatturare_a}</td>
                       <td className="mono">{p.tipologia}</td>
                       <td className="mono">{c.count} / {c.soglia}</td>
                       <td className="mono">{c.ultimaData || "—"}</td>

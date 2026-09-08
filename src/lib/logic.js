@@ -144,7 +144,7 @@ export function computeAggiornamentoPreview(events, patients, cancellazioniEsist
     risultati.push({
       eventId: e.id,
       patientId: patient.id,
-      nome: patient.fatturare_a || patient.nome_calendario,
+      nome: patient.nome_calendario || patient.fatturare_a,
       data: e.data,
       ora: e.ora,
       cancelledAt,

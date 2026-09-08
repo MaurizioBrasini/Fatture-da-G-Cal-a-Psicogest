@@ -69,7 +69,7 @@ function sortRows(list, sort) {
   // A parità di valore sulla chiave scelta, ordina in secondo luogo per
   // nome (alfabetico) — utile soprattutto per "Regime", dove i pazienti si
   // dividono solo in due gruppi.
-  const nomeOrdinamento = (p) => (p.fatturare_a || p.nome_calendario || "").toUpperCase();
+  const nomeOrdinamento = (p) => (p.nome_calendario || p.fatturare_a || "").toUpperCase();
   arr.sort((a, b) => {
     const va = getVal(a), vb = getVal(b);
     if (va < vb) return sort.dir === "asc" ? -1 : 1;
@@ -148,7 +148,7 @@ export default function PazientiPage() {
 
   async function apriStorico(patient) {
     setStoricoLoading(true);
-    const nome = patient.fatturare_a || patient.nome_calendario;
+    const nome = patient.nome_calendario || patient.fatturare_a;
     setStoricoPaziente({ nome, fatture: [], contanti: [] });
     const [{ data: fatture }, { data: contanti }] = await Promise.all([
       supabase.from("invoice_history").select("*").eq("patient_id", patient.id).order("data", { ascending: false }),
@@ -164,7 +164,7 @@ export default function PazientiPage() {
   function apriContantiModal(patient) {
     setContantiModal({
       patientId: patient.id,
-      nome: patient.fatturare_a || patient.nome_calendario,
+      nome: patient.nome_calendario || patient.fatturare_a,
       dovuto: patient.contante_dovuto,
       value: String(patient.contante_dovuto),
     });
@@ -635,7 +635,7 @@ export default function PazientiPage() {
                   <td>
                     <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
                     <button className="btn-icon" title="Storico fatture di questo paziente" onClick={() => apriStorico(p)}>§</button>
-                    <button className="btn-icon" onClick={() => removePatient(p.id, p.fatturare_a || p.nome_calendario)}>×</button>
+                    <button className="btn-icon" onClick={() => removePatient(p.id, p.nome_calendario || p.fatturare_a)}>×</button>
                   </td>
                 </tr>
               ))}
@@ -755,14 +755,14 @@ export default function PazientiPage() {
               ) : (
                 <table className="tbl">
                   <thead>
-                    <tr><th>Data</th><th>Sedute</th><th>Onorario</th><th>Note</th></tr>
+                    <tr><th>Data</th><th>Sedute</th><th>Importo</th><th>Note</th></tr>
                   </thead>
                   <tbody>
                     {storicoPaziente.fatture.map((h) => (
                       <tr key={h.id}>
                         <td className="mono">{h.data}</td>
                         <td className="mono">{h.totale_sedute}</td>
-                        <td className="mono">€ {h.onorario}</td>
+                        <td className="mono">€ {Math.round(h.onorario * 1.02 * 100) / 100}</td>
                         <td>{h.note}</td>
                       </tr>
                     ))}
