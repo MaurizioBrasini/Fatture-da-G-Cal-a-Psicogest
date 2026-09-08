@@ -121,7 +121,7 @@ export async function deleteGoogleCalendarEvent(refreshToken, eventId) {
 // crea un evento per ciascuna occorrenza calcolata da patient_slots, invece
 // di affidarsi a una RRULE nativa — vedi "Perché non usare RRULE native" in
 // istruzioni-claude-code-appuntamenti.md). data: "YYYY-MM-DD", ora: "HH:MM".
-export async function createGoogleCalendarEvent(refreshToken, { data, ora, durataMinuti, titolo, descrizione }) {
+export async function createGoogleCalendarEvent(refreshToken, { data, ora, durataMinuti, titolo, descrizione, colorId }) {
   const accessToken = await getAccessToken(refreshToken);
 
   const inizio = `${data}T${ora}:00`;
@@ -129,22 +129,51 @@ export async function createGoogleCalendarEvent(refreshToken, { data, ora, durat
   const fineMinuti = h * 60 + m + durataMinuti;
   const fine = `${data}T${String(Math.floor(fineMinuti / 60) % 24).padStart(2, "0")}:${String(fineMinuti % 60).padStart(2, "0")}:00`;
 
+  const body = {
+    summary: titolo,
+    description: descrizione || "",
+    start: { dateTime: inizio, timeZone: "Europe/Rome" },
+    end: { dateTime: fine, timeZone: "Europe/Rome" },
+  };
+  // colorId omesso = colore di default dell'evento (confermato); valorizzato
+  // (es. "6" Tangerine/mandarino) per segnalare "da confermare".
+  if (colorId) body.colorId = colorId;
+
   const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      summary: titolo,
-      description: descrizione || "",
-      start: { dateTime: inizio, timeZone: "Europe/Rome" },
-      end: { dateTime: fine, timeZone: "Europe/Rome" },
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text();
     throw new Error("Creazione dell'evento sul calendario fallita: " + text);
+  }
+  return res.json();
+}
+
+// Cambia solo il colore di un evento esistente (bottone app confermato/da
+// confermare — sezione 6 del piano di ripopolamento calendario). colorId
+// null = torna al colore di default (confermato); "6" = Tangerine/mandarino
+// (da confermare). PATCH invece di update: non tocca nessun altro campo
+// dell'evento (titolo, descrizione, orario restano quelli che sono).
+export async function updateGoogleCalendarEventColor(refreshToken, eventId, colorId) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ colorId: colorId || null }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Scrittura del colore sull'evento del calendario fallita: " + text);
   }
   return res.json();
 }
