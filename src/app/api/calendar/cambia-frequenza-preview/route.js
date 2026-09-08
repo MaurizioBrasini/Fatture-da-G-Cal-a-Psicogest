@@ -57,8 +57,12 @@ export async function POST(request) {
 
     const nuoveDate = new Set(occorrenzeFuture({ ...slot, interval_days: nuovoIntervalDays }, closures || [], orizzonte, oggi));
 
+    // L'appuntamento di OGGI non si tocca mai per un cambio di cadenza: se
+    // è già in corso o appena successo, cancellarlo qui sarebbe un effetto
+    // collaterale del cambio frequenza, non una scelta esplicita di
+    // Maurizio (stessa regola già applicata in "Genera occorrenze future").
     const daRimuovere = eventiPaziente
-      .filter((e) => !nuoveDate.has(e.data))
+      .filter((e) => e.data !== oggi && !nuoveDate.has(e.data))
       .map((e) => ({ eventId: e.id, data: e.data, ora: e.ora, descrizione: e.descrizione }));
     const invariati = eventiPaziente.filter((e) => nuoveDate.has(e.data)).map((e) => e.data);
 
