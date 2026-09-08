@@ -1120,6 +1120,14 @@ export default function PazientiPage() {
                 Fatto: cadenza aggiornata, {freqModal.result.cancellati} appuntamenti fuori ritmo cancellati,{" "}
                 {freqModal.result.noteAggiornate} note ricalcolate.
               </p>
+              {(freqModal.result.cancellazioniFallite?.length > 0 || freqModal.result.noteFallite?.length > 0 || freqModal.result.rinumeraError) && (
+                <p style={{ color: "crimson" }}>
+                  Attenzione: {freqModal.result.cancellazioniFallite?.length || 0} cancellazioni e{" "}
+                  {freqModal.result.noteFallite?.length || 0} aggiornamenti nota non sono andati a buon fine
+                  {freqModal.result.rinumeraError ? ` (${freqModal.result.rinumeraError})` : ""} — riprova il
+                  cambio di cadenza per completarli.
+                </p>
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={() => { chiudiFreqModal(); load(); }}>Chiudi</button>
               </div>

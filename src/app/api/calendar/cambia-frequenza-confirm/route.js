@@ -37,41 +37,81 @@ export async function POST(request) {
   }
 
   try {
-    const { error: slotError } = await supabase
+    const { data: slotAggiornato, error: slotError } = await supabase
       .from("patient_slots")
       .update({ interval_days: nuovoIntervalDays })
       .eq("patient_id", patientId)
-      .eq("active", true);
+      .eq("active", true)
+      .select("id");
     if (slotError) throw new Error(slotError.message);
+    // .update().eq() non dà errore se nessuna riga corrisponde (es. lo slot
+    // è stato disattivato tra l'anteprima e la conferma) — senza questo
+    // controllo proseguiremmo a cancellare appuntamenti come se la cadenza
+    // fosse davvero cambiata, quando in realtà non è stato scritto nulla.
+    if (!slotAggiornato || slotAggiornato.length === 0) {
+      throw new Error("Nessuno slot fisso attivo trovato per questo paziente: la cadenza non è stata cambiata.");
+    }
 
+    // Cancellazioni e aggiornamenti nota proseguono elemento per elemento
+    // (stesso pattern resiliente di renumber-confirm/genera-occorrenze-confirm):
+    // un errore di rete o un rate-limit di Google su UN evento non deve
+    // bloccare gli altri né lasciare l'utente senza sapere cosa è stato
+    // applicato davvero.
     let cancellati = 0;
+    const cancellazioniFallite = [];
     for (const eventId of eventIdsDaRimuovere) {
-      await deleteGoogleCalendarEvent(tokenRow.refresh_token, eventId);
-      cancellati++;
+      try {
+        await deleteGoogleCalendarEvent(tokenRow.refresh_token, eventId);
+        cancellati++;
+      } catch (e) {
+        cancellazioniFallite.push({ eventId, error: e.message });
+      }
       await new Promise((r) => setTimeout(r, 150));
     }
 
     // Rilancia Rinumera sul paziente per aggiornare la numerazione dei
     // restanti (stessa logica di renumber-preview/confirm, qui in un solo
-    // giro dato che il paziente è uno solo).
-    const [{ data: patients }, { data: settingsRow }] = await Promise.all([
-      supabase.from("patients").select("*"),
-      supabase.from("settings").select("*").maybeSingle(),
-    ]);
-    const patient = (patients || []).find((p) => p.id === patientId);
-    const settings = { ...DEFAULT_SETTINGS, ...(settingsRow || {}) };
-    const oggi = todayISO();
-    const dataMinima = patient?.ancora_data && patient.ancora_data < oggi ? patient.ancora_data : oggi;
-    const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, addDays(oggi, 180));
-    const piano = patient ? computeRinumerazione(patient, events, settings, patients).filter((r) => r.cambia) : [];
+    // giro dato che il paziente è uno solo). Isolata nel proprio try: la
+    // cadenza è già stata cambiata e le cancellazioni sopra sono già
+    // definitive, quindi un errore qui (rete, fetch pazienti/eventi) deve
+    // comunque restituire cancellati/cancellazioniFallite invece di andare
+    // perso nel catch esterno, che altrimenti risponderebbe solo con un
+    // errore generico senza dire che le cancellazioni sono già avvenute.
     let noteAggiornate = 0;
-    for (const r of piano) {
-      await updateGoogleCalendarEventDescription(tokenRow.refresh_token, r.id, r.descrizioneNuova);
-      noteAggiornate++;
-      await new Promise((res) => setTimeout(res, 150));
+    let noteFallite = [];
+    let rinumeraError = null;
+    try {
+      const [{ data: patients }, { data: settingsRow }] = await Promise.all([
+        supabase.from("patients").select("*"),
+        supabase.from("settings").select("*").maybeSingle(),
+      ]);
+      const patient = (patients || []).find((p) => p.id === patientId);
+      const settings = { ...DEFAULT_SETTINGS, ...(settingsRow || {}) };
+      const oggi = todayISO();
+      const dataMinima = patient?.ancora_data && patient.ancora_data < oggi ? patient.ancora_data : oggi;
+      const events = patient ? await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, addDays(oggi, 180)) : [];
+      const piano = patient ? computeRinumerazione(patient, events, settings, patients).filter((r) => r.cambia) : [];
+      for (const r of piano) {
+        try {
+          await updateGoogleCalendarEventDescription(tokenRow.refresh_token, r.id, r.descrizioneNuova);
+          noteAggiornate++;
+        } catch (e) {
+          noteFallite.push({ eventId: r.id, error: e.message });
+        }
+        await new Promise((res) => setTimeout(res, 150));
+      }
+    } catch (e) {
+      rinumeraError = e.message;
     }
 
-    return NextResponse.json({ ok: true, cancellati, noteAggiornate });
+    return NextResponse.json({
+      ok: cancellazioniFallite.length === 0 && noteFallite.length === 0 && !rinumeraError,
+      cancellati,
+      noteAggiornate,
+      cancellazioniFallite,
+      noteFallite,
+      rinumeraError,
+    });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
