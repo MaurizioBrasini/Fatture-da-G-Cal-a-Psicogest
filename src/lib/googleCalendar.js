@@ -1,7 +1,7 @@
 // Usa il refresh token salvato per ottenere un access token fresco da Google,
 // poi legge gli eventi del calendario nel periodo richiesto.
 
-import { addDays } from "./logic";
+import { addDays } from "./logic.js";
 
 async function getAccessToken(refreshToken) {
   const res = await fetch("https://oauth2.googleapis.com/token", {

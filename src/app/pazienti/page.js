@@ -34,7 +34,6 @@ const COLONNE_OPZIONALI = [
   { key: "ancora_data", label: "Ancora: data" },
   { key: "ancora_valore", label: "Ancora: valore" },
   { key: "stato", label: "Stato" },
-  { key: "fuori_schema", label: "Fuori schema" },
   { key: "modalita_pagamento", label: "Pagamento" },
   { key: "quota_contante_seduta", label: "Contante/seduta €" },
   { key: "contante_dovuto", label: "Contanti dovuti" },
@@ -404,7 +403,7 @@ export default function PazientiPage() {
   // { step:'loading'|'preview'|'writing'|'done'|'error', patientId, nome, nuovoIntervalDays,
   //   intervalDaysAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
 
-  const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Ogni 4 settimane" };
+  const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Mensile" };
 
   async function apriCambiaFrequenza(patient, nuovoIntervalDays) {
     setFreqModal({ step: "loading", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, nuovoIntervalDays });
@@ -468,6 +467,63 @@ export default function PazientiPage() {
 
   function chiudiFreqModal() {
     setFreqModal(null);
+  }
+
+  // Passa un paziente con slot fisso a "su richiesta": disattiva lo slot
+  // (i dati restano, riattivabile in futuro scegliendo di nuovo una cadenza
+  // fissa) e marca fuori_schema — nessuna scrittura sul calendario, le
+  // sedute già generate restano dove sono.
+  async function passaSuRichiesta(patient) {
+    const nome = patient.nome_calendario || patient.fatturare_a;
+    if (!window.confirm(`Passare ${nome} a "su richiesta"? Lo slot fisso attuale verrà disattivato — le sedute già sul calendario non vengono toccate, solo non se ne generano più di nuove in automatico.`)) return;
+    await supabase.from("patient_slots").update({ active: false }).eq("patient_id", patient.id).eq("active", true);
+    await supabase.from("patients").update({ fuori_schema: true }).eq("id", patient.id);
+    setSlotsByPatientId((s) => {
+      const next = { ...s };
+      delete next[patient.id];
+      return next;
+    });
+    patchLocal(patient.id, { fuori_schema: true });
+  }
+
+  // --- Nuovo slot fisso (paziente "su richiesta" che passa a una cadenza fissa) ---
+  const [nuovoSlotModal, setNuovoSlotModal] = useState(null); // { patientId, nome, intervalDays, data, ora } | null
+
+  function apriNuovoSlot(patient, intervalDays) {
+    setNuovoSlotModal({
+      patientId: patient.id,
+      nome: patient.nome_calendario || patient.fatturare_a,
+      intervalDays,
+      data: "",
+      ora: "",
+    });
+  }
+
+  function chiudiNuovoSlot() {
+    setNuovoSlotModal(null);
+  }
+
+  async function confermaNuovoSlot() {
+    const { patientId, intervalDays, data, ora } = nuovoSlotModal;
+    if (!data || !ora) return;
+    // Stessa convenzione già usata negli script di migrazione: mezzogiorno
+    // UTC per calcolare il weekday, cosi' il cambio d'ora legale/solare non
+    // fa scivolare la data di un giorno.
+    const weekday = new Date(`${data}T12:00:00Z`).getUTCDay();
+    const { data: userData } = await supabase.auth.getUser();
+    await supabase.from("patient_slots").insert({
+      user_id: userData.user.id,
+      patient_id: patientId,
+      weekday,
+      time_of_day: `${ora}:00`,
+      interval_days: intervalDays,
+      anchor_date: data,
+      active: true,
+    });
+    await supabase.from("patients").update({ fuori_schema: false }).eq("id", patientId);
+    patchLocal(patientId, { fuori_schema: false });
+    setNuovoSlotModal(null);
+    load();
   }
 
   // Le quattro funzioni sotto erano prima ciascuna la propria copia di
@@ -714,7 +770,7 @@ export default function PazientiPage() {
                 {visibleCols.nome && <th>Nome</th>}
                 {visibleCols.cognome && <th>Cognome</th>}
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
-                {visibleCols.frequenza && <th title="Cadenza dello slot fisso — vuoto per i pazienti fuori schema, senza slot fisso">Frequenza</th>}
+                {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
                 {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
                 {visibleCols.tipologia && <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />}
                 {visibleCols.regime_tariffario && <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />}
@@ -724,7 +780,6 @@ export default function PazientiPage() {
                 {visibleCols.ancora_data && <SortableTh label="Ancora: data" sortKey="ancora_data" sort={sort} setSort={setSort} />}
                 {visibleCols.ancora_valore && <th>Ancora: valore</th>}
                 {visibleCols.stato && <SortableTh label="Stato" sortKey="stato" sort={sort} setSort={setSort} />}
-                {visibleCols.fuori_schema && <th title="Paziente senza slot fisso nel piano generale: prenota di volta in volta uno slot libero">Fuori schema</th>}
                 {visibleCols.modalita_pagamento && <th>Pagamento</th>}
                 {visibleCols.quota_contante_seduta && <th title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">Contante/seduta €</th>}
                 {visibleCols.contante_dovuto && <SortableTh label="Contanti dovuti" sortKey="contante_dovuto" sort={sort} setSort={setSort} />}
@@ -748,18 +803,24 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.frequenza && (
                     <td>
-                      {slotsByPatientId[p.id] ? (
-                        <select
-                          value={slotsByPatientId[p.id].interval_days}
-                          onChange={(e) => apriCambiaFrequenza(p, parseInt(e.target.value, 10))}
-                        >
-                          <option value={7}>Settimanale</option>
-                          <option value={14}>Quindicinale</option>
-                          <option value={28}>Ogni 4 settimane</option>
-                        </select>
-                      ) : (
-                        <span className="muted mono">—</span>
-                      )}
+                      <select
+                        value={slotsByPatientId[p.id] ? slotsByPatientId[p.id].interval_days : "richiesta"}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "richiesta") {
+                            passaSuRichiesta(p);
+                          } else if (slotsByPatientId[p.id]) {
+                            apriCambiaFrequenza(p, parseInt(v, 10));
+                          } else {
+                            apriNuovoSlot(p, parseInt(v, 10));
+                          }
+                        }}
+                      >
+                        <option value={7}>Settimanale</option>
+                        <option value={14}>Quindicinale</option>
+                        <option value={28}>Mensile</option>
+                        <option value="richiesta">Su richiesta</option>
+                      </select>
                     </td>
                   )}
                   {visibleCols.codice_fiscale && (
@@ -809,15 +870,6 @@ export default function PazientiPage() {
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
                     </select>
-                  </td>
-                  )}
-                  {visibleCols.fuori_schema && (
-                  <td style={{ textAlign: "center" }}>
-                    <input
-                      type="checkbox"
-                      checked={!!p.fuori_schema}
-                      onChange={(e) => updateField(p.id, "fuori_schema", e.target.checked)}
-                    />
                   </td>
                   )}
                   {visibleCols.modalita_pagamento && (
@@ -1138,6 +1190,45 @@ export default function PazientiPage() {
               </div>
             </>
           )}
+        </Modal>
+      )}
+
+      {nuovoSlotModal && (
+        <Modal maxWidth={420}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
+            Nuovo slot fisso — {nuovoSlotModal.nome}
+          </h2>
+          <p className="muted small">
+            {FREQ_LABEL[nuovoSlotModal.intervalDays]}, a partire dalla prima seduta che scegli qui sotto — le
+            successive verranno generate con la stessa cadenza, giorno della settimana e orario (via &quot;Genera
+            occorrenze future&quot;).
+          </p>
+          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
+            <label className="muted small" style={{ flex: 1 }}>
+              Data prima seduta
+              <input
+                type="date"
+                style={{ display: "block", width: "100%", marginTop: 4 }}
+                value={nuovoSlotModal.data}
+                onChange={(e) => setNuovoSlotModal((m) => ({ ...m, data: e.target.value }))}
+              />
+            </label>
+            <label className="muted small" style={{ flex: 1 }}>
+              Ora
+              <input
+                type="time"
+                style={{ display: "block", width: "100%", marginTop: 4 }}
+                value={nuovoSlotModal.ora}
+                onChange={(e) => setNuovoSlotModal((m) => ({ ...m, ora: e.target.value }))}
+              />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+            <button className="btn btn-ghost" onClick={chiudiNuovoSlot}>Annulla</button>
+            <button className="btn btn-primary" disabled={!nuovoSlotModal.data || !nuovoSlotModal.ora} onClick={confermaNuovoSlot}>
+              Crea slot fisso
+            </button>
+          </div>
         </Modal>
       )}
 
