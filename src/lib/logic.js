@@ -192,11 +192,16 @@ export function matchPatientForEvent(title, patients) {
 // fisicamente presente a calendario o già stato rimosso (il pulsante
 // "Registra disdette" lo rimuove, ma il conteggio non deve dipendere da
 // quel dettaglio implementativo).
-export function computePatientState(patient, events, settings, cancellazioni = []) {
-  const matched = events.filter((e) => {
-    const m = matchPatientForEvent(e.titolo, [patient]);
-    return !!m;
-  });
+// allPatients (facoltativo): l'intera anagrafica, usata per l'abbinamento
+// invece del solo `patient` — matchPatientForEvent usa l'ambiguità tra TUTTI
+// i pazienti per scartare i match "deboli" quando più di uno condivide la
+// stessa base del nome (es. "Francesco All./Man./Mer.", collisioni reali
+// trovate il 2026-09-08). Se omesso, ricade sul solo `patient` — comodo per
+// i test e gli script one-off dove l'ambiguità non è in gioco, ma i
+// chiamanti reali dell'app devono sempre passare l'anagrafica completa.
+export function computePatientState(patient, events, settings, cancellazioni = [], allPatients) {
+  const roster = allPatients || [patient];
+  const matched = events.filter((e) => matchPatientForEvent(e.titolo, roster)?.patient === patient);
   const oggi = todayISO();
   const passate = matched.filter((e) => e.data <= oggi);
   const future = matched.filter((e) => e.data > oggi);
@@ -389,10 +394,14 @@ export function buildNuovaDescrizione(descrizioneOriginale, codice) {
 // dalla sua ancora_data in poi, in ordine cronologico — la stessa identica
 // logica di abbinamento già usata per il conteggio (matchPatientForEvent),
 // solo senza il filtro "solo sedute passate" che usa computePatientState.
-export function eventiDiPazienteOrdinati(patient, allEvents) {
+// allPatients (facoltativo): vedi nota su computePatientState — l'intera
+// anagrafica serve per disambiguare correttamente, ricade su [patient] se
+// omesso.
+export function eventiDiPazienteOrdinati(patient, allEvents, allPatients) {
+  const roster = allPatients || [patient];
   return allEvents
     .filter((e) => !patient.ancora_data || e.data >= patient.ancora_data)
-    .filter((e) => matchPatientForEvent(e.titolo, [patient]))
+    .filter((e) => matchPatientForEvent(e.titolo, roster)?.patient === patient)
     .sort((a, b) => {
       if (a.data !== b.data) return a.data < b.data ? -1 : 1;
       return (a.ora || "") < (b.ora || "") ? -1 : (a.ora || "") > (b.ora || "") ? 1 : 0;
@@ -438,10 +447,13 @@ export function analizzaNotaPerAudit(descrizioneOriginale) {
 // soglia — una proiezione che assume che la fattura verrà confermata subito
 // dopo quella seduta. Per i pazienti sospesi, accumula senza mai azzerarsi
 // (nessuna fatturazione periodica prevista per loro).
-export function computeRinumerazione(patient, allEvents, settings) {
+// allPatients (facoltativo): vedi nota su computePatientState — l'intera
+// anagrafica serve per disambiguare correttamente, ricade su [patient] se
+// omesso.
+export function computeRinumerazione(patient, allEvents, settings, allPatients) {
   const lettera = letteraCodice(patient);
   const soglia = patient.soglia_fatturazione || settings.soglia_default;
-  const eventi = eventiDiPazienteOrdinati(patient, allEvents);
+  const eventi = eventiDiPazienteOrdinati(patient, allEvents, allPatients);
 
   let contatore = patient.ancora_valore || 0;
   const piano = [];

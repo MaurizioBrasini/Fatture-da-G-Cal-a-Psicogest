@@ -102,6 +102,27 @@ test("computePatientState: paziente sospeso resta 'sospeso' anche sopra soglia",
   assert.equal(st.stato, "sospeso");
 });
 
+// Regressione 2026-09-08: due pazienti che condividono lo stesso nome di
+// battesimo (es. reale "Francesco All./Man./Mer.") non devono mai contare
+// un evento ambiguo (titolo col solo nome, senza l'iniziale del cognome) per
+// entrambi — matchPatientForEvent deve vedere l'intera anagrafica (allPatients)
+// per rifiutare il match debole quando è ambiguo, non solo il singolo paziente.
+test("computePatientState con l'anagrafica completa NON conta un evento ambiguo condiviso da due pazienti omonimi", () => {
+  const francesco1 = { nome_calendario: "Francesco All.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const francesco2 = { nome_calendario: "Francesco Man.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const roster = [francesco1, francesco2];
+  const events = [{ data: "2026-01-05", titolo: "Francesco" }]; // titolo ambiguo, senza iniziale cognome
+  assert.equal(computePatientState(francesco1, events, DEFAULT_SETTINGS, [], roster).count, 0);
+  assert.equal(computePatientState(francesco2, events, DEFAULT_SETTINGS, [], roster).count, 0);
+});
+test("computePatientState senza allPatients (fallback [patient]) conta erroneamente l'evento ambiguo per entrambi — limite noto del fallback, non usarlo con più pazienti omonimi in gioco", () => {
+  const francesco1 = { nome_calendario: "Francesco All.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const francesco2 = { nome_calendario: "Francesco Man.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const events = [{ data: "2026-01-05", titolo: "Francesco" }];
+  assert.equal(computePatientState(francesco1, events, DEFAULT_SETTINGS).count, 1);
+  assert.equal(computePatientState(francesco2, events, DEFAULT_SETTINGS).count, 1);
+});
+
 // --- buildInvoiceRow: scorporo onorario/ENPAP/bollo ---
 test("buildInvoiceRow: onorario + ENPAP torna esattamente alla tariffa tonda", () => {
   const patient = { costo_unitario: 80, tipologia: "individuale", regime_tariffario: "regolare" };
@@ -216,6 +237,19 @@ test("computeRinumerazione: 'cambia' è false se la nota è già corretta", () =
   const events = [{ id: "ev0", data: "2026-01-05", ora: "10:00", titolo: "Mario Rossi", descrizione: "R1" }];
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
   assert.equal(piano[0].cambia, false);
+});
+test("computeRinumerazione con l'anagrafica completa non abbina l'evento ambiguo di un omonimo (regressione 2026-09-08)", () => {
+  const francesco1 = { nome_calendario: "Francesco All.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5, regime_tariffario: "regolare" };
+  const francesco2 = { nome_calendario: "Francesco Man.", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5, regime_tariffario: "regolare" };
+  const roster = [francesco1, francesco2];
+  const events = [
+    { id: "ev0", data: "2026-01-05", ora: "10:00", titolo: "Francesco", descrizione: "" }, // ambiguo
+    { id: "ev1", data: "2026-01-19", ora: "10:00", titolo: "Francesco All.", descrizione: "" }, // solo di francesco1
+  ];
+  const piano1 = computeRinumerazione(francesco1, events, DEFAULT_SETTINGS, roster);
+  const piano2 = computeRinumerazione(francesco2, events, DEFAULT_SETTINGS, roster);
+  assert.deepEqual(piano1.map((r) => r.id), ["ev1"]); // solo il suo, non l'ambiguo
+  assert.deepEqual(piano2.map((r) => r.id), []); // nessun evento suo davvero
 });
 
 // --- analizzaNotaPerAudit (prova a vuoto sulle note storiche) ---

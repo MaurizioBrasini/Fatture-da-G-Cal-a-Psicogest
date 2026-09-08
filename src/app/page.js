@@ -197,7 +197,7 @@ export default function DashboardPage() {
   const computed = useMemo(() => {
     const map = {};
     patients.forEach((p) => {
-      map[p.id] = computePatientState(p, events, settings, cancellazioni);
+      map[p.id] = computePatientState(p, events, settings, cancellazioni, patients);
     });
     return map;
   }, [patients, events, settings, cancellazioni]);

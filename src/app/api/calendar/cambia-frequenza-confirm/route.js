@@ -63,7 +63,7 @@ export async function POST(request) {
     const oggi = todayISO();
     const dataMinima = patient?.ancora_data && patient.ancora_data < oggi ? patient.ancora_data : oggi;
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, addDays(oggi, 180));
-    const piano = patient ? computeRinumerazione(patient, events, settings).filter((r) => r.cambia) : [];
+    const piano = patient ? computeRinumerazione(patient, events, settings, patients).filter((r) => r.cambia) : [];
     let noteAggiornate = 0;
     for (const r of piano) {
       await updateGoogleCalendarEventDescription(tokenRow.refresh_token, r.id, r.descrizioneNuova);

@@ -56,7 +56,7 @@ export async function POST(request) {
       .map((p) => ({
         pazienteId: p.id,
         nome: p.nome_calendario || p.fatturare_a,
-        piano: computeRinumerazione(p, events, settings).filter((r) => r.cambia),
+        piano: computeRinumerazione(p, events, settings, patients).filter((r) => r.cambia),
       }))
       .filter((r) => r.piano.length > 0);
 
