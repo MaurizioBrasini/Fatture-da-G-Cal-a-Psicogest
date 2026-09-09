@@ -402,20 +402,29 @@ export default function PazientiPage() {
 
   // --- Cambio slot fisso: cadenza, giorno della settimana e/o ora ---
   const [freqModal, setFreqModal] = useState(null);
-  // { step:'loading'|'preview'|'writing'|'done'|'error', patientId, nome,
-  //   changes:{intervalDays?,weekday?,timeOfDay?}, intervalDaysAttuale, weekdayAttuale,
+  // { step:'chiedi-data'|'loading'|'preview'|'writing'|'done'|'error', patientId, nome,
+  //   changes:{intervalDays?,weekday?,timeOfDay?}, daData, intervalDaysAttuale, weekdayAttuale,
   //   timeOfDayAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
 
   const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Mensile" };
   const GIORNI_LABEL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
-  async function apriCambiaSlot(patient, changes) {
-    setFreqModal({ step: "loading", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, changes });
+  // Apre il modale al primo passaggio: chiede sempre "a partire da quando"
+  // prima di calcolare qualunque anteprima — senza quella data non si
+  // applica nulla, tutto quello che c'è prima resta con il vecchio ritmo.
+  function apriCambiaSlot(patient, changes) {
+    setFreqModal({ step: "chiedi-data", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, changes, daData: "" });
+  }
+
+  async function procediConData() {
+    const { patientId, changes, daData } = freqModal;
+    if (!daData) return;
+    setFreqModal((m) => ({ ...m, step: "loading" }));
     try {
       const res = await fetch("/api/calendar/cambia-frequenza-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId: patient.id, ...changes }),
+        body: JSON.stringify({ patientId, daData, ...changes }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -447,7 +456,7 @@ export default function PazientiPage() {
   }
 
   async function confermaCambiaFrequenza() {
-    const { patientId, changes, daRimuovere, eventiEsclusi } = freqModal;
+    const { patientId, changes, daData, daRimuovere, eventiEsclusi } = freqModal;
     setFreqModal((m) => ({ ...m, step: "writing" }));
     try {
       const res = await fetch("/api/calendar/cambia-frequenza-confirm", {
@@ -455,6 +464,7 @@ export default function PazientiPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId,
+          daData,
           ...changes,
           eventIdsDaRimuovere: daRimuovere.filter((e) => !eventiEsclusi.has(e.eventId)).map((e) => e.eventId),
         }),
@@ -1178,6 +1188,32 @@ export default function PazientiPage() {
             Cambio frequenza — {freqModal.nome}
           </h2>
 
+          {freqModal.step === "chiedi-data" && (
+            <>
+              <p className="muted small">
+                {freqModal.changes.intervalDays !== undefined && <>Nuova cadenza: <strong>{FREQ_LABEL[freqModal.changes.intervalDays]}</strong>. </>}
+                {freqModal.changes.weekday !== undefined && <>Nuovo giorno: <strong>{GIORNI_LABEL[freqModal.changes.weekday]}</strong>. </>}
+                {freqModal.changes.timeOfDay !== undefined && <>Nuova ora: <strong>{freqModal.changes.timeOfDay.slice(0, 5)}</strong>. </>}
+              </p>
+              <label className="muted small" style={{ display: "block" }}>
+                A partire da quale data?
+                <input
+                  type="date"
+                  style={{ display: "block", width: "100%", marginTop: 4 }}
+                  value={freqModal.daData}
+                  onChange={(e) => setFreqModal((m) => ({ ...m, daData: e.target.value }))}
+                />
+              </label>
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Tutto quello che è prima di questa data resta esattamente com&apos;è, ancora sotto il vecchio ritmo.
+              </p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Annulla</button>
+                <button className="btn btn-primary" disabled={!freqModal.daData} onClick={procediConData}>Continua</button>
+              </div>
+            </>
+          )}
+
           {freqModal.step === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
 
           {freqModal.step === "error" && (
@@ -1204,6 +1240,7 @@ export default function PazientiPage() {
                   <>Ora: da <strong>{(freqModal.timeOfDayAttuale || "").slice(0, 5)}</strong> a{" "}
                   <strong>{freqModal.changes.timeOfDay.slice(0, 5)}</strong>. </>
                 )}
+                A partire dal <strong>{freqModal.daData}</strong>.
               </p>
 
               {freqModal.daRimuovere.length === 0 ? (

@@ -18,12 +18,13 @@ export async function POST(request) {
 
   const body = await request.json().catch(() => ({}));
   const patientId = body.patientId;
+  const daData = body.daData;
   const nuovoIntervalDays = body.intervalDays != null ? Number(body.intervalDays) : undefined;
   const nuovoWeekday = body.weekday != null ? Number(body.weekday) : undefined;
   const nuovoTimeOfDay = body.timeOfDay || undefined;
   const eventIdsDaRimuovere = Array.isArray(body.eventIdsDaRimuovere) ? body.eventIdsDaRimuovere : [];
-  if (!patientId || (nuovoIntervalDays === undefined && nuovoWeekday === undefined && nuovoTimeOfDay === undefined)) {
-    return NextResponse.json({ error: "Parametri mancanti o non validi." }, { status: 400 });
+  if (!patientId || !daData || (nuovoIntervalDays === undefined && nuovoWeekday === undefined && nuovoTimeOfDay === undefined)) {
+    return NextResponse.json({ error: "Parametri mancanti o non validi (serve sempre la data \"a partire da\")." }, { status: 400 });
   }
   if (nuovoIntervalDays !== undefined && ![7, 14, 28].includes(nuovoIntervalDays)) {
     return NextResponse.json({ error: "Cadenza non valida." }, { status: 400 });
@@ -42,14 +43,13 @@ export async function POST(request) {
   }
 
   try {
-    // Serve leggere lo slot attuale PRIMA di scrivere: se cambia il giorno
-    // della settimana, occorrenzeFuture calcola le date reali solo da
-    // anchor_date + interval_days (weekday da solo serve solo ad abbinare
-    // le chiusure straordinarie), quindi va ricalcolato anche l'anchor_date
-    // coerente col nuovo giorno — stessa logica già usata in anteprima.
+    // Serve leggere lo slot attuale PRIMA di scrivere: l'anchor_date nuovo
+    // si ricalcola sempre da daData sul giorno della settimana finale
+    // (nuovo se sta cambiando, altrimenti quello attuale) — stessa logica
+    // già usata in anteprima, per restare coerenti.
     const { data: slotAttuale, error: slotLetturaError } = await supabase
       .from("patient_slots")
-      .select("anchor_date")
+      .select("weekday")
       .eq("patient_id", patientId)
       .eq("active", true)
       .maybeSingle();
@@ -58,12 +58,10 @@ export async function POST(request) {
       throw new Error("Nessuno slot fisso attivo trovato per questo paziente: nessuna modifica scritta.");
     }
 
-    const aggiornamentoSlot = {};
+    const weekdayFinale = nuovoWeekday ?? slotAttuale.weekday;
+    const aggiornamentoSlot = { anchor_date: prossimoWeekday(daData, weekdayFinale) };
     if (nuovoIntervalDays !== undefined) aggiornamentoSlot.interval_days = nuovoIntervalDays;
-    if (nuovoWeekday !== undefined) {
-      aggiornamentoSlot.weekday = nuovoWeekday;
-      aggiornamentoSlot.anchor_date = prossimoWeekday(slotAttuale.anchor_date, nuovoWeekday);
-    }
+    if (nuovoWeekday !== undefined) aggiornamentoSlot.weekday = nuovoWeekday;
     if (nuovoTimeOfDay !== undefined) aggiornamentoSlot.time_of_day = nuovoTimeOfDay;
 
     const { data: slotAggiornato, error: slotError } = await supabase
