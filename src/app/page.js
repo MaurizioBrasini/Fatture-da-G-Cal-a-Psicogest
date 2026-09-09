@@ -83,6 +83,11 @@ export default function DashboardPage() {
   const [aggEsclusi, setAggEsclusi] = useState({}); // { eventId: true } = deselezionato in anteprima
   const [aggRisultato, setAggRisultato] = useState(null);
   const [aggErrore, setAggErrore] = useState("");
+  // Form "Aggiungi disdetta manuale": per un evento già eliminato a mano da
+  // Google Calendar (mai passato dalla scansione delle note "disdetto").
+  // Sempre "non addebitata" — vedi commento su aggiungiDisdettaManuale.
+  const [manPatientId, setManPatientId] = useState("");
+  const [manData, setManData] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -410,6 +415,53 @@ export default function DashboardPage() {
     setAggEsclusi({});
     setAggRisultato(null);
     setAggErrore("");
+    setManPatientId("");
+    setManData("");
+  }
+
+  // Sovrascrive l'esito automatico (regola delle 48h) calcolato in anteprima
+  // per una riga già trovata dalla scansione — es. un ricovero senza
+  // preavviso che comunque non va addebitato.
+  function cambiaEsitoDisdetta(eventId, nuovoBilling) {
+    setAggCandidati((prev) => (prev || []).map((c) => (c.eventId === eventId ? { ...c, billingStatus: nuovoBilling } : c)));
+  }
+
+  // Aggiunge a mano una disdetta NON ADDEBITATA il cui evento è già stato
+  // eliminato dall'utente direttamente su Google Calendar (non più
+  // trovabile dalla scansione, che legge gli eventi live). Nessun evento da
+  // cancellare al momento della conferma (`manual: true`), solo la riga in
+  // `cancellations`.
+  //
+  // Solo "non addebitata" ha senso qui: il conteggio/numerazione (Rinumera)
+  // legge SEMPRE gli eventi live da calendario, non la tabella
+  // `cancellations` — una seduta "addebitata" (buca da pagare) deve restare
+  // fisicamente sul calendario o sparirà dalla numerazione anche se questa
+  // riga dice che va pagata. Se un evento da addebitare è già stato
+  // cancellato per errore, va ricreato sul calendario prima di Rinumera,
+  // altrimenti quella seduta non verrà contata.
+  function aggiungiDisdettaManuale() {
+    if (!manPatientId || !manData) return;
+    const patient = patients.find((p) => String(p.id) === manPatientId);
+    if (!patient) return;
+    const giaPresente = (aggCandidati || []).some((c) => c.patientId === patient.id && c.data === manData);
+    if (giaPresente) {
+      setAggErrore("C'è già una riga per questo paziente in questa data.");
+      return;
+    }
+    const nuova = {
+      eventId: `manual-${patient.id}-${manData}-${Date.now()}`,
+      patientId: patient.id,
+      nome: patient.nome_calendario || patient.fatturare_a,
+      data: manData,
+      ora: "",
+      cancelledAt: new Date().toISOString(),
+      billingStatus: "not_charged",
+      manual: true,
+    };
+    setAggCandidati((prev) => [...(prev || []), nuova].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)));
+    setAggErrore("");
+    setManPatientId("");
+    setManData("");
   }
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
@@ -777,14 +829,17 @@ export default function DashboardPage() {
 
           {aggStep === "preview" && (
             <>
+              {aggErrore && <p style={{ color: "crimson" }}>{aggErrore}</p>}
               {(!aggCandidati || aggCandidati.length === 0) ? (
-                <p className="muted">Nessuna disdetta nuova da registrare.</p>
+                <p className="muted">Nessuna disdetta nuova trovata dalla scansione delle note.</p>
               ) : (
                 <>
                   <p className="muted small">
-                    Le righe <strong>non addebitate</strong> (preavviso ≥48h) rimuoveranno l&apos;evento dal
-                    calendario per liberare lo slot; le righe <strong>addebitate</strong> (buche) restano a
-                    calendario così come sono. Deseleziona una riga per lasciarla da gestire a mano.
+                    L&apos;esito (addebitata/non addebitata) è calcolato dalla regola delle 48h di preavviso, ma è
+                    <strong> modificabile riga per riga</strong> prima di confermare. <strong>Non addebitata</strong>{" "}
+                    rimuove l&apos;evento dal calendario per liberare lo slot e non conta la seduta;{" "}
+                    <strong>addebitata</strong> (buca) lascia l&apos;evento invariato e conta la seduta. Deseleziona
+                    una riga per lasciarla da gestire a mano.
                   </p>
                   <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
                     <thead>
@@ -810,12 +865,18 @@ export default function DashboardPage() {
                           <td className="mono" style={{ whiteSpace: "nowrap" }}>
                             {c.data}{c.ora ? ` ${c.ora}` : ""}
                           </td>
-                          <td>{c.nome}</td>
                           <td>
-                            {c.billingStatus === "not_charged" ? (
-                              <span>Non addebitata — rimuove l&apos;evento</span>
+                            {c.nome}
+                            {c.manual && <span className="muted small"> (manuale, evento già eliminato)</span>}
+                          </td>
+                          <td>
+                            {c.manual ? (
+                              <span>Non addebitata</span>
                             ) : (
-                              <span>Addebitata (buca) — evento invariato</span>
+                              <select value={c.billingStatus} onChange={(e) => cambiaEsitoDisdetta(c.eventId, e.target.value)}>
+                                <option value="not_charged">Non addebitata — rimuove l&apos;evento</option>
+                                <option value="charged">Addebitata (buca) — evento invariato</option>
+                              </select>
                             )}
                           </td>
                         </tr>
@@ -824,6 +885,34 @@ export default function DashboardPage() {
                   </table>
                 </>
               )}
+
+              <div style={{ marginTop: 16, padding: 10, border: "1px solid var(--border)", borderRadius: 8 }}>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  Aggiungi disdetta <strong>non addebitata</strong> manuale — solo per un appuntamento già eliminato
+                  a mano da Google Calendar (la scansione delle note non può più trovarlo). Serve solo a registrare
+                  che quella seduta non va pagata: il conteggio/numerazione non dipende da questa tabella.
+                  <br />
+                  <strong>Attenzione</strong>: se invece un appuntamento da <em>addebitare</em> (una buca da pagare)
+                  è stato cancellato per errore da calendario, non aggiungerlo qui — ricrea l&apos;evento sul
+                  calendario a quella data/ora prima di lanciare &quot;Rinumera&quot;, altrimenti quella seduta
+                  sparisce dalla numerazione e dal conteggio della fattura.
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <select value={manPatientId} onChange={(e) => setManPatientId(e.target.value)} style={{ minWidth: 180 }}>
+                    <option value="">Paziente…</option>
+                    {[...patients]
+                      .sort((a, b) => (a.nome_calendario || "").localeCompare(b.nome_calendario || ""))
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>{p.nome_calendario || p.fatturare_a}</option>
+                      ))}
+                  </select>
+                  <input type="date" value={manData} onChange={(e) => setManData(e.target.value)} />
+                  <button className="btn-small" onClick={aggiungiDisdettaManuale} disabled={!manPatientId || !manData}>
+                    Aggiungi (non addebitata)
+                  </button>
+                </div>
+              </div>
+
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiRegistraDisdette}>Annulla</button>
                 {aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0 && (

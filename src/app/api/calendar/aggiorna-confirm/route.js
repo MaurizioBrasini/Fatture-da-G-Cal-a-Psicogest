@@ -1,11 +1,17 @@
 // Registra davvero le disdette confermate. Riceve esattamente la lista già
-// calcolata e mostrata in anteprima (non ricalcola nulla), come per la
-// rinumerazione. Per ciascuna, nell'ordine che conta per non perdere dati:
+// calcolata e mostrata in anteprima (billing_status incluso l'eventuale
+// override manuale fatto dall'utente in anteprima, che sovrascrive il
+// calcolo automatico delle 48h), come per la rinumerazione. Per ciascuna,
+// nell'ordine che conta per non perdere dati:
 // 1) scrive la riga in `cancellations` (se già presente per patient_id+data,
 //    la salta senza errore: idempotenza lato database);
-// 2) SOLO se billing_status = not_charged, rimuove l'evento dal calendario
-//    per liberare lo slot. Le buche (charged) restano a calendario per
-//    pulizia storica — il conteggio non dipende più dalla loro presenza.
+// 2) SOLO se billing_status = not_charged E la riga non è "manuale", rimuove
+//    l'evento dal calendario per liberare lo slot. Le righe manuali (`c.manual`)
+//    sono disdette il cui evento è già stato eliminato a mano dall'utente
+//    direttamente su Google Calendar — non hanno un evento reale da cancellare
+//    (e non passano dalla scansione delle note "disdetto"). Le buche (charged,
+//    non manuali) restano a calendario per pulizia storica — il conteggio non
+//    dipende più dalla loro presenza.
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
@@ -51,7 +57,7 @@ export async function POST(request) {
       // procede comunque all'eventuale rimozione dell'evento.
       if (insertError && insertError.code !== "23505") throw new Error(insertError.message);
 
-      if (c.billingStatus === "not_charged") {
+      if (c.billingStatus === "not_charged" && !c.manual) {
         await deleteGoogleCalendarEvent(tokenRow.refresh_token, c.eventId);
       }
       risultati.push({ eventId: c.eventId, ok: true });
