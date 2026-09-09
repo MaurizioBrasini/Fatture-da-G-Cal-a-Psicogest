@@ -410,8 +410,9 @@ export default function PazientiPage() {
   const GIORNI_LABEL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
   // Apre il modale al primo passaggio: chiede sempre "a partire da quando"
-  // prima di calcolare qualunque anteprima — senza quella data non si
-  // applica nulla, tutto quello che c'è prima resta con il vecchio ritmo.
+  // riparte il nuovo assetto (Rientro). L'Uscita è sempre immediata e
+  // incondizionata — libera subito tutti i futuri non confermati — la data
+  // serve solo per ancorare il nuovo slot che nasce al Rientro.
   function apriCambiaSlot(patient, changes) {
     setFreqModal({ step: "chiedi-data", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, changes, daData: "" });
   }
@@ -439,7 +440,7 @@ export default function PazientiPage() {
         timeOfDayAttuale: data.timeOfDayAttuale,
         daRimuovere: data.daRimuovere,
         invariati: data.invariati,
-        eventiEsclusi: new Set(), // eventi che l'utente sceglie di NON cancellare, pur fuori dal nuovo assetto
+        eventiEsclusi: new Set(), // eventi che l'utente sceglie di tenere comunque, pur non confermati
       }));
     } catch (e) {
       setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
@@ -474,15 +475,10 @@ export default function PazientiPage() {
         setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore durante la scrittura." }));
         return;
       }
-      setSlotsByPatientId((s) => ({
-        ...s,
-        [patientId]: {
-          ...s[patientId],
-          interval_days: changes.intervalDays ?? s[patientId]?.interval_days,
-          weekday: changes.weekday ?? s[patientId]?.weekday,
-          time_of_day: changes.timeOfDay ?? s[patientId]?.time_of_day,
-        },
-      }));
+      // Uscita+Rientro cambia lo slot attivo (nuova riga, non un update sul
+      // posto) e fuori_schema — più semplice ricaricare tutto invece di
+      // patchare a mano lo stato locale.
+      load();
       setFreqModal((m) => ({ ...m, step: "done", result: data }));
     } catch (e) {
       setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
@@ -1205,7 +1201,7 @@ export default function PazientiPage() {
                 />
               </label>
               <p className="muted small" style={{ marginTop: 8 }}>
-                Tutto quello che è prima di questa data resta esattamente com&apos;è, ancora sotto il vecchio ritmo.
+                Il paziente esce subito dalla programmazione attuale: tutti gli appuntamenti futuri non ancora confermati si liberano da ora, non da questa data. La data serve solo per il rientro: dal giorno indicato riparte il nuovo assetto.
               </p>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiFreqModal}>Annulla</button>
@@ -1242,13 +1238,16 @@ export default function PazientiPage() {
                 )}
                 A partire dal <strong>{freqModal.daData}</strong>.
               </p>
+              <p className="muted small">
+                Il paziente esce subito dalla programmazione fissa attuale (nessuna prenotazione finché non rientra alla data scelta) e rientra con il nuovo assetto da quella data.
+              </p>
 
               {freqModal.daRimuovere.length === 0 ? (
-                <p className="muted">Nessun appuntamento già sul calendario è fuori dal nuovo ritmo — verrà solo aggiornata la cadenza per le prossime occorrenze.</p>
+                <p className="muted">Nessun appuntamento futuro da liberare — non ci sono ancora occorrenze da confermare sul calendario.</p>
               ) : (
                 <>
                   <p className="muted small">
-                    Questi appuntamenti già sul calendario non rientrano più nel nuovo ritmo e verranno <strong>cancellati</strong> — togli la spunta a quelli che vuoi tenere comunque:
+                    Questi appuntamenti futuri non ancora confermati verranno <strong>cancellati</strong> subito (il paziente non ha più prenotazioni fino al rientro) — togli la spunta a quelli che vuoi tenere comunque:
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
                     {freqModal.daRimuovere.map((e) => {
@@ -1266,7 +1265,7 @@ export default function PazientiPage() {
 
               {freqModal.invariati.length > 0 && (
                 <p className="muted small">
-                  Restano invariati: {freqModal.invariati.join(", ")}.
+                  Già confermati, restano comunque: {freqModal.invariati.join(", ")}.
                 </p>
               )}
 
@@ -1282,7 +1281,7 @@ export default function PazientiPage() {
           {freqModal.step === "done" && freqModal.result && (
             <>
               <p>
-                Fatto: cadenza aggiornata, {freqModal.result.cancellati} appuntamenti fuori ritmo cancellati,{" "}
+                Fatto: uscita e rientro applicati, {freqModal.result.cancellati} appuntamenti non confermati liberati,{" "}
                 {freqModal.result.noteAggiornate} note ricalcolate.
               </p>
               {(freqModal.result.cancellazioniFallite?.length > 0 || freqModal.result.noteFallite?.length > 0 || freqModal.result.rinumeraError) && (

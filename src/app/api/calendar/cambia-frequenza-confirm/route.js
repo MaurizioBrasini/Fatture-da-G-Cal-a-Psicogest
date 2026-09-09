@@ -1,8 +1,11 @@
-// Applica davvero un cambio di cadenza: aggiorna patient_slots.interval_days,
-// cancella gli appuntamenti futuri confermati come "fuori dal nuovo ritmo"
-// in anteprima, poi rilancia Rinumera sul paziente per aggiornare la
-// numerazione dei restanti (stesso ordine di operazioni usato a mano per
-// Susanna e Simone l'8/9/2026).
+// Applica un cambio programmazione (Maurizio, 2026-09-09 — versione
+// semplificata): esattamente un'Uscita dalla programmazione (disattiva lo
+// slot corrente, cancella gli appuntamenti futuri non confermati confermati
+// in anteprima — il paziente resta attivo ma senza prenotazioni, "a schema
+// libero" nel frattempo) seguita SUBITO da un Rientro alla data scelta
+// (nuovo patient_slot, stesso meccanismo di "Nuovo slot fisso" per un
+// paziente che riparte). Nessuna logica "furba" di conservazione parziale:
+// tutto il non confermato si libera, punto.
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent, fetchGoogleCalendarEvents, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
@@ -23,8 +26,8 @@ export async function POST(request) {
   const nuovoWeekday = body.weekday != null ? Number(body.weekday) : undefined;
   const nuovoTimeOfDay = body.timeOfDay || undefined;
   const eventIdsDaRimuovere = Array.isArray(body.eventIdsDaRimuovere) ? body.eventIdsDaRimuovere : [];
-  if (!patientId || !daData || (nuovoIntervalDays === undefined && nuovoWeekday === undefined && nuovoTimeOfDay === undefined)) {
-    return NextResponse.json({ error: "Parametri mancanti o non validi (serve sempre la data \"a partire da\")." }, { status: 400 });
+  if (!patientId || !daData) {
+    return NextResponse.json({ error: "Parametri mancanti (serve sempre la data \"a partire da\")." }, { status: 400 });
   }
   if (nuovoIntervalDays !== undefined && ![7, 14, 28].includes(nuovoIntervalDays)) {
     return NextResponse.json({ error: "Cadenza non valida." }, { status: 400 });
@@ -43,13 +46,11 @@ export async function POST(request) {
   }
 
   try {
-    // Serve leggere lo slot attuale PRIMA di scrivere: l'anchor_date nuovo
-    // si ricalcola sempre da daData sul giorno della settimana finale
-    // (nuovo se sta cambiando, altrimenti quello attuale) — stessa logica
-    // già usata in anteprima, per restare coerenti.
+    // Legge lo slot attuale per sapere cosa NON sta cambiando (es. se cambi
+    // solo l'ora, cadenza e giorno del nuovo slot restano quelli di prima).
     const { data: slotAttuale, error: slotLetturaError } = await supabase
       .from("patient_slots")
-      .select("weekday")
+      .select("weekday, time_of_day, interval_days")
       .eq("patient_id", patientId)
       .eq("active", true)
       .maybeSingle();
@@ -58,32 +59,15 @@ export async function POST(request) {
       throw new Error("Nessuno slot fisso attivo trovato per questo paziente: nessuna modifica scritta.");
     }
 
-    const weekdayFinale = nuovoWeekday ?? slotAttuale.weekday;
-    const aggiornamentoSlot = { anchor_date: prossimoWeekday(daData, weekdayFinale) };
-    if (nuovoIntervalDays !== undefined) aggiornamentoSlot.interval_days = nuovoIntervalDays;
-    if (nuovoWeekday !== undefined) aggiornamentoSlot.weekday = nuovoWeekday;
-    if (nuovoTimeOfDay !== undefined) aggiornamentoSlot.time_of_day = nuovoTimeOfDay;
-
-    const { data: slotAggiornato, error: slotError } = await supabase
+    // --- Uscita: disattiva lo slot corrente, libera tutte le settimane
+    // future non confermate (esattamente come esci-da-programmazione).
+    const { error: disattivaError } = await supabase
       .from("patient_slots")
-      .update(aggiornamentoSlot)
+      .update({ active: false })
       .eq("patient_id", patientId)
-      .eq("active", true)
-      .select("id");
-    if (slotError) throw new Error(slotError.message);
-    // .update().eq() non dà errore se nessuna riga corrisponde (es. lo slot
-    // è stato disattivato tra l'anteprima e la conferma) — senza questo
-    // controllo proseguiremmo a cancellare appuntamenti come se lo slot
-    // fosse davvero cambiato, quando in realtà non è stato scritto nulla.
-    if (!slotAggiornato || slotAggiornato.length === 0) {
-      throw new Error("Nessuno slot fisso attivo trovato per questo paziente: nessuna modifica scritta.");
-    }
+      .eq("active", true);
+    if (disattivaError) throw new Error(disattivaError.message);
 
-    // Cancellazioni e aggiornamenti nota proseguono elemento per elemento
-    // (stesso pattern resiliente di renumber-confirm/genera-occorrenze-confirm):
-    // un errore di rete o un rate-limit di Google su UN evento non deve
-    // bloccare gli altri né lasciare l'utente senza sapere cosa è stato
-    // applicato davvero.
     let cancellati = 0;
     const cancellazioniFallite = [];
     for (const eventId of eventIdsDaRimuovere) {
@@ -96,14 +80,30 @@ export async function POST(request) {
       await new Promise((r) => setTimeout(r, 150));
     }
 
-    // Rilancia Rinumera sul paziente per aggiornare la numerazione dei
-    // restanti (stessa logica di renumber-preview/confirm, qui in un solo
-    // giro dato che il paziente è uno solo). Isolata nel proprio try: la
-    // cadenza è già stata cambiata e le cancellazioni sopra sono già
-    // definitive, quindi un errore qui (rete, fetch pazienti/eventi) deve
-    // comunque restituire cancellati/cancellazioniFallite invece di andare
-    // perso nel catch esterno, che altrimenti risponderebbe solo con un
-    // errore generico senza dire che le cancellazioni sono già avvenute.
+    // --- Rientro: nuovo slot fisso alla data scelta, con i campi cambiati
+    // (o quelli di prima per chi non cambia). Il giorno della settimana e
+    // la data devono essere coerenti: prossimoWeekday sposta la data in
+    // avanti (mai indietro) fino al giorno giusto se non coincidono già.
+    const weekdayFinale = nuovoWeekday ?? slotAttuale.weekday;
+    const nuovoAnchor = prossimoWeekday(daData, weekdayFinale);
+    const { data: userData } = await supabase.auth.getUser();
+    const { error: nuovoSlotError } = await supabase.from("patient_slots").insert({
+      user_id: userData.user.id,
+      patient_id: patientId,
+      weekday: weekdayFinale,
+      time_of_day: nuovoTimeOfDay ?? slotAttuale.time_of_day,
+      interval_days: nuovoIntervalDays ?? slotAttuale.interval_days,
+      anchor_date: nuovoAnchor,
+      active: true,
+    });
+    if (nuovoSlotError) throw new Error(nuovoSlotError.message);
+    await supabase.from("patients").update({ fuori_schema: false }).eq("id", patientId);
+
+    // Rilancia Rinumera sul paziente (isolata nel proprio try: le operazioni
+    // sopra sono già definitive, un suo errore non deve far perdere i
+    // conteggi già ottenuti) — utile soprattutto per gli eventuali
+    // appuntamenti già confermati rimasti, la cui numerazione potrebbe
+    // essere cambiata.
     let noteAggiornate = 0;
     let noteFallite = [];
     let rinumeraError = null;
@@ -138,6 +138,7 @@ export async function POST(request) {
       cancellazioniFallite,
       noteFallite,
       rinumeraError,
+      nuovoAnchor,
     });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
