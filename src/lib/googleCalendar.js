@@ -134,10 +134,9 @@ export async function updateGoogleCalendarEventTitle(refreshToken, eventId, newT
 
 // Rimuove un evento dal calendario. Cancellazione IRREVERSIBILE — usata per:
 // (1) le disdette con preavviso ≥48h (billing_status = not_charged): libera
-// lo slot da subito; (2) cambio di cadenza di uno slot fisso
-// (cambia-frequenza-confirm), per togliere gli appuntamenti futuri già
-// generati che non rientrano più nel nuovo ritmo — solo quelli confermati
-// esplicitamente dall'utente in anteprima, mai in automatico. Le buche
+// lo slot da subito; (2) uscita dalla programmazione fissa
+// (esci-da-programmazione, anche incatenata da un cambio di programmazione),
+// per liberare i futuri appuntamenti non ancora confermati. Le buche
 // (charged) non vanno mai cancellate da qui — restano a calendario per
 // pulizia storica, per costruzione del chiamante.
 export async function deleteGoogleCalendarEvent(refreshToken, eventId) {

@@ -400,104 +400,19 @@ export default function PazientiPage() {
     setGenOccProgress(null);
   }
 
-  // --- Cambio slot fisso: cadenza, giorno della settimana e/o ora ---
-  const [freqModal, setFreqModal] = useState(null);
-  // { step:'chiedi-data'|'loading'|'preview'|'writing'|'done'|'error', patientId, nome,
-  //   changes:{intervalDays?,weekday?,timeOfDay?}, daData, intervalDaysAttuale, weekdayAttuale,
-  //   timeOfDayAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
-
   const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Mensile" };
   const GIORNI_LABEL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
-
-  // Apre il modale al primo passaggio: chiede sempre "a partire da quando"
-  // riparte il nuovo assetto (Rientro). L'Uscita è sempre immediata e
-  // incondizionata — libera subito tutti i futuri non confermati — la data
-  // serve solo per ancorare il nuovo slot che nasce al Rientro.
-  function apriCambiaSlot(patient, changes) {
-    setFreqModal({ step: "chiedi-data", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, changes, daData: "" });
-  }
-
-  async function procediConData() {
-    const { patientId, changes, daData } = freqModal;
-    if (!daData) return;
-    setFreqModal((m) => ({ ...m, step: "loading" }));
-    try {
-      const res = await fetch("/api/calendar/cambia-frequenza-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId, daData, ...changes }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore nel calcolo dell'anteprima." }));
-        return;
-      }
-      setFreqModal((m) => ({
-        ...m,
-        step: "preview",
-        intervalDaysAttuale: data.intervalDaysAttuale,
-        weekdayAttuale: data.weekdayAttuale,
-        timeOfDayAttuale: data.timeOfDayAttuale,
-        daRimuovere: data.daRimuovere,
-        invariati: data.invariati,
-        eventiEsclusi: new Set(), // eventi che l'utente sceglie di tenere comunque, pur non confermati
-      }));
-    } catch (e) {
-      setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
-    }
-  }
-
-  function toggleFreqEsclusione(eventId) {
-    setFreqModal((m) => {
-      const next = new Set(m.eventiEsclusi);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return { ...m, eventiEsclusi: next };
-    });
-  }
-
-  async function confermaCambiaFrequenza() {
-    const { patientId, changes, daData, daRimuovere, eventiEsclusi } = freqModal;
-    setFreqModal((m) => ({ ...m, step: "writing" }));
-    try {
-      const res = await fetch("/api/calendar/cambia-frequenza-confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patientId,
-          daData,
-          ...changes,
-          eventIdsDaRimuovere: daRimuovere.filter((e) => !eventiEsclusi.has(e.eventId)).map((e) => e.eventId),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore durante la scrittura." }));
-        return;
-      }
-      // Uscita+Rientro cambia lo slot attivo (nuova riga, non un update sul
-      // posto) e fuori_schema — più semplice ricaricare tutto invece di
-      // patchare a mano lo stato locale.
-      load();
-      setFreqModal((m) => ({ ...m, step: "done", result: data }));
-    } catch (e) {
-      setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
-    }
-  }
-
-  function chiudiFreqModal() {
-    setFreqModal(null);
-  }
 
   // "Uscita" dalla programmazione fissa: il paziente resta attivo, torna
   // temporaneamente "su richiesta" (come un fuori-schema qualunque) finché
   // non si decide la nuova cadenza. Disattiva lo slot (dati non persi) e
   // rimuove dal calendario i SOLI appuntamenti futuri non ancora confermati
   // (segnaposto del vecchio ritmo) — quelli già confermati col paziente
-  // restano, non decadono per un cambio di programmazione.
-  async function passaSuRichiesta(patient) {
-    const nome = patient.nome_calendario || patient.fatturare_a;
-    if (!window.confirm(`Passare ${nome} a "su richiesta"? Lo slot fisso verrà disattivato e gli appuntamenti futuri NON ancora confermati verranno rimossi dal calendario — quelli già confermati col paziente restano.`)) return;
+  // restano, non decadono per un cambio di programmazione. Restituisce i
+  // dati della risposta (null se annullato o fallito) così sia "Su
+  // richiesta" (uscita e basta) sia "Cambia programmazione" (uscita seguita
+  // subito da un nuovo slot) possono riusare la stessa identica chiamata.
+  async function eseguiUscita(patient) {
     try {
       const res = await fetch("/api/calendar/esci-da-programmazione", {
         method: "POST",
@@ -507,7 +422,7 @@ export default function PazientiPage() {
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || "Errore durante l'uscita dalla programmazione.");
-        return;
+        return null;
       }
       setSlotsByPatientId((s) => {
         const next = { ...s };
@@ -515,13 +430,40 @@ export default function PazientiPage() {
         return next;
       });
       patchLocal(patient.id, { fuori_schema: true });
-      const avviso = data.cancellazioniFallite?.length
-        ? ` (attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova)`
-        : "";
-      alert(`Fatto: ${data.cancellati} appuntamenti non confermati rimossi, ${data.mantenuti} già confermati mantenuti.${avviso}`);
+      return data;
     } catch (e) {
       alert(e.message);
+      return null;
     }
+  }
+
+  async function passaSuRichiesta(patient) {
+    const nome = patient.nome_calendario || patient.fatturare_a;
+    if (!window.confirm(`Passare ${nome} a "su richiesta"? Lo slot fisso verrà disattivato e gli appuntamenti futuri NON ancora confermati verranno rimossi dal calendario — quelli già confermati col paziente restano.`)) return;
+    const data = await eseguiUscita(patient);
+    if (!data) return;
+    const avviso = data.cancellazioniFallite?.length
+      ? ` (attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova)`
+      : "";
+    alert(`Fatto: ${data.cancellati} appuntamenti non confermati rimossi, ${data.mantenuti} già confermati mantenuti.${avviso}`);
+  }
+
+  // Cambio di programmazione quando il nuovo assetto è già deciso: incatena
+  // Uscita (sgancio immediato dallo schema attuale, sopra) e Rientro (sotto,
+  // "Nuovo slot fisso" — stesso meccanismo di un paziente che riparte da
+  // zero) nella stessa interazione. Nessuna logica nuova: è la stessa cosa
+  // di cliccare prima "Su richiesta" e poi "Nuovo slot fisso" un mese dopo,
+  // solo fatta insieme perché qui si conosce già la destinazione.
+  async function cambiaProgrammazione(patient, intervalDaysOverride) {
+    const nome = patient.nome_calendario || patient.fatturare_a;
+    const cadenzaAttuale = slotsByPatientId[patient.id]?.interval_days;
+    if (!window.confirm(`Cambiare programmazione di ${nome}? Lo slot attuale verrà disattivato subito e gli appuntamenti futuri NON ancora confermati liberati (quelli già confermati restano) — poi scegli la prima seduta del nuovo assetto.`)) return;
+    const data = await eseguiUscita(patient);
+    if (!data) return;
+    if (data.cancellazioniFallite?.length) {
+      alert(`Attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova più tardi.`);
+    }
+    apriNuovoSlot(patient, intervalDaysOverride ?? cadenzaAttuale ?? 7);
   }
 
   // --- Nuovo slot fisso (paziente "su richiesta" che passa a una cadenza fissa) ---
@@ -850,7 +792,7 @@ export default function PazientiPage() {
                           if (v === "richiesta") {
                             passaSuRichiesta(p);
                           } else if (slotsByPatientId[p.id]) {
-                            apriCambiaSlot(p, { intervalDays: parseInt(v, 10) });
+                            cambiaProgrammazione(p, parseInt(v, 10));
                           } else {
                             apriNuovoSlot(p, parseInt(v, 10));
                           }
@@ -866,12 +808,18 @@ export default function PazientiPage() {
                   {visibleCols.giorno && (
                     <td>
                       {slotsByPatientId[p.id] ? (
-                        <select
-                          value={slotsByPatientId[p.id].weekday}
-                          onChange={(e) => apriCambiaSlot(p, { weekday: parseInt(e.target.value, 10) })}
-                        >
-                          {GIORNI_LABEL.map((g, i) => <option key={i} value={i}>{g}</option>)}
-                        </select>
+                        <span className="small" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {GIORNI_LABEL[slotsByPatientId[p.id].weekday]}
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: "2px 8px", fontSize: 12 }}
+                            title="Cambia giorno (esce dalla programmazione attuale e apre la scelta della prima seduta del nuovo assetto)"
+                            onClick={() => cambiaProgrammazione(p)}
+                          >
+                            cambia
+                          </button>
+                        </span>
                       ) : (
                         <span className="muted mono">—</span>
                       )}
@@ -880,11 +828,18 @@ export default function PazientiPage() {
                   {visibleCols.ora && (
                     <td>
                       {slotsByPatientId[p.id] ? (
-                        <input
-                          type="time"
-                          value={(slotsByPatientId[p.id].time_of_day || "").slice(0, 5)}
-                          onChange={(e) => apriCambiaSlot(p, { timeOfDay: `${e.target.value}:00` })}
-                        />
+                        <span className="small" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                          {(slotsByPatientId[p.id].time_of_day || "").slice(0, 5)}
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: "2px 8px", fontSize: 12 }}
+                            title="Cambia ora (esce dalla programmazione attuale e apre la scelta della prima seduta del nuovo assetto)"
+                            onClick={() => cambiaProgrammazione(p)}
+                          >
+                            cambia
+                          </button>
+                        </span>
                       ) : (
                         <span className="muted mono">—</span>
                       )}
@@ -1172,128 +1127,6 @@ export default function PazientiPage() {
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiGeneraOccorrenze}>Chiudi</button>
-              </div>
-            </>
-          )}
-        </Modal>
-      )}
-
-      {freqModal && (
-        <Modal maxWidth={640}>
-          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>
-            Cambio frequenza — {freqModal.nome}
-          </h2>
-
-          {freqModal.step === "chiedi-data" && (
-            <>
-              <p className="muted small">
-                {freqModal.changes.intervalDays !== undefined && <>Nuova cadenza: <strong>{FREQ_LABEL[freqModal.changes.intervalDays]}</strong>. </>}
-                {freqModal.changes.weekday !== undefined && <>Nuovo giorno: <strong>{GIORNI_LABEL[freqModal.changes.weekday]}</strong>. </>}
-                {freqModal.changes.timeOfDay !== undefined && <>Nuova ora: <strong>{freqModal.changes.timeOfDay.slice(0, 5)}</strong>. </>}
-              </p>
-              <label className="muted small" style={{ display: "block" }}>
-                A partire da quale data?
-                <input
-                  type="date"
-                  style={{ display: "block", width: "100%", marginTop: 4 }}
-                  value={freqModal.daData}
-                  onChange={(e) => setFreqModal((m) => ({ ...m, daData: e.target.value }))}
-                />
-              </label>
-              <p className="muted small" style={{ marginTop: 8 }}>
-                Il paziente esce subito dalla programmazione attuale: tutti gli appuntamenti futuri non ancora confermati si liberano da ora, non da questa data. La data serve solo per il rientro: dal giorno indicato riparte il nuovo assetto.
-              </p>
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Annulla</button>
-                <button className="btn btn-primary" disabled={!freqModal.daData} onClick={procediConData}>Continua</button>
-              </div>
-            </>
-          )}
-
-          {freqModal.step === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
-
-          {freqModal.step === "error" && (
-            <>
-              <p style={{ color: "crimson" }}>{freqModal.error}</p>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Chiudi</button>
-              </div>
-            </>
-          )}
-
-          {freqModal.step === "preview" && (
-            <>
-              <p className="muted small">
-                {freqModal.changes.intervalDays !== undefined && (
-                  <>Cadenza: da <strong>{FREQ_LABEL[freqModal.intervalDaysAttuale] || freqModal.intervalDaysAttuale + " gg"}</strong> a{" "}
-                  <strong>{FREQ_LABEL[freqModal.changes.intervalDays]}</strong>. </>
-                )}
-                {freqModal.changes.weekday !== undefined && (
-                  <>Giorno: da <strong>{GIORNI_LABEL[freqModal.weekdayAttuale]}</strong> a{" "}
-                  <strong>{GIORNI_LABEL[freqModal.changes.weekday]}</strong>. </>
-                )}
-                {freqModal.changes.timeOfDay !== undefined && (
-                  <>Ora: da <strong>{(freqModal.timeOfDayAttuale || "").slice(0, 5)}</strong> a{" "}
-                  <strong>{freqModal.changes.timeOfDay.slice(0, 5)}</strong>. </>
-                )}
-                A partire dal <strong>{freqModal.daData}</strong>.
-              </p>
-              <p className="muted small">
-                Il paziente esce subito dalla programmazione fissa attuale (nessuna prenotazione finché non rientra alla data scelta) e rientra con il nuovo assetto da quella data.
-              </p>
-
-              {freqModal.daRimuovere.length === 0 ? (
-                <p className="muted">Nessun appuntamento futuro da liberare — non ci sono ancora occorrenze da confermare sul calendario.</p>
-              ) : (
-                <>
-                  <p className="muted small">
-                    Questi appuntamenti futuri non ancora confermati verranno <strong>cancellati</strong> subito (il paziente non ha più prenotazioni fino al rientro) — togli la spunta a quelli che vuoi tenere comunque:
-                  </p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
-                    {freqModal.daRimuovere.map((e) => {
-                      const esclusa = freqModal.eventiEsclusi.has(e.eventId);
-                      return (
-                        <label key={e.eventId} className="small" style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: esclusa ? 0.5 : 1 }}>
-                          <input type="checkbox" checked={!esclusa} onChange={() => toggleFreqEsclusione(e.eventId)} />
-                          {e.data} {e.ora} {e.descrizione ? `— "${e.descrizione}"` : ""}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-
-              {freqModal.invariati.length > 0 && (
-                <p className="muted small">
-                  Già confermati, restano comunque: {freqModal.invariati.join(", ")}.
-                </p>
-              )}
-
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                <button className="btn btn-ghost" onClick={chiudiFreqModal}>Annulla</button>
-                <button className="btn btn-primary" onClick={confermaCambiaFrequenza}>Conferma</button>
-              </div>
-            </>
-          )}
-
-          {freqModal.step === "writing" && <p>Applico la nuova cadenza…</p>}
-
-          {freqModal.step === "done" && freqModal.result && (
-            <>
-              <p>
-                Fatto: uscita e rientro applicati, {freqModal.result.cancellati} appuntamenti non confermati liberati,{" "}
-                {freqModal.result.noteAggiornate} note ricalcolate.
-              </p>
-              {(freqModal.result.cancellazioniFallite?.length > 0 || freqModal.result.noteFallite?.length > 0 || freqModal.result.rinumeraError) && (
-                <p style={{ color: "crimson" }}>
-                  Attenzione: {freqModal.result.cancellazioniFallite?.length || 0} cancellazioni e{" "}
-                  {freqModal.result.noteFallite?.length || 0} aggiornamenti nota non sono andati a buon fine
-                  {freqModal.result.rinumeraError ? ` (${freqModal.result.rinumeraError})` : ""} — riprova il
-                  cambio di cadenza per completarli.
-                </p>
-              )}
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button className="btn btn-primary" onClick={() => { chiudiFreqModal(); load(); }}>Chiudi</button>
               </div>
             </>
           )}
