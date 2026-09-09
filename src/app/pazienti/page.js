@@ -25,6 +25,8 @@ const COLONNE_OPZIONALI = [
   { key: "cognome", label: "Cognome" },
   { key: "fatturare_a", label: "Fatturare a" },
   { key: "frequenza", label: "Frequenza" },
+  { key: "giorno", label: "Giorno" },
+  { key: "ora", label: "Ora" },
   { key: "codice_fiscale", label: "Codice fiscale" },
   { key: "tipologia", label: "Tipologia" },
   { key: "regime_tariffario", label: "Regime" },
@@ -398,20 +400,22 @@ export default function PazientiPage() {
     setGenOccProgress(null);
   }
 
-  // --- Cambio frequenza (patient_slots.interval_days) ---
+  // --- Cambio slot fisso: cadenza, giorno della settimana e/o ora ---
   const [freqModal, setFreqModal] = useState(null);
-  // { step:'loading'|'preview'|'writing'|'done'|'error', patientId, nome, nuovoIntervalDays,
-  //   intervalDaysAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
+  // { step:'loading'|'preview'|'writing'|'done'|'error', patientId, nome,
+  //   changes:{intervalDays?,weekday?,timeOfDay?}, intervalDaysAttuale, weekdayAttuale,
+  //   timeOfDayAttuale, daRimuovere:[...], invariati:[...], eventiEsclusi:Set, error, result }
 
   const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Mensile" };
+  const GIORNI_LABEL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
-  async function apriCambiaFrequenza(patient, nuovoIntervalDays) {
-    setFreqModal({ step: "loading", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, nuovoIntervalDays });
+  async function apriCambiaSlot(patient, changes) {
+    setFreqModal({ step: "loading", patientId: patient.id, nome: patient.nome_calendario || patient.fatturare_a, changes });
     try {
       const res = await fetch("/api/calendar/cambia-frequenza-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId: patient.id, intervalDays: nuovoIntervalDays }),
+        body: JSON.stringify({ patientId: patient.id, ...changes }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -422,9 +426,11 @@ export default function PazientiPage() {
         ...m,
         step: "preview",
         intervalDaysAttuale: data.intervalDaysAttuale,
+        weekdayAttuale: data.weekdayAttuale,
+        timeOfDayAttuale: data.timeOfDayAttuale,
         daRimuovere: data.daRimuovere,
         invariati: data.invariati,
-        eventiEsclusi: new Set(), // eventi che l'utente sceglie di NON cancellare, pur fuori dal nuovo ritmo
+        eventiEsclusi: new Set(), // eventi che l'utente sceglie di NON cancellare, pur fuori dal nuovo assetto
       }));
     } catch (e) {
       setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
@@ -441,7 +447,7 @@ export default function PazientiPage() {
   }
 
   async function confermaCambiaFrequenza() {
-    const { patientId, nuovoIntervalDays, daRimuovere, eventiEsclusi } = freqModal;
+    const { patientId, changes, daRimuovere, eventiEsclusi } = freqModal;
     setFreqModal((m) => ({ ...m, step: "writing" }));
     try {
       const res = await fetch("/api/calendar/cambia-frequenza-confirm", {
@@ -449,7 +455,7 @@ export default function PazientiPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId,
-          intervalDays: nuovoIntervalDays,
+          ...changes,
           eventIdsDaRimuovere: daRimuovere.filter((e) => !eventiEsclusi.has(e.eventId)).map((e) => e.eventId),
         }),
       });
@@ -458,7 +464,15 @@ export default function PazientiPage() {
         setFreqModal((m) => ({ ...m, step: "error", error: data.error || "Errore durante la scrittura." }));
         return;
       }
-      setSlotsByPatientId((s) => ({ ...s, [patientId]: { ...s[patientId], interval_days: nuovoIntervalDays } }));
+      setSlotsByPatientId((s) => ({
+        ...s,
+        [patientId]: {
+          ...s[patientId],
+          interval_days: changes.intervalDays ?? s[patientId]?.interval_days,
+          weekday: changes.weekday ?? s[patientId]?.weekday,
+          time_of_day: changes.timeOfDay ?? s[patientId]?.time_of_day,
+        },
+      }));
       setFreqModal((m) => ({ ...m, step: "done", result: data }));
     } catch (e) {
       setFreqModal((m) => ({ ...m, step: "error", error: e.message }));
@@ -789,6 +803,8 @@ export default function PazientiPage() {
                 {visibleCols.cognome && <th>Cognome</th>}
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
                 {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
+                {visibleCols.giorno && <th>Giorno</th>}
+                {visibleCols.ora && <th>Ora</th>}
                 {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
                 {visibleCols.tipologia && <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />}
                 {visibleCols.regime_tariffario && <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />}
@@ -828,7 +844,7 @@ export default function PazientiPage() {
                           if (v === "richiesta") {
                             passaSuRichiesta(p);
                           } else if (slotsByPatientId[p.id]) {
-                            apriCambiaFrequenza(p, parseInt(v, 10));
+                            apriCambiaSlot(p, { intervalDays: parseInt(v, 10) });
                           } else {
                             apriNuovoSlot(p, parseInt(v, 10));
                           }
@@ -839,6 +855,33 @@ export default function PazientiPage() {
                         <option value={28}>Mensile</option>
                         <option value="richiesta">Su richiesta</option>
                       </select>
+                    </td>
+                  )}
+                  {visibleCols.giorno && (
+                    <td>
+                      {slotsByPatientId[p.id] ? (
+                        <select
+                          value={slotsByPatientId[p.id].weekday}
+                          onChange={(e) => apriCambiaSlot(p, { weekday: parseInt(e.target.value, 10) })}
+                        >
+                          {GIORNI_LABEL.map((g, i) => <option key={i} value={i}>{g}</option>)}
+                        </select>
+                      ) : (
+                        <span className="muted mono">—</span>
+                      )}
+                    </td>
+                  )}
+                  {visibleCols.ora && (
+                    <td>
+                      {slotsByPatientId[p.id] ? (
+                        <input
+                          type="time"
+                          value={(slotsByPatientId[p.id].time_of_day || "").slice(0, 5)}
+                          onChange={(e) => apriCambiaSlot(p, { timeOfDay: `${e.target.value}:00` })}
+                        />
+                      ) : (
+                        <span className="muted mono">—</span>
+                      )}
                     </td>
                   )}
                   {visibleCols.codice_fiscale && (
@@ -1149,8 +1192,18 @@ export default function PazientiPage() {
           {freqModal.step === "preview" && (
             <>
               <p className="muted small">
-                Da <strong>{FREQ_LABEL[freqModal.intervalDaysAttuale] || freqModal.intervalDaysAttuale + " gg"}</strong> a{" "}
-                <strong>{FREQ_LABEL[freqModal.nuovoIntervalDays]}</strong>.
+                {freqModal.changes.intervalDays !== undefined && (
+                  <>Cadenza: da <strong>{FREQ_LABEL[freqModal.intervalDaysAttuale] || freqModal.intervalDaysAttuale + " gg"}</strong> a{" "}
+                  <strong>{FREQ_LABEL[freqModal.changes.intervalDays]}</strong>. </>
+                )}
+                {freqModal.changes.weekday !== undefined && (
+                  <>Giorno: da <strong>{GIORNI_LABEL[freqModal.weekdayAttuale]}</strong> a{" "}
+                  <strong>{GIORNI_LABEL[freqModal.changes.weekday]}</strong>. </>
+                )}
+                {freqModal.changes.timeOfDay !== undefined && (
+                  <>Ora: da <strong>{(freqModal.timeOfDayAttuale || "").slice(0, 5)}</strong> a{" "}
+                  <strong>{freqModal.changes.timeOfDay.slice(0, 5)}</strong>. </>
+                )}
               </p>
 
               {freqModal.daRimuovere.length === 0 ? (

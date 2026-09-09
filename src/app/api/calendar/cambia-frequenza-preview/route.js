@@ -1,13 +1,15 @@
-// Calcola l'anteprima di un cambio di cadenza (patient_slots.interval_days)
-// per un paziente: ricalcola le occorrenze attese con il NUOVO intervallo a
-// partire dallo stesso anchor_date, poi confronta con gli appuntamenti
-// futuri già presenti sul calendario per trovare quelli che non rientrano
-// più nel nuovo ritmo — quelli vanno tolti, altrimenti restano "fantasma"
-// fuori ciclo (visto dal vivo l'8/9 con Susanna e Simone). Non scrive nulla.
+// Calcola l'anteprima di un cambio allo slot fisso di un paziente —
+// cadenza (interval_days), giorno della settimana (weekday) e/o ora
+// (time_of_day), anche insieme: ricalcola le occorrenze attese con lo slot
+// AGGIORNATO a partire dallo stesso anchor_date, poi confronta con gli
+// appuntamenti futuri già presenti sul calendario per trovare quelli che
+// non rientrano più nel nuovo assetto — quelli vanno tolti, altrimenti
+// restano "fantasma" fuori ciclo (visto dal vivo l'8/9 con Susanna e
+// Simone). Non scrive nulla.
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { occorrenzeFuture, matchPatientForEvent, todayISO, addDays } from "@/lib/logic";
+import { occorrenzeFuture, matchPatientForEvent, todayISO, addDays, prossimoWeekday } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -19,9 +21,19 @@ export async function POST(request) {
 
   const body = await request.json().catch(() => ({}));
   const patientId = body.patientId;
-  const nuovoIntervalDays = Number(body.intervalDays);
-  if (!patientId || ![7, 14, 28].includes(nuovoIntervalDays)) {
+  // Ciascuno facoltativo: si aggiorna solo quello che viene passato, il
+  // resto resta quello attuale dello slot.
+  const nuovoIntervalDays = body.intervalDays != null ? Number(body.intervalDays) : undefined;
+  const nuovoWeekday = body.weekday != null ? Number(body.weekday) : undefined;
+  const nuovoTimeOfDay = body.timeOfDay || undefined;
+  if (!patientId || (nuovoIntervalDays === undefined && nuovoWeekday === undefined && nuovoTimeOfDay === undefined)) {
     return NextResponse.json({ error: "Parametri mancanti o non validi." }, { status: 400 });
+  }
+  if (nuovoIntervalDays !== undefined && ![7, 14, 28].includes(nuovoIntervalDays)) {
+    return NextResponse.json({ error: "Cadenza non valida." }, { status: 400 });
+  }
+  if (nuovoWeekday !== undefined && (nuovoWeekday < 0 || nuovoWeekday > 6)) {
+    return NextResponse.json({ error: "Giorno della settimana non valido." }, { status: 400 });
   }
 
   const [{ data: patients }, { data: slot }, { data: closures }, { data: tokenRow, error: tokenError }] = await Promise.all([
@@ -55,12 +67,24 @@ export async function POST(request) {
       .filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === patientId)
       .sort((a, b) => (a.data < b.data ? -1 : 1));
 
-    const nuoveDate = new Set(occorrenzeFuture({ ...slot, interval_days: nuovoIntervalDays }, closures || [], orizzonte, oggi));
+    // occorrenzeFuture calcola le date reali solo da anchor_date +
+    // interval_days: il campo weekday da solo non sposta nulla (serve solo
+    // ad abbinare le chiusure straordinarie), quindi un cambio di giorno
+    // richiede di ricalcolare anche l'anchor_date coerente con il nuovo
+    // giorno della settimana.
+    const slotProposto = {
+      ...slot,
+      interval_days: nuovoIntervalDays ?? slot.interval_days,
+      weekday: nuovoWeekday ?? slot.weekday,
+      time_of_day: nuovoTimeOfDay ?? slot.time_of_day,
+      anchor_date: nuovoWeekday !== undefined ? prossimoWeekday(slot.anchor_date, nuovoWeekday) : slot.anchor_date,
+    };
+    const nuoveDate = new Set(occorrenzeFuture(slotProposto, closures || [], orizzonte, oggi));
 
-    // L'appuntamento di OGGI non si tocca mai per un cambio di cadenza: se
-    // è già in corso o appena successo, cancellarlo qui sarebbe un effetto
-    // collaterale del cambio frequenza, non una scelta esplicita di
-    // Maurizio (stessa regola già applicata in "Genera occorrenze future").
+    // L'appuntamento di OGGI non si tocca mai per un cambio allo slot: se è
+    // già in corso o appena successo, cancellarlo qui sarebbe un effetto
+    // collaterale, non una scelta esplicita di Maurizio (stessa regola già
+    // applicata in "Genera occorrenze future").
     const daRimuovere = eventiPaziente
       .filter((e) => e.data !== oggi && !nuoveDate.has(e.data))
       .map((e) => ({ eventId: e.id, data: e.data, ora: e.ora, descrizione: e.descrizione }));
@@ -69,6 +93,8 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       intervalDaysAttuale: slot.interval_days,
+      weekdayAttuale: slot.weekday,
+      timeOfDayAttuale: slot.time_of_day,
       daRimuovere,
       invariati,
     });

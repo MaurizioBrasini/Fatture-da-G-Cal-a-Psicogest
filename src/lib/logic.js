@@ -31,6 +31,26 @@ export function addDays(dateStr, n) {
   return dt.toISOString().slice(0, 10);
 }
 
+// Giorno della settimana (0=domenica..6=sabato) di una data "YYYY-MM-DD",
+// calcolato a mezzogiorno UTC per non rischiare di scalare di un giorno per
+// via del fuso orario (stessa convenzione già usata negli script di
+// migrazione).
+export function weekdayOf(dateStr) {
+  return new Date(`${dateStr}T12:00:00Z`).getUTCDay();
+}
+
+// Sposta AVANTI una data fino al prossimo giorno della settimana richiesto
+// (0-6 giorni di scarto, mai indietro) — serve quando si cambia il "Giorno"
+// di uno slot fisso: occorrenzeFuture calcola le date reali solo da
+// anchor_date + interval_days, il campo weekday da solo non sposta nulla
+// (serve solo ad abbinare le chiusure straordinarie), quindi cambiare
+// davvero giorno richiede di ricalcolare anche l'anchor_date coerente.
+export function prossimoWeekday(dataISO, weekdayTarget) {
+  const attuale = weekdayOf(dataISO);
+  const scarto = (weekdayTarget - attuale + 7) % 7;
+  return addDays(dataISO, scarto);
+}
+
 // Converte una stringa "YYYY-MM-DD" in un vero oggetto Date a mezzanotte
 // locale (non UTC, per evitare che il giorno scali indietro di uno in
 // alcuni fusi orari). Serve per scrivere celle di tipo data reali nel file

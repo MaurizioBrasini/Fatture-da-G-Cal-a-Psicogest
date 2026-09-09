@@ -5,6 +5,8 @@
 import assert from "node:assert/strict";
 import {
   addDays,
+  weekdayOf,
+  prossimoWeekday,
   daysBetween,
   normalizeName,
   matchPatientForEvent,
@@ -48,6 +50,25 @@ test("addDays attraversa il cambio anno", () => {
 test("addDays gestisce anno bisestile (29 febbraio)", () => {
   assert.equal(addDays("2028-02-28", 1), "2028-02-29");
   assert.equal(addDays("2028-02-29", 1), "2028-03-01");
+});
+
+test("weekdayOf: 2024-01-01 e' un lunedi' (1)", () => {
+  assert.equal(weekdayOf("2024-01-01"), 1);
+});
+test("prossimoWeekday: stesso giorno della settimana richiesto -> nessuno scarto", () => {
+  const oggi = "2026-09-15"; // qualunque data
+  assert.equal(prossimoWeekday(oggi, weekdayOf(oggi)), oggi);
+});
+test("prossimoWeekday: sposta sempre in AVANTI, mai indietro (scarto 0-6 giorni)", () => {
+  const lunedi = "2024-01-01"; // lunedi' (weekday 1)
+  assert.equal(prossimoWeekday(lunedi, 2), "2024-01-02"); // martedi', +1
+  assert.equal(prossimoWeekday(lunedi, 0), "2024-01-07"); // domenica, +6 (mai -1)
+  assert.equal(prossimoWeekday(lunedi, 1), lunedi); // stesso giorno, +0
+});
+test("prossimoWeekday attraversa il cambio mese", () => {
+  // 2024-01-31 e' mercoledi' (3); giovedi' (4) successivo e' il 1 febbraio.
+  assert.equal(weekdayOf("2024-01-31"), 3);
+  assert.equal(prossimoWeekday("2024-01-31", 4), "2024-02-01");
 });
 
 test("daysBetween conta i giorni tra due date", () => {

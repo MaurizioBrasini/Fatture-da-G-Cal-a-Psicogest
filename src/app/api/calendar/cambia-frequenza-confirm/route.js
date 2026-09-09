@@ -6,7 +6,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent, fetchGoogleCalendarEvents, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
-import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
+import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays, prossimoWeekday } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -18,10 +18,15 @@ export async function POST(request) {
 
   const body = await request.json().catch(() => ({}));
   const patientId = body.patientId;
-  const nuovoIntervalDays = Number(body.intervalDays);
+  const nuovoIntervalDays = body.intervalDays != null ? Number(body.intervalDays) : undefined;
+  const nuovoWeekday = body.weekday != null ? Number(body.weekday) : undefined;
+  const nuovoTimeOfDay = body.timeOfDay || undefined;
   const eventIdsDaRimuovere = Array.isArray(body.eventIdsDaRimuovere) ? body.eventIdsDaRimuovere : [];
-  if (!patientId || ![7, 14, 28].includes(nuovoIntervalDays)) {
+  if (!patientId || (nuovoIntervalDays === undefined && nuovoWeekday === undefined && nuovoTimeOfDay === undefined)) {
     return NextResponse.json({ error: "Parametri mancanti o non validi." }, { status: 400 });
+  }
+  if (nuovoIntervalDays !== undefined && ![7, 14, 28].includes(nuovoIntervalDays)) {
+    return NextResponse.json({ error: "Cadenza non valida." }, { status: 400 });
   }
 
   const { data: tokenRow, error: tokenError } = await supabase
@@ -37,19 +42,43 @@ export async function POST(request) {
   }
 
   try {
+    // Serve leggere lo slot attuale PRIMA di scrivere: se cambia il giorno
+    // della settimana, occorrenzeFuture calcola le date reali solo da
+    // anchor_date + interval_days (weekday da solo serve solo ad abbinare
+    // le chiusure straordinarie), quindi va ricalcolato anche l'anchor_date
+    // coerente col nuovo giorno — stessa logica già usata in anteprima.
+    const { data: slotAttuale, error: slotLetturaError } = await supabase
+      .from("patient_slots")
+      .select("anchor_date")
+      .eq("patient_id", patientId)
+      .eq("active", true)
+      .maybeSingle();
+    if (slotLetturaError) throw new Error(slotLetturaError.message);
+    if (!slotAttuale) {
+      throw new Error("Nessuno slot fisso attivo trovato per questo paziente: nessuna modifica scritta.");
+    }
+
+    const aggiornamentoSlot = {};
+    if (nuovoIntervalDays !== undefined) aggiornamentoSlot.interval_days = nuovoIntervalDays;
+    if (nuovoWeekday !== undefined) {
+      aggiornamentoSlot.weekday = nuovoWeekday;
+      aggiornamentoSlot.anchor_date = prossimoWeekday(slotAttuale.anchor_date, nuovoWeekday);
+    }
+    if (nuovoTimeOfDay !== undefined) aggiornamentoSlot.time_of_day = nuovoTimeOfDay;
+
     const { data: slotAggiornato, error: slotError } = await supabase
       .from("patient_slots")
-      .update({ interval_days: nuovoIntervalDays })
+      .update(aggiornamentoSlot)
       .eq("patient_id", patientId)
       .eq("active", true)
       .select("id");
     if (slotError) throw new Error(slotError.message);
     // .update().eq() non dà errore se nessuna riga corrisponde (es. lo slot
     // è stato disattivato tra l'anteprima e la conferma) — senza questo
-    // controllo proseguiremmo a cancellare appuntamenti come se la cadenza
-    // fosse davvero cambiata, quando in realtà non è stato scritto nulla.
+    // controllo proseguiremmo a cancellare appuntamenti come se lo slot
+    // fosse davvero cambiato, quando in realtà non è stato scritto nulla.
     if (!slotAggiornato || slotAggiornato.length === 0) {
-      throw new Error("Nessuno slot fisso attivo trovato per questo paziente: la cadenza non è stata cambiata.");
+      throw new Error("Nessuno slot fisso attivo trovato per questo paziente: nessuna modifica scritta.");
     }
 
     // Cancellazioni e aggiornamenti nota proseguono elemento per elemento
