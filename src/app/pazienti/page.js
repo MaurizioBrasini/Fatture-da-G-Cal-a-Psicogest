@@ -469,21 +469,39 @@ export default function PazientiPage() {
     setFreqModal(null);
   }
 
-  // Passa un paziente con slot fisso a "su richiesta": disattiva lo slot
-  // (i dati restano, riattivabile in futuro scegliendo di nuovo una cadenza
-  // fissa) e marca fuori_schema — nessuna scrittura sul calendario, le
-  // sedute già generate restano dove sono.
+  // "Uscita" dalla programmazione fissa: il paziente resta attivo, torna
+  // temporaneamente "su richiesta" (come un fuori-schema qualunque) finché
+  // non si decide la nuova cadenza. Disattiva lo slot (dati non persi) e
+  // rimuove dal calendario i SOLI appuntamenti futuri non ancora confermati
+  // (segnaposto del vecchio ritmo) — quelli già confermati col paziente
+  // restano, non decadono per un cambio di programmazione.
   async function passaSuRichiesta(patient) {
     const nome = patient.nome_calendario || patient.fatturare_a;
-    if (!window.confirm(`Passare ${nome} a "su richiesta"? Lo slot fisso attuale verrà disattivato — le sedute già sul calendario non vengono toccate, solo non se ne generano più di nuove in automatico.`)) return;
-    await supabase.from("patient_slots").update({ active: false }).eq("patient_id", patient.id).eq("active", true);
-    await supabase.from("patients").update({ fuori_schema: true }).eq("id", patient.id);
-    setSlotsByPatientId((s) => {
-      const next = { ...s };
-      delete next[patient.id];
-      return next;
-    });
-    patchLocal(patient.id, { fuori_schema: true });
+    if (!window.confirm(`Passare ${nome} a "su richiesta"? Lo slot fisso verrà disattivato e gli appuntamenti futuri NON ancora confermati verranno rimossi dal calendario — quelli già confermati col paziente restano.`)) return;
+    try {
+      const res = await fetch("/api/calendar/esci-da-programmazione", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId: patient.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Errore durante l'uscita dalla programmazione.");
+        return;
+      }
+      setSlotsByPatientId((s) => {
+        const next = { ...s };
+        delete next[patient.id];
+        return next;
+      });
+      patchLocal(patient.id, { fuori_schema: true });
+      const avviso = data.cancellazioniFallite?.length
+        ? ` (attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova)`
+        : "";
+      alert(`Fatto: ${data.cancellati} appuntamenti non confermati rimossi, ${data.mantenuti} già confermati mantenuti.${avviso}`);
+    } catch (e) {
+      alert(e.message);
+    }
   }
 
   // --- Nuovo slot fisso (paziente "su richiesta" che passa a una cadenza fissa) ---
