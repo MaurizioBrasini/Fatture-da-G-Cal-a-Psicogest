@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
@@ -19,6 +18,7 @@ import {
   BOOKING_COLOR_ID,
 } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
+import { useRinumerazione } from "@/lib/useRinumerazione";
 import { leggiRoutine, segnaRoutine } from "@/lib/routineChecklist";
 
 function sortPatients(list, computed, sort) {
@@ -74,6 +74,14 @@ export default function DashboardPage() {
   function segna(step, valore = true) {
     setRoutine(segnaRoutine(todayISO(), step, valore));
   }
+  // "Rinumera tutti" può partire anche da qui, non solo da Pazienti — stessa
+  // logica/modale condivisa (src/lib/useRinumerazione.js). Il callback
+  // rilegge la checklist da localStorage dopo una conferma riuscita: la
+  // scrittura di segnaRoutine dentro l'hook non aggiorna da sola lo useState
+  // di questa pagina.
+  const { apriRinumerazione, renumerazioneModal } = useRinumerazione({
+    onRinumeraTuttiCompletato: () => setRoutine(leggiRoutine(todayISO())),
+  });
 
   // --- Modale numero fattura (sostituisce window.prompt) ---
   const [numeroModal, setNumeroModal] = useState(null); // null | { patientIds, value }
@@ -604,11 +612,9 @@ export default function DashboardPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
               <span className="small" style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}>
-                3. Rinumera tutti (pagina Pazienti)
+                3. Rinumera tutti
               </span>
-              <Link href="/pazienti" className="btn-small" style={{ textDecoration: "none", display: "inline-block" }}>
-                Vai a Pazienti
-              </Link>
+              <button className="btn-small" onClick={() => apriRinumerazione(null)}>Fai ora</button>
             </div>
           </div>
           {groups.pronto.length > 0 && (
@@ -901,6 +907,8 @@ export default function DashboardPage() {
           </div>
         </section>
       </main>
+
+      {renumerazioneModal}
 
       {numeroModal && (
         <Modal maxWidth={420}>
