@@ -482,6 +482,116 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients) 
 }
 
 // ---------------------------------------------------------------------
+// Prenotazioni online (Google Calendar Appointment Schedule): riconoscimento
+// e abbinamento delle prenotazioni fatte dal link "Prenotazioni online dr.
+// Brasini" — usato per supervisioni/consulenze estemporanee, pazienti fuori
+// schema che riprenotano prima del prossimo appuntamento pianificato, e
+// primi colloqui di nuovi pazienti (sezione C del piano di lavoro, vedi
+// memoria "appuntamenti-engine-spec"). Questi eventi NON generano mai un
+// patient_slot: restano sempre singole occorrenze isolate da abbinare/
+// contare, mai una base per generare automaticamente occorrenze future.
+// ---------------------------------------------------------------------
+
+export const BOOKING_TITLE_REGEX = /^Prenotazioni online dr\.\s*Brasini/i;
+// colorId "3" = Uva/Grape ("vinaccia") — Maurizio lo usa apposta per notare
+// a colpo d'occhio, su Google Calendar, quali appuntamenti sono arrivati dal
+// link di prenotazione invece che decisi da lui; resta permanente anche dopo
+// la riconciliazione (mai confuso col bottone confermato/da confermare, che
+// va disattivato per questi eventi).
+export const BOOKING_COLOR_ID = "3";
+
+// Estrae nome ed email di chi ha prenotato dalla descrizione che Google
+// scrive in automatico sull'evento ("<b>Prenotato da</b>\nNome\nemail").
+export function parseBookingInfo(descrizione) {
+  const testo = (descrizione || "").replace(/<[^>]+>/g, "\n");
+  const righe = testo.split("\n").map((r) => r.trim()).filter(Boolean);
+  const idx = righe.findIndex((r) => /prenotato da/i.test(r));
+  if (idx < 0) return { nome: null, email: null };
+  const nome = righe[idx + 1] || null;
+  const possibileEmail = righe[idx + 2] || null;
+  return { nome, email: possibileEmail && possibileEmail.includes("@") ? possibileEmail.toLowerCase() : null };
+}
+
+function tokenizzaNome(s) {
+  return normalizeName(s).split(" ").filter(Boolean);
+}
+
+// Abbina chi ha prenotato online (nome libero + email) a un paziente già in
+// anagrafica, usando nome/cognome VERI (non l'abbreviazione nome_calendario,
+// che chi prenota non conosce) più l'email se già salvata su un paziente da
+// una riconciliazione precedente. confidence: "forte" (email combacia, o
+// nome E cognome combaciano su un unico paziente), "debole" (un solo token —
+// solo nome o solo cognome — combacia su un unico paziente), "ambiguo" (più
+// candidati, nessuna scelta automatica), null (nessun candidato).
+export function matchBookingToPatient(bookerNome, bookerEmail, patients) {
+  const emailNorm = (bookerEmail || "").trim().toLowerCase();
+  if (emailNorm) {
+    const perEmail = patients.filter((p) => (p.email || "").trim().toLowerCase() === emailNorm);
+    if (perEmail.length === 1) return { patient: perEmail[0], confidence: "forte", candidati: [] };
+  }
+
+  const tokens = tokenizzaNome(bookerNome);
+  if (!tokens.length) return { patient: null, confidence: null, candidati: [] };
+
+  const scored = patients
+    .map((p) => {
+      const nomeTok = tokenizzaNome(p.nome);
+      const cognomeTok = tokenizzaNome(p.cognome);
+      const haNome = nomeTok.length > 0 && nomeTok.every((t) => tokens.includes(t));
+      const haCognome = cognomeTok.length > 0 && cognomeTok.every((t) => tokens.includes(t));
+      return { patient: p, haNome, haCognome };
+    })
+    .filter((s) => s.haNome || s.haCognome);
+
+  const forti = scored.filter((s) => s.haNome && s.haCognome);
+  if (forti.length === 1) return { patient: forti[0].patient, confidence: "forte", candidati: [] };
+  if (forti.length > 1) return { patient: null, confidence: "ambiguo", candidati: forti.map((s) => s.patient) };
+  if (scored.length === 1) return { patient: scored[0].patient, confidence: "debole", candidati: [] };
+  if (scored.length > 1) return { patient: null, confidence: "ambiguo", candidati: scored.map((s) => s.patient) };
+  return { patient: null, confidence: null, candidati: [] };
+}
+
+// Scandisce gli eventi alla ricerca delle prenotazioni online (titolo +
+// eventualmente colore), le abbina se possibile e le classifica in 4 gruppi:
+// "pronte" (paziente trovato E nome_calendario già impostato: pronte a
+// rinominare+rinumerare), "inAttesa" (paziente trovato ma nome_calendario
+// ancora da scegliere), "ambigue" (più candidati, scelta manuale), "nuove"
+// (nessun paziente esistente combacia). Non scrive nulla: la correzione del
+// colore e le scritture vere restano a carico della route chiamante.
+export function computePrenotazioniPreview(events, patients) {
+  const righe = events
+    .filter((e) => BOOKING_TITLE_REGEX.test(e.titolo || ""))
+    .map((e) => {
+      const { nome: bookerNome, email: bookerEmail } = parseBookingInfo(e.descrizione);
+      const match = matchBookingToPatient(bookerNome, bookerEmail, patients);
+      return {
+        eventId: e.id,
+        data: e.data,
+        ora: e.ora,
+        titoloAttuale: e.titolo,
+        colorId: e.colorId,
+        bookerNome,
+        bookerEmail,
+        patientId: match.patient?.id || null,
+        patientNome: match.patient ? match.patient.nome_calendario || null : null,
+        confidence: match.confidence,
+        candidati: (match.candidati || []).map((p) => ({
+          id: p.id,
+          nome: p.nome_calendario || `${p.nome || ""} ${p.cognome || ""}`.trim(),
+        })),
+      };
+    })
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+
+  return {
+    pronte: righe.filter((r) => r.patientId && r.patientNome),
+    inAttesa: righe.filter((r) => r.patientId && !r.patientNome),
+    ambigue: righe.filter((r) => !r.patientId && r.confidence === "ambiguo"),
+    nuove: righe.filter((r) => !r.patientId && r.confidence !== "ambiguo"),
+  };
+}
+
+// ---------------------------------------------------------------------
 // Quota in contanti non fatturata (es. paziente che paga 60€ in fattura +
 // 10€ a parte in contanti, mai su Psicogest) — si accumula da sola ad ogni
 // fattura confermata, ed è saldabile anche parzialmente.
