@@ -10,6 +10,7 @@ import {
   matchPatientForEvent,
   computePatientState,
   buildInvoiceRow,
+  buildPsicogestAnagraficaRow,
   letteraCodice,
   formatCodice,
   stripCodiceEsistente,
@@ -162,6 +163,35 @@ test("buildInvoiceRow: fatturaDATAPAGAMENTO non è presente come chiave (non pag
   const computed = { count: 1, usati: [{ data: "2026-01-10" }], ultimaData: "2026-01-10" };
   const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-15", 1, 100);
   assert.ok(!("fatturaDATAPAGAMENTO" in row));
+});
+
+// --- buildPsicogestAnagraficaRow: export anagrafica per l'import Psicogest ---
+test("buildPsicogestAnagraficaRow: valorizza nome/cognome/CF e i default fissi", () => {
+  const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" });
+  assert.equal(row.Nome, "Mario");
+  assert.equal(row.Cognome, "Rossi");
+  assert.equal(row["Codice Fiscale"], "RSSMRA80A01H501U");
+  assert.equal(row.Privato, "Privato");
+  assert.equal(row.Nazione, "Italia");
+});
+test("buildPsicogestAnagraficaRow: email/telefono/note assenti come chiave se non compilati (non stringa vuota)", () => {
+  const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" });
+  assert.ok(!("Email" in row));
+  assert.ok(!("Telefono 1" in row));
+  assert.ok(!("Note" in row));
+});
+test("buildPsicogestAnagraficaRow: email/telefono/note inclusi quando presenti", () => {
+  const row = buildPsicogestAnagraficaRow({
+    nome: "Mario",
+    cognome: "Rossi",
+    codice_fiscale: "RSSMRA80A01H501U",
+    email: "mario@example.com",
+    telefono: "333 1234567",
+    note: "deve 50€",
+  });
+  assert.equal(row.Email, "mario@example.com");
+  assert.equal(row["Telefono 1"], "333 1234567");
+  assert.equal(row.Note, "deve 50€");
 });
 
 // --- Numerazione sedute su calendario ---

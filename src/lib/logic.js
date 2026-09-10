@@ -332,6 +332,73 @@ export const COLUMN_ORDER = [
   "fatturaDATAPAGAMENTO",
 ];
 
+// Riga per l'import "anagrafica pazienti" di Psicogest (Strumenti → Importa,
+// distinto dall'import fatture sopra) — stesse colonne/ordine del file
+// d'esempio scaricato da Psicogest (Appunti/Settings/psicogest pazienti.xls).
+// Psicogest deduplica per Codice Fiscale/Partita IVA, quindi è sicuro
+// riesportare l'anagrafica intera ogni volta: i pazienti già presenti
+// vengono semplicemente ignorati.
+//
+// Solo i campi che abbiamo davvero vengono valorizzati; tutto il resto (ID
+// personale, indirizzo, data di nascita, dati fiscali che non teniamo, "Data
+// creazione in Psicogest"...) resta fuori dall'oggetto invece di essere
+// scritto come stringa vuota — stessa cautela già imparata con
+// fatturaDATAPAGAMENTO in buildInvoiceRow, per non rischiare che un parser
+// lato Psicogest tratti una cella vuota diversamente da una chiave assente.
+export function buildPsicogestAnagraficaRow(patient) {
+  const row = {
+    Privato: "Privato",
+    Saluto: "Gentile",
+    Nome: patient.nome || "",
+    Cognome: patient.cognome || "",
+    Nazione: "Italia",
+    "Codice Fiscale": patient.codice_fiscale || "",
+    "Opposizione trasm. S.T.S.": "No",
+    "Omette R.A.": "No",
+    "Cliente P.A.": "No",
+    Archiviato: "No",
+  };
+  if (patient.telefono) row["Telefono 1"] = patient.telefono;
+  if (patient.email) row["Email"] = patient.email;
+  if (patient.note) row["Note"] = patient.note;
+  return row;
+}
+
+export const PSICOGEST_ANAGRAFICA_COLUMN_ORDER = [
+  "ID personale",
+  "Privato",
+  "Saluto",
+  "Ragione sociale",
+  "Nome",
+  "Cognome",
+  "Indirizzo 1",
+  "Indirizzo 2",
+  "Località",
+  "Provincia",
+  "Telefono 1",
+  "Telefono 2",
+  "Email",
+  "Email 2",
+  "Email PEC",
+  "CAP",
+  "Nazione",
+  "Partita IVA",
+  "Codice Fiscale",
+  "Data nascita",
+  "Luogo nascita",
+  "Note",
+  "Informazioni aggiuntive",
+  "Opposizione trasm. S.T.S.",
+  "Omette R.A.",
+  "Cliente P.A.",
+  "Codice dest. SDI",
+  "Percentuale R.A.",
+  "Percentuale Imponibile per R.A.",
+  "Data creazione in Psicogest",
+  "Tags",
+  "Archiviato",
+];
+
 export const DEFAULT_SETTINGS = {
   soglia_default: 5,
   giorni_stale: 60,

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
-import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -24,6 +24,8 @@ const COLONNE_OPZIONALI = [
   { key: "nome", label: "Nome" },
   { key: "cognome", label: "Cognome" },
   { key: "fatturare_a", label: "Fatturare a" },
+  { key: "email", label: "Email" },
+  { key: "telefono", label: "Telefono" },
   { key: "frequenza", label: "Frequenza" },
   { key: "giorno", label: "Giorno" },
   { key: "ora", label: "Ora" },
@@ -592,6 +594,8 @@ export default function PazientiPage() {
       Nome: p.nome || "",
       Cognome: p.cognome || "",
       "Fatturare a": p.fatturare_a,
+      Email: p.email || "",
+      Telefono: p.telefono || "",
       "Codice fiscale": p.codice_fiscale,
       Tipologia: TIPOLOGIA_LABEL[p.tipologia] || p.tipologia,
       Regime: p.regime_tariffario === "agevolata" ? "Agevolata" : "Regolare",
@@ -636,6 +640,8 @@ export default function PazientiPage() {
         const rawGiorniStale = row["Giorni inattività"];
         const rawSoglia = row["Soglia fatturazione"];
         const rawTariffa = row["Tariffa"];
+        const email = String(row["Email"] || "").trim();
+        const telefono = String(row["Telefono"] || "").trim();
 
         if (existing) {
           const patch = {
@@ -643,6 +649,8 @@ export default function PazientiPage() {
             nome: nomeCol || existing.nome,
             cognome: cognomeCol || existing.cognome,
             fatturare_a: fatturareA,
+            email: email || existing.email,
+            telefono: telefono || existing.telefono,
             tipologia,
             regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || existing.costo_unitario,
@@ -659,6 +667,8 @@ export default function PazientiPage() {
             nome: nomeCol,
             cognome: cognomeCol,
             fatturare_a: fatturareA,
+            email,
+            telefono,
             tipologia,
             regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || 80,
@@ -674,6 +684,34 @@ export default function PazientiPage() {
       alert(`Import completato: ${updated} pazienti aggiornati, ${added} nuovi aggiunti.`);
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  // Export "anagrafica pazienti" nel formato che Psicogest stesso accetta in
+  // Strumenti → Importa (distinto dall'export "Esporta anagrafica" sopra,
+  // che è il roundtrip Excel per modificare in blocco i nostri dati, non un
+  // formato Psicogest). Psicogest deduplica per Codice Fiscale/Partita IVA,
+  // quindi si può riesportare tutta l'anagrafica ogni volta senza creare
+  // doppioni: i pazienti già presenti vengono semplicemente ignorati.
+  function exportPsicogestAnagrafica() {
+    const esportabili = patients.filter((p) => p.nome && p.cognome && p.codice_fiscale);
+    const saltati = patients.length - esportabili.length;
+    if (!esportabili.length) {
+      alert("Nessun paziente con Nome, Cognome e Codice fiscale tutti compilati: niente da esportare.");
+      return;
+    }
+    const rows = esportabili.map(buildPsicogestAnagraficaRow);
+    const ws = XLSX.utils.json_to_sheet(rows, { header: PSICOGEST_ANAGRAFICA_COLUMN_ORDER });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Foglio 1");
+    // Psicogest accetta solo .xls dal selettore file (stessa scoperta già
+    // fatta con l'import fatture).
+    XLSX.writeFile(wb, `anagrafica_psicogest_${todayISO()}.xls`, { bookType: "xls" });
+    if (saltati > 0) {
+      alert(
+        `Esportati ${esportabili.length} pazienti. ${saltati} saltati perché manca Nome, Cognome o Codice fiscale ` +
+          `(es. pazienti "coppia" con un solo record per due persone — vanno gestiti a mano in Psicogest).`
+      );
+    }
   }
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
@@ -699,6 +737,7 @@ export default function PazientiPage() {
             <button className="btn btn-primary" onClick={saveAll}>Salva tutte le modifiche</button>
             <button className="btn btn-ghost" onClick={exportAnagrafica}>Scarica anagrafica (.xlsx)</button>
             <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>Carica anagrafica (.xlsx)</button>
+            <button className="btn btn-ghost" title="Genera un .xls nel formato che Psicogest accetta in Strumenti → Importa: i pazienti già presenti (per Codice fiscale) vengono ignorati, quindi si può riesportare tutto senza doppioni" onClick={exportPsicogestAnagrafica}>Esporta per Psicogest</button>
             <input
               ref={fileInputRef}
               type="file"
@@ -750,6 +789,8 @@ export default function PazientiPage() {
                 {visibleCols.nome && <th>Nome</th>}
                 {visibleCols.cognome && <th>Cognome</th>}
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
+                {visibleCols.email && <th>Email</th>}
+                {visibleCols.telefono && <th>Telefono</th>}
                 {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
                 {visibleCols.giorno && <th>Giorno</th>}
                 {visibleCols.ora && <th>Ora</th>}
@@ -783,6 +824,12 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.fatturare_a && (
                     <td><input value={p.fatturare_a || ""} onChange={(e) => updateLocal(p.id, "fatturare_a", e.target.value)} onBlur={(e) => persistField(p.id, "fatturare_a", e.target.value)} /></td>
+                  )}
+                  {visibleCols.email && (
+                    <td><input type="email" value={p.email || ""} onChange={(e) => updateLocal(p.id, "email", e.target.value)} onBlur={(e) => persistField(p.id, "email", e.target.value)} /></td>
+                  )}
+                  {visibleCols.telefono && (
+                    <td><input value={p.telefono || ""} onChange={(e) => updateLocal(p.id, "telefono", e.target.value)} onBlur={(e) => persistField(p.id, "telefono", e.target.value)} /></td>
                   )}
                   {visibleCols.frequenza && (
                     <td>
