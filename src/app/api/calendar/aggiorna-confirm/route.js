@@ -12,6 +12,18 @@
 //    (e non passano dalla scansione delle note "disdetto"). Le buche (charged,
 //    non manuali) restano a calendario per pulizia storica — il conteggio non
 //    dipende più dalla loro presenza.
+// 3) SOLO se billing_status = not_charged (evento assente dal calendario, sia
+//    perché appena cancellato qui sia perché già rimosso a mano), registra
+//    anche la data in `skipped_occurrences` — altrimenti resta l'unica fonte
+//    che "Genera occorrenze future" consulta per sapere quali date NON
+//    rigenerare, e occorrenzeFuture (logic.js) non ha alcuna idea di questa
+//    disdetta: la ricalcola sempre dalla pura matematica anchor_date+interval,
+//    quindi vede la data come "mancante" e la ricrea da zero al giro
+//    successivo. Bug reale 2026-09-10: chiusura del 24/9 + rigenerazione
+//    hanno resuscitato Simone Z. e Isabella e Simone su una data che loro
+//    stessi avevano già disdetto per conto proprio, senza nessuna chiusura
+//    di mezzo — la disdetta paziente non lascia traccia da nessuna parte che
+//    il generatore di occorrenze legga.
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
@@ -57,8 +69,18 @@ export async function POST(request) {
       // procede comunque all'eventuale rimozione dell'evento.
       if (insertError && insertError.code !== "23505") throw new Error(insertError.message);
 
-      if (c.billingStatus === "not_charged" && !c.manual) {
-        await deleteGoogleCalendarEvent(tokenRow.refresh_token, c.eventId);
+      if (c.billingStatus === "not_charged") {
+        if (!c.manual) {
+          await deleteGoogleCalendarEvent(tokenRow.refresh_token, c.eventId);
+        }
+        // Idempotente (onConflict ignora se già presente da un giro
+        // precedente o da "Genera occorrenze future"): impedisce che questa
+        // data ricompaia come "occorrenza mancante" la prossima volta che si
+        // rilancia quel bottone.
+        await supabase.from("skipped_occurrences").upsert(
+          { user_id: user.id, patient_id: c.patientId, data: c.data },
+          { onConflict: "patient_id,data", ignoreDuplicates: true }
+        );
       }
       risultati.push({ eventId: c.eventId, ok: true });
     } catch (e) {
