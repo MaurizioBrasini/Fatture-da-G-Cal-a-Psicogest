@@ -1,15 +1,17 @@
-// Calcola l'anteprima di una chiusura/indisponibilità (giornata intera, o
-// solo da un certo orario in poi, su un intervallo di date): espande la
-// richiesta nelle fasce weekday+ora coinvolte (espandiChiusura), poi
-// ricalcola le occorrenze corrette per ogni slot fisso attivo e trova gli
-// eventi già creati che non corrisponderebbero più — da proporre in
+// Calcola l'anteprima di una chiusura/indisponibilità (una finestra
+// continua da dataInizio+oraInizio a dataFine+oraFine): trova i conflitti
+// REALI sul calendario (rilevaConflittiChiusura — solo pazienti che hanno
+// davvero un appuntamento dentro la finestra, mai in base al solo orario
+// nominale della fascia, per non coinvolgere chi ha già disdetto per conto
+// suo), poi ricalcola le occorrenze corrette per gli slot coinvolti e trova
+// gli eventi già creati che non corrisponderebbero più — da proporre in
 // cancellazione (solo se ancora "da confermare") o solo da segnalare (se già
 // confermati o prenotati online: mai toccati in automatico). Non scrive
 // nulla su calendario o database.
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { espandiChiusura, computeImpattoChiusura, todayISO, addDays } from "@/lib/logic";
+import { rilevaConflittiChiusura, computeImpattoChiusura, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -41,21 +43,28 @@ export async function POST(request) {
     );
   }
 
-  const tutteLeFasce = espandiChiusura({ dataInizio, oraInizio, dataFine, oraFine, note }, patientSlots || []);
-  const giaEsistenti = new Set(
-    (closureEsistenti || []).map((c) => `${c.weekday}|${c.time_of_day}|${c.closure_date}`)
-  );
-  const nuoveChiusure = tutteLeFasce.filter((c) => !giaEsistenti.has(`${c.weekday}|${c.time_of_day}|${c.closure_date}`));
-
-  if (!nuoveChiusure.length) {
-    return NextResponse.json({ ok: true, nuoveChiusure: [], daCancellare: [], daVerificare: [], alternanzaCoinvolta: [] });
-  }
-
   const oggi = todayISO();
   const dataMassima = addDays(oggi, giorniAvanti);
 
   try {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, oggi, dataMassima);
+
+    const conflitti = rilevaConflittiChiusura(patientSlots || [], patients || [], events, {
+      dataInizio,
+      oraInizio,
+      dataFine,
+      oraFine,
+      note,
+    });
+    const giaEsistenti = new Set(
+      (closureEsistenti || []).map((c) => `${c.weekday}|${c.time_of_day}|${c.closure_date}`)
+    );
+    const nuoveChiusure = conflitti.filter((c) => !giaEsistenti.has(`${c.weekday}|${c.time_of_day}|${c.closure_date}`));
+
+    if (!nuoveChiusure.length) {
+      return NextResponse.json({ ok: true, nuoveChiusure: [], daCancellare: [], daVerificare: [], alternanzaCoinvolta: [] });
+    }
+
     const closureComplete = [...(closureEsistenti || []), ...nuoveChiusure];
     const { daCancellare, daVerificare, alternanzaCoinvolta } = computeImpattoChiusura(
       patientSlots || [],

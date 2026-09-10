@@ -452,7 +452,7 @@ export default function PazientiPage() {
   }
 
   async function confermaChiusura() {
-    if (!chiuAnteprima?.nuoveChiusure?.length) return;
+    if (!chiuAnteprima) return;
     setChiuStep("writing");
     const cancellazioni = chiuAnteprima.daCancellare
       .filter((r) => !chiuEsclusi.has(r.eventId))
@@ -1333,12 +1333,17 @@ export default function PazientiPage() {
           {chiuStep === "preview" && chiuAnteprima && (
             <>
               {chiuAnteprima.nuoveChiusure.length === 0 ? (
-                <p className="muted">Questa chiusura è già registrata (o non coinvolge nessuna fascia attiva) — nulla da fare.</p>
+                <p className="muted small">
+                  Nessun appuntamento reale cade in questa finestra (chi era programmato ha già disdetto per conto
+                  suo, o la chiusura è già registrata) — nessuno slittamento necessario. Confermando creo comunque
+                  l&apos;evento &quot;occupato&quot; sul calendario, così la pagina di prenotazione non offre questi orari.
+                </p>
               ) : (
                 <>
                   <p className="muted small">
-                    <strong>{chiuAnteprima.nuoveChiusure.length}</strong> fasce/date verranno chiuse. Dopo aver
-                    confermato, rilancia &quot;Genera occorrenze future&quot; per creare le date corrette slittate.
+                    <strong>{chiuAnteprima.nuoveChiusure.length}</strong> appuntamenti reali coinvolti (con chi
+                    condivide la loro stessa fascia). Dopo aver confermato, rilancia &quot;Genera occorrenze
+                    future&quot; per creare le date corrette slittate.
                   </p>
 
                   {chiuAnteprima.daCancellare.length > 0 && (
@@ -1396,9 +1401,7 @@ export default function PazientiPage() {
               )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiChiusure}>Annulla</button>
-                {chiuAnteprima.nuoveChiusure.length > 0 && (
-                  <button className="btn btn-primary" onClick={confermaChiusura}>Conferma chiusura</button>
-                )}
+                <button className="btn btn-primary" onClick={confermaChiusura}>Conferma chiusura</button>
               </div>
             </>
           )}

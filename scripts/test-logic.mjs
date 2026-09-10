@@ -24,7 +24,7 @@ import {
   matchBookingToPatient,
   computePrenotazioniPreview,
   occorrenzeFuture,
-  espandiChiusura,
+  rilevaConflittiChiusura,
   computeImpattoChiusura,
 } from "../src/lib/logic.js";
 
@@ -402,54 +402,56 @@ test("occorrenzeFuture: due pazienti alternati sulla stessa fascia restano ordin
   assert.equal(dateA[1], "2027-01-04"); // A (ultimo turno pre-pausa): riprende sul SECONDO lunedì dopo il rientro, come da regola di Maurizio
 });
 
-test("espandiChiusura chiude tutta la giornata su ogni fascia attiva di quel weekday, senza doppioni per una coppia condivisa", () => {
-  const slots = [
-    { active: true, weekday: 1, time_of_day: "15:00:00" }, // paziente A
-    { active: true, weekday: 1, time_of_day: "15:00:00" }, // paziente B, stessa fascia (coppia alternata)
-    { active: true, weekday: 1, time_of_day: "18:00:00" },
-    { active: true, weekday: 2, time_of_day: "10:00:00" }, // martedì, non coinvolto
-    { active: false, weekday: 1, time_of_day: "09:00:00" }, // slot disattivo, escluso
+test("rilevaConflittiChiusura ignora un paziente il cui orario rientrerebbe nella finestra ma che quel giorno non ha nessun appuntamento reale (bug reale 2026-09-10)", () => {
+  // Caso reale: chiudendo giovedì dalle 14:30, Simone Z. (15:30) aveva già
+  // disdetto per conto suo — nessun evento quel giorno — e non deve essere
+  // toccato. Solo Livia e Pietro (18:30) hanno davvero un appuntamento nella
+  // finestra, e Romano condivide la loro stessa fascia.
+  const patientSlots = [
+    { active: true, patient_id: 1, weekday: 4, time_of_day: "15:30:00", interval_days: 14, anchor_date: "2026-09-10" }, // Simone Z.
+    { active: true, patient_id: 2, weekday: 4, time_of_day: "18:30:00", interval_days: 14, anchor_date: "2026-09-17" }, // Romano
+    { active: true, patient_id: 3, weekday: 4, time_of_day: "18:30:00", interval_days: 14, anchor_date: "2026-09-24" }, // Livia e Pietro
   ];
-  const righe = espandiChiusura({ dataInizio: "2026-10-05", dataFine: "2026-10-05" }, slots);
-  assert.equal(righe.length, 2);
-  assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:00:00", "18:00:00"]);
-});
-test("espandiChiusura con oraInizio chiude solo le fasce da quell'orario in poi, sul primo giorno", () => {
-  // 2026-09-25 è un venerdì (weekday 5).
-  const slots = [
-    { active: true, weekday: 5, time_of_day: "14:00:00" },
-    { active: true, weekday: 5, time_of_day: "15:30:00" },
-    { active: true, weekday: 5, time_of_day: "17:00:00" },
+  const patients = [
+    { id: 1, nome_calendario: "Simone Z." },
+    { id: 2, nome_calendario: "Romano A." },
+    { id: 3, nome_calendario: "Livia e Pietro" },
   ];
-  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraInizio: "15:30" }, slots);
-  assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:30:00", "17:00:00"]);
-});
-test("espandiChiusura su un intervallo di più giorni produce una riga per ciascuna data coinvolta", () => {
-  const slots = [{ active: true, weekday: 1, time_of_day: "15:00:00" }];
-  // 2026-12-21 e 2026-12-28 sono entrambi lunedì
-  const righe = espandiChiusura({ dataInizio: "2026-12-21", dataFine: "2026-12-28" }, slots);
-  assert.deepEqual(righe.map((r) => r.closure_date).sort(), ["2026-12-21", "2026-12-28"]);
-});
-test("espandiChiusura: stesso giorno con oraInizio e oraFine chiude solo la finestra tra i due orari", () => {
-  const slots = [
-    { active: true, weekday: 5, time_of_day: "09:00:00" }, // prima della finestra: resta aperta
-    { active: true, weekday: 5, time_of_day: "12:00:00" }, // dentro la finestra
-    { active: true, weekday: 5, time_of_day: "16:00:00" }, // fuori (== oraFine, non incluso)
+  const events = [
+    // Simone Z.: nessun evento il 24/9 (ha disdetto per conto suo) — solo prima/dopo
+    { id: "s1", data: "2026-09-10", ora: "15:30", titolo: "Simone Z." },
+    { id: "s2", data: "2026-10-08", ora: "15:30", titolo: "Simone Z." },
+    // Romano: nessun evento il 24/9 (non è il suo turno)
+    { id: "r1", data: "2026-09-17", ora: "18:30", titolo: "Romano A." },
+    { id: "r2", data: "2026-10-01", ora: "18:30", titolo: "Romano A." },
+    // Livia e Pietro: appuntamento reale il 24/9, dentro la finestra chiusa
+    { id: "l1", data: "2026-09-24", ora: "18:30", titolo: "Livia e Pietro" },
   ];
-  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraInizio: "10:00", oraFine: "16:00" }, slots);
-  assert.deepEqual(righe.map((r) => r.time_of_day), ["12:00:00"]);
+  const conflitti = rilevaConflittiChiusura(patientSlots, patients, events, {
+    dataInizio: "2026-09-24", oraInizio: "14:30", dataFine: "2026-09-24", oraFine: null, note: null,
+  });
+  assert.equal(conflitti.length, 1);
+  assert.equal(conflitti[0].patientId, 3);
+  assert.equal(conflitti[0].closure_date, "2026-09-24");
+  assert.equal(conflitti[0].time_of_day, "18:30:00");
 });
-test("espandiChiusura: finestra multi-giorno con orari — primo giorno parziale, intermedio tutto il giorno, ultimo parziale", () => {
-  // "Da lunedì 23 ore 7 a domenica 29 ore 22": weekday del lunedì è 1.
-  const slots = [
-    { active: true, weekday: 1, time_of_day: "07:00:00" }, // lunedì presto: chiuso (>= 07:00)
-    { active: true, weekday: 1, time_of_day: "06:00:00" }, // lunedì prima delle 7: resta aperto
-  ];
-  const dataInizio = "2026-11-23"; // lunedì
-  const dataFine = "2026-11-29"; // domenica successiva
-  const righeInizio = espandiChiusura({ dataInizio, oraInizio: "07:00", dataFine, oraFine: "22:00" }, slots)
-    .filter((r) => r.closure_date === dataInizio);
-  assert.deepEqual(righeInizio.map((r) => r.time_of_day), ["07:00:00"]);
+test("rilevaConflittiChiusura ignora un evento reale fuori dall'orario richiesto (prima di oraInizio)", () => {
+  const patientSlots = [{ active: true, patient_id: 1, weekday: 4, time_of_day: "12:00:00", interval_days: 14, anchor_date: "2026-09-10" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [{ id: "e1", data: "2026-09-24", ora: "12:00", titolo: "Mario R." }];
+  const conflitti = rilevaConflittiChiusura(patientSlots, patients, events, {
+    dataInizio: "2026-09-24", oraInizio: "14:30", dataFine: "2026-09-24", oraFine: null, note: null,
+  });
+  assert.equal(conflitti.length, 0);
+});
+test("rilevaConflittiChiusura: paziente senza patient_slot (fuori schema/consulenza) non genera conflitti", () => {
+  const patientSlots = [];
+  const patients = [{ id: 1, nome_calendario: "Chiara C." }];
+  const events = [{ id: "e1", data: "2026-09-24", ora: "16:00", titolo: "Chiara C." }];
+  const conflitti = rilevaConflittiChiusura(patientSlots, patients, events, {
+    dataInizio: "2026-09-24", oraInizio: "14:30", dataFine: "2026-09-24", oraFine: null, note: null,
+  });
+  assert.equal(conflitti.length, 0);
 });
 
 test("computeImpattoChiusura propone la cancellazione solo per gli eventi 'da confermare', segnala gli altri", () => {

@@ -21,12 +21,11 @@ export async function POST(request) {
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
   const { nuoveChiusure, cancellazioni, dataInizio, oraInizio, dataFine, oraFine, note } = await request.json().catch(() => ({}));
-  if (!Array.isArray(nuoveChiusure) || !nuoveChiusure.length) {
-    return NextResponse.json({ error: "Nessuna chiusura da registrare." }, { status: 400 });
-  }
   if (!dataInizio || !dataFine) {
     return NextResponse.json({ error: "Intervallo di date mancante." }, { status: 400 });
   }
+  // nuoveChiusure può essere vuoto (nessun paziente coinvolto): si conferma
+  // comunque, serve solo a creare il blocco sulla pagina di prenotazione.
 
   const { data: tokenRow, error: tokenError } = await supabase
     .from("google_tokens")
@@ -40,17 +39,19 @@ export async function POST(request) {
     );
   }
 
-  const { error: insertError } = await supabase.from("slot_closures").insert(
-    nuoveChiusure.map((c) => ({
-      user_id: user.id,
-      weekday: c.weekday,
-      time_of_day: c.time_of_day,
-      closure_date: c.closure_date,
-      note: c.note || null,
-    }))
-  );
-  if (insertError) {
-    return NextResponse.json({ error: "Errore nel salvare la chiusura: " + insertError.message }, { status: 500 });
+  if (Array.isArray(nuoveChiusure) && nuoveChiusure.length) {
+    const { error: insertError } = await supabase.from("slot_closures").insert(
+      nuoveChiusure.map((c) => ({
+        user_id: user.id,
+        weekday: c.weekday,
+        time_of_day: c.time_of_day,
+        closure_date: c.closure_date,
+        note: c.note || null,
+      }))
+    );
+    if (insertError) {
+      return NextResponse.json({ error: "Errore nel salvare la chiusura: " + insertError.message }, { status: 500 });
+    }
   }
 
   let bloccoCreato = true;
@@ -82,7 +83,7 @@ export async function POST(request) {
   const falliti = risultati.filter((r) => !r.ok);
   return NextResponse.json({
     ok: falliti.length === 0 && bloccoCreato,
-    chiuse: nuoveChiusure.length,
+    chiuse: (nuoveChiusure || []).length,
     cancellati: risultati.length - falliti.length,
     falliti: falliti.length,
     bloccoCreato,

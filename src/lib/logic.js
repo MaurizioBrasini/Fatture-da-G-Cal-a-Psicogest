@@ -607,45 +607,58 @@ export function computePrenotazioniPreview(events, patients) {
 // tutto com'è, si applica solo il normale flusso "Registra disdette".
 // ---------------------------------------------------------------------
 
-// Espande una richiesta di chiusura — una finestra continua da
+// Trova le chiusure DA REGISTRARE per una finestra continua da
 // dataInizio+oraInizio a dataFine+oraFine (es. "da lunedì 23 ore 7 a
-// domenica 29 ore 22"), entrambi gli orari facoltativi (assenti = da/fino a
-// inizio/fine giornata, cioè chiusura di giornata intera se mancano
-// entrambi) — in righe slot_closures pronte da inserire: una per ogni fascia
-// weekday+ora effettivamente occupata da uno slot fisso attivo in quel
-// momento, per ciascun giorno della finestra (una coppia alternata che
-// condivide la stessa fascia produce una sola riga, non due). Il primo
-// giorno è chiuso solo da oraInizio in poi, l'ultimo solo fino a oraFine, i
-// giorni intermedi sono chiusi per intero (se dataInizio === dataFine,
-// entrambi i bordi si applicano allo stesso giorno). Include anche gli slot
-// con alternanza_fissa: la riga rappresenta il fatto oggettivo "quella
-// fascia quel giorno non c'è" — è occorrenzeFuture, non l'espansione, a
-// decidere se applicarla o no per un singolo paziente. Pura: non tocca il
-// database o il calendario, restituisce solo le righe.
-export function espandiChiusura({ dataInizio, oraInizio, dataFine, oraFine, note }, patientSlots) {
-  const righe = [];
-  let d = dataInizio;
-  while (d <= dataFine) {
-    const primoGiorno = d === dataInizio;
-    const ultimoGiorno = d === dataFine;
-    const weekday = toDateObj(d).getDay();
-    const fasce = new Set(
-      (patientSlots || [])
-        .filter((s) => {
-          if (!s.active || s.weekday !== weekday) return false;
-          const ora = s.time_of_day.slice(0, 5);
-          if (primoGiorno && oraInizio && ora < oraInizio) return false;
-          if (ultimoGiorno && oraFine && ora >= oraFine) return false;
-          return true;
-        })
-        .map((s) => s.time_of_day)
-    );
-    for (const time_of_day of fasce) {
-      righe.push({ weekday, time_of_day, closure_date: d, note: note || null });
-    }
-    d = addDays(d, 1);
+// domenica 29 ore 22"): non "ogni fascia il cui orario nominale rientra
+// nella finestra" (bug reale 2026-09-10 — vedi sotto), ma SOLO le fasce per
+// cui esiste già un appuntamento VERO sul calendario che cade dentro la
+// finestra. Un paziente il cui slot orario rientrerebbe teoricamente nella
+// finestra ma che quel giorno non ha nessun appuntamento reale (perché ha
+// disdetto per conto suo in un momento qualsiasi prima d'ora — disdetta del
+// paziente, mai motivo di slittamento) NON viene toccato: la sua fascia non
+// entra nemmeno nel calcolo. Una riga per ogni (fascia, data) con un vero
+// conflitto — una coppia alternata che condivide la stessa fascia in
+// scadenza a settimane diverse può quindi generare più righe sulla stessa
+// fascia, una per ciascuna data realmente occupata nella finestra.
+//
+// Bug reale scoperto testando con Maurizio: chiudendo "giovedì dalle 14:30"
+// la versione precedente (che guardava solo l'orario nominale della fascia)
+// coinvolgeva anche pazienti il cui vero appuntamento quel giorno non
+// esisteva affatto (avevano già disdetto loro, per conto proprio, in
+// momenti diversi e scollegati) — solo chi aveva DAVVERO un appuntamento
+// nella finestra (e chi condivide la sua stessa fascia, es. l'altro membro
+// di un'alternanza) deve essere coinvolto.
+export function rilevaConflittiChiusura(patientSlots, patients, allEvents, { dataInizio, oraInizio, dataFine, oraFine, note }) {
+  const slotByPatientId = Object.fromEntries((patientSlots || []).filter((s) => s.active).map((s) => [s.patient_id, s]));
+  const viste = new Set();
+  const conflitti = [];
+
+  for (const e of allEvents || []) {
+    if (e.data < dataInizio || e.data > dataFine) continue;
+    const ora = e.ora || "";
+    if (e.data === dataInizio && oraInizio && ora < oraInizio) continue;
+    if (e.data === dataFine && oraFine && ora >= oraFine) continue;
+
+    const match = matchPatientForEvent(e.titolo, patients);
+    if (!match) continue;
+    const slot = slotByPatientId[match.patient.id];
+    if (!slot) continue; // paziente senza slot fisso (fuori schema/consulenza): fuori da questo meccanismo
+
+    const chiave = `${slot.weekday}|${slot.time_of_day}|${e.data}`;
+    if (viste.has(chiave)) continue;
+    viste.add(chiave);
+    conflitti.push({
+      weekday: slot.weekday,
+      time_of_day: slot.time_of_day,
+      closure_date: e.data,
+      note: note || null,
+      eventId: e.id,
+      patientId: match.patient.id,
+      nome: match.patient.nome_calendario,
+      ora: e.ora,
+    });
   }
-  return righe;
+  return conflitti;
 }
 
 // Dato l'insieme di chiusure aggiornato (comprese quelle appena proposte) e
