@@ -2,7 +2,7 @@
 // slot_closures (una per fascia weekday+ora coinvolta), crea l'evento
 // "occupato" corrispondente sul calendario reale (indispensabile perché la
 // pagina di prenotazione online smetta di proporre quegli slot — vedi
-// createChiusuraBlockEvents) e cancella SOLO gli eventi "da confermare"
+// createChiusuraBlockEvent) e cancella SOLO gli eventi "da confermare"
 // scelti dall'utente — mai un evento già confermato col paziente o
 // prenotato online, quelli restano sempre a carico di Maurizio. Le
 // occorrenze corrette (sulle nuove date slittate) NON vengono create qui:
@@ -10,7 +10,7 @@
 // ripulito quelle obsolete.
 
 import { createClient } from "@/lib/supabase/server";
-import { deleteGoogleCalendarEvent, createChiusuraBlockEvents } from "@/lib/googleCalendar";
+import { deleteGoogleCalendarEvent, createChiusuraBlockEvent } from "@/lib/googleCalendar";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -20,7 +20,7 @@ export async function POST(request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
-  const { nuoveChiusure, cancellazioni, dataInizio, dataFine, oraDa, note } = await request.json().catch(() => ({}));
+  const { nuoveChiusure, cancellazioni, dataInizio, oraInizio, dataFine, oraFine, note } = await request.json().catch(() => ({}));
   if (!Array.isArray(nuoveChiusure) || !nuoveChiusure.length) {
     return NextResponse.json({ error: "Nessuna chiusura da registrare." }, { status: 400 });
   }
@@ -56,10 +56,11 @@ export async function POST(request) {
   let bloccoCreato = true;
   let bloccoErrore = null;
   try {
-    await createChiusuraBlockEvents(tokenRow.refresh_token, {
+    await createChiusuraBlockEvent(tokenRow.refresh_token, {
       dataInizio,
+      oraInizio: oraInizio || null,
       dataFine,
-      oraDa: oraDa || null,
+      oraFine: oraFine || null,
       titolo: note ? `Indisponibile — ${note}` : "Indisponibile",
     });
   } catch (e) {

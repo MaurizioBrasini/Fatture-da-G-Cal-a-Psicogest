@@ -607,23 +607,37 @@ export function computePrenotazioniPreview(events, patients) {
 // tutto com'è, si applica solo il normale flusso "Registra disdette".
 // ---------------------------------------------------------------------
 
-// Espande una richiesta di chiusura (un intervallo di date, giornata intera
-// oppure — se oraDa è indicata — solo dall'orario indicato in poi) in righe
-// slot_closures pronte da inserire: una per ogni fascia weekday+ora
-// effettivamente occupata da uno slot fisso attivo in quel momento (una
-// coppia alternata che condivide la stessa fascia produce una sola riga,
-// non due). Include anche gli slot con alternanza_fissa: la riga rappresenta
-// il fatto oggettivo "quella fascia quel giorno non c'è" — è
-// occorrenzeFuture, non l'espansione, a decidere se applicarla o no per un
-// singolo paziente. Pura: non tocca il database, restituisce solo le righe.
-export function espandiChiusura({ dataInizio, dataFine, oraDa, note }, patientSlots) {
+// Espande una richiesta di chiusura — una finestra continua da
+// dataInizio+oraInizio a dataFine+oraFine (es. "da lunedì 23 ore 7 a
+// domenica 29 ore 22"), entrambi gli orari facoltativi (assenti = da/fino a
+// inizio/fine giornata, cioè chiusura di giornata intera se mancano
+// entrambi) — in righe slot_closures pronte da inserire: una per ogni fascia
+// weekday+ora effettivamente occupata da uno slot fisso attivo in quel
+// momento, per ciascun giorno della finestra (una coppia alternata che
+// condivide la stessa fascia produce una sola riga, non due). Il primo
+// giorno è chiuso solo da oraInizio in poi, l'ultimo solo fino a oraFine, i
+// giorni intermedi sono chiusi per intero (se dataInizio === dataFine,
+// entrambi i bordi si applicano allo stesso giorno). Include anche gli slot
+// con alternanza_fissa: la riga rappresenta il fatto oggettivo "quella
+// fascia quel giorno non c'è" — è occorrenzeFuture, non l'espansione, a
+// decidere se applicarla o no per un singolo paziente. Pura: non tocca il
+// database o il calendario, restituisce solo le righe.
+export function espandiChiusura({ dataInizio, oraInizio, dataFine, oraFine, note }, patientSlots) {
   const righe = [];
   let d = dataInizio;
   while (d <= dataFine) {
+    const primoGiorno = d === dataInizio;
+    const ultimoGiorno = d === dataFine;
     const weekday = toDateObj(d).getDay();
     const fasce = new Set(
       (patientSlots || [])
-        .filter((s) => s.active && s.weekday === weekday && (!oraDa || s.time_of_day.slice(0, 5) >= oraDa))
+        .filter((s) => {
+          if (!s.active || s.weekday !== weekday) return false;
+          const ora = s.time_of_day.slice(0, 5);
+          if (primoGiorno && oraInizio && ora < oraInizio) return false;
+          if (ultimoGiorno && oraFine && ora >= oraFine) return false;
+          return true;
+        })
         .map((s) => s.time_of_day)
     );
     for (const time_of_day of fasce) {

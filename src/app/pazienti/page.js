@@ -405,7 +405,7 @@ export default function PazientiPage() {
   // slittano in avanti le occorrenze future degli slot fissi coinvolti,
   // ripulendo prima gli eventuali eventi già creati sulle date sbagliate. ---
   const [chiuStep, setChiuStep] = useState(null); // null | 'form' | 'loading' | 'preview' | 'writing' | 'done' | 'error'
-  const [chiuForm, setChiuForm] = useState({ dataInizio: "", dataFine: "", giornataIntera: true, oraDa: "", note: "" });
+  const [chiuForm, setChiuForm] = useState({ dataInizio: "", oraInizio: "", dataFine: "", oraFine: "", note: "" });
   const [chiuAnteprima, setChiuAnteprima] = useState(null); // { nuoveChiusure, daCancellare, daVerificare, alternanzaCoinvolta }
   const [chiuEsclusi, setChiuEsclusi] = useState(new Set()); // eventId deselezionati dalla proposta di cancellazione
   const [chiuRisultato, setChiuRisultato] = useState(null);
@@ -413,7 +413,7 @@ export default function PazientiPage() {
 
   function apriChiusure() {
     setChiuStep("form");
-    setChiuForm({ dataInizio: todayISO(), dataFine: todayISO(), giornataIntera: true, oraDa: "", note: "" });
+    setChiuForm({ dataInizio: todayISO(), oraInizio: "", dataFine: todayISO(), oraFine: "", note: "" });
     setChiuAnteprima(null);
     setChiuEsclusi(new Set());
     setChiuRisultato(null);
@@ -430,8 +430,9 @@ export default function PazientiPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dataInizio: chiuForm.dataInizio,
+          oraInizio: chiuForm.oraInizio || null,
           dataFine: chiuForm.dataFine,
-          oraDa: chiuForm.giornataIntera ? null : chiuForm.oraDa || null,
+          oraFine: chiuForm.oraFine || null,
           note: chiuForm.note || null,
         }),
       });
@@ -464,8 +465,9 @@ export default function PazientiPage() {
           nuoveChiusure: chiuAnteprima.nuoveChiusure,
           cancellazioni,
           dataInizio: chiuForm.dataInizio,
+          oraInizio: chiuForm.oraInizio || null,
           dataFine: chiuForm.dataFine,
-          oraDa: chiuForm.giornataIntera ? null : chiuForm.oraDa || null,
+          oraFine: chiuForm.oraFine || null,
           note: chiuForm.note || null,
         }),
       });
@@ -1254,46 +1256,45 @@ export default function PazientiPage() {
           {chiuStep === "form" && (
             <>
               <p className="muted small">
-                Segna un giorno intero chiuso (ferie, weekend lungo) o solo una fascia da un certo orario in poi
-                (es. &quot;parto alle 15:30&quot;). Le occorrenze future degli slot fissi coinvolti slittano in avanti
-                di una settimana — chi ha &quot;alternanza fissa&quot; non si sposta, resta a te decidere. Viene creato
-                anche un evento &quot;occupato&quot; sul calendario reale, così la pagina di prenotazione online non
-                proporrà più questi orari.
+                Segna una finestra continua di indisponibilità: da un giorno/ora a un altro giorno/ora (es.
+                &quot;da lunedì 23 ore 7 a domenica 29 ore 22&quot;) — lascia vuoto un orario per intendere
+                &quot;dall'inizio&quot;/&quot;fino a fine giornata&quot; (entrambi vuoti = giornata/e intere chiuse). Le
+                occorrenze future degli slot fissi coinvolti slittano in avanti di una settimana — chi ha
+                &quot;alternanza fissa&quot; non si sposta, resta a te decidere. Viene creato anche un evento
+                &quot;occupato&quot; sul calendario reale, così la pagina di prenotazione online non proporrà più
+                questi orari.
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   Dal
                   <input
                     type="date"
                     value={chiuForm.dataInizio}
                     onChange={(e) => setChiuForm((f) => ({ ...f, dataInizio: e.target.value }))}
                   />
-                  al
+                  ore
+                  <input
+                    type="time"
+                    value={chiuForm.oraInizio}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, oraInizio: e.target.value }))}
+                    placeholder="inizio giornata"
+                  />
+                </label>
+                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  Al
                   <input
                     type="date"
                     value={chiuForm.dataFine}
                     onChange={(e) => setChiuForm((f) => ({ ...f, dataFine: e.target.value }))}
                   />
-                </label>
-                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  ore
                   <input
-                    type="checkbox"
-                    checked={chiuForm.giornataIntera}
-                    onChange={(e) => setChiuForm((f) => ({ ...f, giornataIntera: e.target.checked }))}
+                    type="time"
+                    value={chiuForm.oraFine}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, oraFine: e.target.value }))}
+                    placeholder="fine giornata"
                   />
-                  Giornata intera (studio chiuso)
                 </label>
-                {!chiuForm.giornataIntera && (
-                  <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    Indisponibile dalle
-                    <input
-                      type="time"
-                      value={chiuForm.oraDa}
-                      onChange={(e) => setChiuForm((f) => ({ ...f, oraDa: e.target.value }))}
-                    />
-                    in poi (ogni giorno dell&apos;intervallo)
-                  </label>
-                )}
                 <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   Nota (facoltativa)
                   <input
@@ -1309,7 +1310,7 @@ export default function PazientiPage() {
                 <button className="btn btn-ghost" onClick={chiudiChiusure}>Annulla</button>
                 <button
                   className="btn btn-primary"
-                  disabled={!chiuForm.dataInizio || !chiuForm.dataFine || (!chiuForm.giornataIntera && !chiuForm.oraDa)}
+                  disabled={!chiuForm.dataInizio || !chiuForm.dataFine || chiuForm.dataFine < chiuForm.dataInizio}
                   onClick={calcolaAnteprimaChiusura}
                 >
                   Calcola anteprima

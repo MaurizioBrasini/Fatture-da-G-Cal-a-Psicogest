@@ -20,7 +20,7 @@ export async function POST(request) {
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { dataInizio, dataFine, oraDa, note } = body;
+  const { dataInizio, oraInizio, dataFine, oraFine, note } = body;
   const giorniAvanti = Number(body.giorniAvanti) || 120;
   if (!dataInizio || !dataFine || dataFine < dataInizio) {
     return NextResponse.json({ error: "Intervallo di date non valido." }, { status: 400 });
@@ -41,7 +41,7 @@ export async function POST(request) {
     );
   }
 
-  const tutteLeFasce = espandiChiusura({ dataInizio, dataFine, oraDa, note }, patientSlots || []);
+  const tutteLeFasce = espandiChiusura({ dataInizio, oraInizio, dataFine, oraFine, note }, patientSlots || []);
   const giaEsistenti = new Set(
     (closureEsistenti || []).map((c) => `${c.weekday}|${c.time_of_day}|${c.closure_date}`)
   );

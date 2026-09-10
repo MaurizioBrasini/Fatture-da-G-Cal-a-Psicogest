@@ -414,14 +414,14 @@ test("espandiChiusura chiude tutta la giornata su ogni fascia attiva di quel wee
   assert.equal(righe.length, 2);
   assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:00:00", "18:00:00"]);
 });
-test("espandiChiusura con oraDa chiude solo le fasce da quell'orario in poi", () => {
+test("espandiChiusura con oraInizio chiude solo le fasce da quell'orario in poi, sul primo giorno", () => {
   // 2026-09-25 è un venerdì (weekday 5).
   const slots = [
     { active: true, weekday: 5, time_of_day: "14:00:00" },
     { active: true, weekday: 5, time_of_day: "15:30:00" },
     { active: true, weekday: 5, time_of_day: "17:00:00" },
   ];
-  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraDa: "15:30" }, slots);
+  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraInizio: "15:30" }, slots);
   assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:30:00", "17:00:00"]);
 });
 test("espandiChiusura su un intervallo di più giorni produce una riga per ciascuna data coinvolta", () => {
@@ -429,6 +429,27 @@ test("espandiChiusura su un intervallo di più giorni produce una riga per ciasc
   // 2026-12-21 e 2026-12-28 sono entrambi lunedì
   const righe = espandiChiusura({ dataInizio: "2026-12-21", dataFine: "2026-12-28" }, slots);
   assert.deepEqual(righe.map((r) => r.closure_date).sort(), ["2026-12-21", "2026-12-28"]);
+});
+test("espandiChiusura: stesso giorno con oraInizio e oraFine chiude solo la finestra tra i due orari", () => {
+  const slots = [
+    { active: true, weekday: 5, time_of_day: "09:00:00" }, // prima della finestra: resta aperta
+    { active: true, weekday: 5, time_of_day: "12:00:00" }, // dentro la finestra
+    { active: true, weekday: 5, time_of_day: "16:00:00" }, // fuori (== oraFine, non incluso)
+  ];
+  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraInizio: "10:00", oraFine: "16:00" }, slots);
+  assert.deepEqual(righe.map((r) => r.time_of_day), ["12:00:00"]);
+});
+test("espandiChiusura: finestra multi-giorno con orari — primo giorno parziale, intermedio tutto il giorno, ultimo parziale", () => {
+  // "Da lunedì 23 ore 7 a domenica 29 ore 22": weekday del lunedì è 1.
+  const slots = [
+    { active: true, weekday: 1, time_of_day: "07:00:00" }, // lunedì presto: chiuso (>= 07:00)
+    { active: true, weekday: 1, time_of_day: "06:00:00" }, // lunedì prima delle 7: resta aperto
+  ];
+  const dataInizio = "2026-11-23"; // lunedì
+  const dataFine = "2026-11-29"; // domenica successiva
+  const righeInizio = espandiChiusura({ dataInizio, oraInizio: "07:00", dataFine, oraFine: "22:00" }, slots)
+    .filter((r) => r.closure_date === dataInizio);
+  assert.deepEqual(righeInizio.map((r) => r.time_of_day), ["07:00:00"]);
 });
 
 test("computeImpattoChiusura propone la cancellazione solo per gli eventi 'da confermare', segnala gli altri", () => {

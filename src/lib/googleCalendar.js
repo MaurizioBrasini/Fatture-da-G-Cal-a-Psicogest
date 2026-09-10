@@ -232,55 +232,32 @@ export async function updateGoogleCalendarEventColor(refreshToken, eventId, colo
 // perché la pagina di prenotazione online (Google Appointment Schedule)
 // propone solo gli orari liberi sul calendario: senza un evento busy qui,
 // continuerebbe a offrire quegli slot nonostante slot_closures dica che sono
-// chiusi lato app. Giornata intera: un unico evento "tutto il giorno" che
-// copre l'intero intervallo di date (Google lo tratta come occupato ogni
-// giorno che copre). Fascia parziale (oraDa): un evento a orario per
-// ciascun giorno dell'intervallo, da oraDa a fine giornata — il resto della
-// giornata prima di oraDa resta libero/prenotabile. transparency "opaque"
+// chiusi lato app. Un'unica finestra continua da dataInizio+oraInizio a
+// dataFine+oraFine (es. "da lunedì ore 7 a domenica ore 22" è UN evento, non
+// uno per giorno) — se entrambi gli orari sono assenti diventa un evento
+// "tutto il giorno" che copre l'intero intervallo. transparency "opaque"
 // esplicito: è ciò che rende l'evento "occupato" invece di "libero" agli
 // occhi della pagina di prenotazione (l'API non lo garantisce di default per
 // gli eventi tutto il giorno).
-export async function createChiusuraBlockEvents(refreshToken, { dataInizio, dataFine, oraDa, titolo }) {
+export async function createChiusuraBlockEvent(refreshToken, { dataInizio, oraInizio, dataFine, oraFine, titolo }) {
   const accessToken = await getAccessToken(refreshToken);
-  const url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
-
-  async function creaEvento(body) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error("Creazione dell'evento di chiusura sul calendario fallita: " + text);
-    }
-    return res.json();
-  }
-
-  const creati = [];
-  if (!oraDa) {
-    creati.push(
-      await creaEvento({
-        summary: titolo,
-        transparency: "opaque",
-        start: { date: dataInizio },
-        end: { date: addDays(dataFine, 1) }, // Google: data di fine esclusiva
-      })
-    );
+  const body = { summary: titolo, transparency: "opaque" };
+  if (!oraInizio && !oraFine) {
+    body.start = { date: dataInizio };
+    body.end = { date: addDays(dataFine, 1) }; // Google: data di fine esclusiva
   } else {
-    let d = dataInizio;
-    while (d <= dataFine) {
-      creati.push(
-        await creaEvento({
-          summary: titolo,
-          transparency: "opaque",
-          start: { dateTime: `${d}T${oraDa}:00`, timeZone: "Europe/Rome" },
-          end: { dateTime: `${d}T23:59:00`, timeZone: "Europe/Rome" },
-        })
-      );
-      d = addDays(d, 1);
-      await new Promise((r) => setTimeout(r, 150));
-    }
+    body.start = { dateTime: `${dataInizio}T${oraInizio || "00:00"}:00`, timeZone: "Europe/Rome" };
+    body.end = { dateTime: `${dataFine}T${oraFine || "23:59"}:00`, timeZone: "Europe/Rome" };
   }
-  return creati;
+
+  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Creazione dell'evento di chiusura sul calendario fallita: " + text);
+  }
+  return res.json();
 }
