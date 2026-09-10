@@ -20,6 +20,12 @@ import {
   computeRinumerazione,
   analizzaNotaPerAudit,
   DEFAULT_SETTINGS,
+  parseBookingInfo,
+  matchBookingToPatient,
+  computePrenotazioniPreview,
+  occorrenzeFuture,
+  espandiChiusura,
+  computeImpattoChiusura,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -300,6 +306,156 @@ test("saldaContante sottrae un incasso, anche parziale, senza andare sotto zero"
   assert.equal(saldaContante(300, 150), 150);
   assert.equal(saldaContante(150, 150), 0);
   assert.equal(saldaContante(50, 150), 0);
+});
+
+// --- Prenotazioni online (link "Prenotazioni online dr. Brasini") ---
+test("parseBookingInfo estrae nome ed email dalla descrizione HTML di Google", () => {
+  const info = parseBookingInfo("<b>Prenotato da</b>\nJessica Di Tommaso\njessica@example.com");
+  assert.equal(info.nome, "Jessica Di Tommaso");
+  assert.equal(info.email, "jessica@example.com");
+});
+test("parseBookingInfo torna nome/email nulli se la descrizione non ha il formato atteso", () => {
+  assert.deepEqual(parseBookingInfo("nota libera qualsiasi"), { nome: null, email: null });
+  assert.deepEqual(parseBookingInfo(""), { nome: null, email: null });
+});
+
+test("matchBookingToPatient trova un match forte su nome+cognome combacianti", () => {
+  const patients = [
+    { id: 1, nome: "Chiara", cognome: "Casali", email: "" },
+    { id: 2, nome: "Chiara", cognome: "Conte", email: "" },
+  ];
+  const r = matchBookingToPatient("Chiara Casali", null, patients);
+  assert.equal(r.patient.id, 1);
+  assert.equal(r.confidence, "forte");
+});
+test("matchBookingToPatient preferisce l'email quando combacia in modo univoco", () => {
+  const patients = [
+    { id: 1, nome: "Chiara", cognome: "Casali", email: "vecchia@example.com" },
+  ];
+  const r = matchBookingToPatient("Nome Diverso Del Tutto", "vecchia@example.com", patients);
+  assert.equal(r.patient.id, 1);
+  assert.equal(r.confidence, "forte");
+});
+test("matchBookingToPatient non sceglie da solo se due pazienti condividono lo stesso nome (ambiguo)", () => {
+  const patients = [
+    { id: 1, nome: "Francesco", cognome: "Neri", email: "" },
+    { id: 2, nome: "Francesco", cognome: "Bruni", email: "" },
+  ];
+  const r = matchBookingToPatient("Francesco", null, patients);
+  assert.equal(r.patient, null);
+  assert.equal(r.confidence, "ambiguo");
+  assert.equal(r.candidati.length, 2);
+});
+test("matchBookingToPatient torna nessun candidato per un nome che non compare in anagrafica", () => {
+  const patients = [{ id: 1, nome: "Chiara", cognome: "Casali", email: "" }];
+  const r = matchBookingToPatient("Adriano De Marco", null, patients);
+  assert.equal(r.patient, null);
+  assert.equal(r.confidence, null);
+});
+
+test("computePrenotazioniPreview classifica correttamente pronte/in attesa/ambigue/nuove", () => {
+  const patients = [
+    { id: 1, nome: "Chiara", cognome: "Casali", nome_calendario: "Chiara C.", email: "" }, // pronta
+    { id: 2, nome: "Giulia", cognome: "Verde", nome_calendario: "", email: "" }, // in attesa (nome_calendario vuoto)
+  ];
+  const events = [
+    { id: "e1", data: "2026-10-08", ora: "11:30", titolo: "Prenotazioni online dr. Brasini (Chiara Casali)", descrizione: "<b>Prenotato da</b>\nChiara Casali\nc@example.com", colorId: "3" },
+    { id: "e2", data: "2026-10-09", ora: "10:00", titolo: "Prenotazioni online dr. Brasini (Giulia Verde)", descrizione: "<b>Prenotato da</b>\nGiulia Verde\ng@example.com", colorId: "3" },
+    { id: "e3", data: "2026-10-10", ora: "09:00", titolo: "Prenotazioni online dr. Brasini (Nuovo Utente)", descrizione: "<b>Prenotato da</b>\nNuovo Utente\nn@example.com", colorId: "3" },
+    { id: "e4", data: "2026-10-11", ora: "09:00", titolo: "Appuntamento normale, non una prenotazione", descrizione: "", colorId: null },
+  ];
+  const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(events, patients);
+  assert.equal(pronte.length, 1);
+  assert.equal(pronte[0].eventId, "e1");
+  assert.equal(inAttesa.length, 1);
+  assert.equal(inAttesa[0].eventId, "e2");
+  assert.equal(ambigue.length, 0);
+  assert.equal(nuove.length, 1);
+  assert.equal(nuove[0].eventId, "e3");
+});
+
+// --- Chiusure/indisponibilità e slittamento delle occorrenze future ---
+test("occorrenzeFuture scala in avanti di una settimana quando incontra una chiusura", () => {
+  const slot = { weekday: 1, time_of_day: "15:00:00", interval_days: 14, anchor_date: "2026-10-05" };
+  const closures = [{ weekday: 1, time_of_day: "15:00:00", closure_date: "2026-10-05" }];
+  const date = occorrenzeFuture(slot, closures, 60, "2026-10-01");
+  assert.equal(date[0], "2026-10-12"); // slitta di 7gg invece di saltare al giro dopo
+  assert.equal(date[1], "2026-10-26"); // il ritmo quindicinale riparte dalla nuova data
+});
+test("occorrenzeFuture con alternanza_fissa ignora del tutto le chiusure", () => {
+  const slot = { weekday: 1, time_of_day: "15:00:00", interval_days: 14, anchor_date: "2026-10-05", alternanza_fissa: true };
+  const closures = [{ weekday: 1, time_of_day: "15:00:00", closure_date: "2026-10-05" }];
+  const date = occorrenzeFuture(slot, closures, 30, "2026-10-01");
+  assert.equal(date[0], "2026-10-05"); // resta sulla data originale, nessuno slittamento
+});
+test("occorrenzeFuture: due pazienti alternati sulla stessa fascia restano ordinati dopo una pausa lunga", () => {
+  // Coppia quindicinale sfalsata di una settimana sulla stessa fascia:
+  // Paziente A l'ultimo lunedì utile prima di una pausa di 3 settimane,
+  // Paziente B una settimana prima ancora.
+  const slotA = { weekday: 1, time_of_day: "18:00:00", interval_days: 14, anchor_date: "2026-11-30" };
+  const slotB = { weekday: 1, time_of_day: "18:00:00", interval_days: 14, anchor_date: "2026-11-23" };
+  const closures = ["2026-12-07", "2026-12-14", "2026-12-21"].map((d) => ({ weekday: 1, time_of_day: "18:00:00", closure_date: d }));
+  const dateA = occorrenzeFuture(slotA, closures, 90, "2026-11-25");
+  const dateB = occorrenzeFuture(slotB, closures, 90, "2026-11-25");
+  assert.equal(dateA[0], "2026-11-30"); // A: ultimo turno pre-pausa, non toccato (prima della prima chiusura)
+  assert.equal(dateB[0], "2026-12-28"); // B (penultimo turno pre-pausa): riprende sul primo lunedì libero dopo il rientro
+  assert.equal(dateA[1], "2027-01-04"); // A (ultimo turno pre-pausa): riprende sul SECONDO lunedì dopo il rientro, come da regola di Maurizio
+});
+
+test("espandiChiusura chiude tutta la giornata su ogni fascia attiva di quel weekday, senza doppioni per una coppia condivisa", () => {
+  const slots = [
+    { active: true, weekday: 1, time_of_day: "15:00:00" }, // paziente A
+    { active: true, weekday: 1, time_of_day: "15:00:00" }, // paziente B, stessa fascia (coppia alternata)
+    { active: true, weekday: 1, time_of_day: "18:00:00" },
+    { active: true, weekday: 2, time_of_day: "10:00:00" }, // martedì, non coinvolto
+    { active: false, weekday: 1, time_of_day: "09:00:00" }, // slot disattivo, escluso
+  ];
+  const righe = espandiChiusura({ dataInizio: "2026-10-05", dataFine: "2026-10-05" }, slots);
+  assert.equal(righe.length, 2);
+  assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:00:00", "18:00:00"]);
+});
+test("espandiChiusura con oraDa chiude solo le fasce da quell'orario in poi", () => {
+  // 2026-09-25 è un venerdì (weekday 5).
+  const slots = [
+    { active: true, weekday: 5, time_of_day: "14:00:00" },
+    { active: true, weekday: 5, time_of_day: "15:30:00" },
+    { active: true, weekday: 5, time_of_day: "17:00:00" },
+  ];
+  const righe = espandiChiusura({ dataInizio: "2026-09-25", dataFine: "2026-09-25", oraDa: "15:30" }, slots);
+  assert.deepEqual(righe.map((r) => r.time_of_day).sort(), ["15:30:00", "17:00:00"]);
+});
+test("espandiChiusura su un intervallo di più giorni produce una riga per ciascuna data coinvolta", () => {
+  const slots = [{ active: true, weekday: 1, time_of_day: "15:00:00" }];
+  // 2026-12-21 e 2026-12-28 sono entrambi lunedì
+  const righe = espandiChiusura({ dataInizio: "2026-12-21", dataFine: "2026-12-28" }, slots);
+  assert.deepEqual(righe.map((r) => r.closure_date).sort(), ["2026-12-21", "2026-12-28"]);
+});
+
+test("computeImpattoChiusura propone la cancellazione solo per gli eventi 'da confermare', segnala gli altri", () => {
+  const patientSlots = [
+    { active: true, patient_id: 1, weekday: 1, time_of_day: "15:00:00", interval_days: 14, anchor_date: "2026-10-05" },
+    { active: true, patient_id: 2, weekday: 1, time_of_day: "15:00:00", interval_days: 14, anchor_date: "2026-10-05", alternanza_fissa: true },
+  ];
+  const patients = [
+    { id: 1, nome_calendario: "Mario R." },
+    { id: 2, nome_calendario: "Anna B." },
+  ];
+  const closures = [{ weekday: 1, time_of_day: "15:00:00", closure_date: "2026-10-05" }];
+  const nuoveChiusure = closures;
+  const events = [
+    // evento "vecchio" ancora sulla data ora chiusa, mai confermato: da cancellare
+    { id: "ev1", data: "2026-10-05", ora: "15:00", titolo: "Mario R.", colorId: "6" },
+    // Anna ha alternanza_fissa sulla stessa fascia: esclusa dal ricalcolo a monte, mai auto-cancellato
+    { id: "ev2", data: "2026-10-05", ora: "15:00", titolo: "Anna B.", colorId: null },
+  ];
+  const { daCancellare, daVerificare, alternanzaCoinvolta } = computeImpattoChiusura(
+    patientSlots, patients, events, closures, nuoveChiusure, 60, "2026-10-01"
+  );
+  assert.equal(daCancellare.length, 1);
+  assert.equal(daCancellare[0].eventId, "ev1");
+  assert.equal(daVerificare.length, 0); // Anna ha alternanza_fissa: esclusa dal ricalcolo, segnalata a parte
+  assert.equal(alternanzaCoinvolta.length, 1);
+  assert.equal(alternanzaCoinvolta[0].patientId, 2);
 });
 
 console.log(`\n${passed} test superati.`);

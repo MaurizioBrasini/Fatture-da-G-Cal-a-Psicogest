@@ -27,6 +27,7 @@ const COLONNE_OPZIONALI = [
   { key: "frequenza", label: "Frequenza" },
   { key: "giorno", label: "Giorno" },
   { key: "ora", label: "Ora" },
+  { key: "alternanza_fissa", label: "Alternanza fissa" },
   { key: "codice_fiscale", label: "Codice fiscale" },
   { key: "tipologia", label: "Tipologia" },
   { key: "regime_tariffario", label: "Regime" },
@@ -400,6 +401,103 @@ export default function PazientiPage() {
     setGenOccProgress(null);
   }
 
+  // --- Chiusure/indisponibilità (weekend lunghi, mezze giornate, ferie):
+  // slittano in avanti le occorrenze future degli slot fissi coinvolti,
+  // ripulendo prima gli eventuali eventi già creati sulle date sbagliate. ---
+  const [chiuStep, setChiuStep] = useState(null); // null | 'form' | 'loading' | 'preview' | 'writing' | 'done' | 'error'
+  const [chiuForm, setChiuForm] = useState({ dataInizio: "", dataFine: "", giornataIntera: true, oraDa: "", note: "" });
+  const [chiuAnteprima, setChiuAnteprima] = useState(null); // { nuoveChiusure, daCancellare, daVerificare, alternanzaCoinvolta }
+  const [chiuEsclusi, setChiuEsclusi] = useState(new Set()); // eventId deselezionati dalla proposta di cancellazione
+  const [chiuRisultato, setChiuRisultato] = useState(null);
+  const [chiuError, setChiuError] = useState("");
+
+  function apriChiusure() {
+    setChiuStep("form");
+    setChiuForm({ dataInizio: todayISO(), dataFine: todayISO(), giornataIntera: true, oraDa: "", note: "" });
+    setChiuAnteprima(null);
+    setChiuEsclusi(new Set());
+    setChiuRisultato(null);
+    setChiuError("");
+  }
+
+  async function calcolaAnteprimaChiusura() {
+    if (!chiuForm.dataInizio || !chiuForm.dataFine) return;
+    setChiuStep("loading");
+    setChiuError("");
+    try {
+      const res = await fetch("/api/calendar/chiusura-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dataInizio: chiuForm.dataInizio,
+          dataFine: chiuForm.dataFine,
+          oraDa: chiuForm.giornataIntera ? null : chiuForm.oraDa || null,
+          note: chiuForm.note || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setChiuError(data.error || "Errore nel calcolo dell'anteprima.");
+        setChiuStep("error");
+        return;
+      }
+      setChiuAnteprima(data);
+      setChiuEsclusi(new Set());
+      setChiuStep("preview");
+    } catch (e) {
+      setChiuError(e.message);
+      setChiuStep("error");
+    }
+  }
+
+  async function confermaChiusura() {
+    if (!chiuAnteprima?.nuoveChiusure?.length) return;
+    setChiuStep("writing");
+    const cancellazioni = chiuAnteprima.daCancellare
+      .filter((r) => !chiuEsclusi.has(r.eventId))
+      .map((r) => ({ eventId: r.eventId }));
+    try {
+      const res = await fetch("/api/calendar/chiusura-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nuoveChiusure: chiuAnteprima.nuoveChiusure,
+          cancellazioni,
+          dataInizio: chiuForm.dataInizio,
+          dataFine: chiuForm.dataFine,
+          oraDa: chiuForm.giornataIntera ? null : chiuForm.oraDa || null,
+          note: chiuForm.note || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setChiuError(data.error || "Errore durante la scrittura.");
+        setChiuStep("error");
+        return;
+      }
+      setChiuRisultato(data);
+      setChiuStep("done");
+    } catch (e) {
+      setChiuError(e.message);
+      setChiuStep("error");
+    }
+  }
+
+  function chiudiChiusure() {
+    setChiuStep(null);
+    setChiuAnteprima(null);
+    setChiuEsclusi(new Set());
+    setChiuRisultato(null);
+    setChiuError("");
+  }
+
+  async function toggleAlternanzaFissa(patient, valore) {
+    const slot = slotsByPatientId[patient.id];
+    if (!slot) return;
+    setSlotsByPatientId((s) => ({ ...s, [patient.id]: { ...s[patient.id], alternanza_fissa: valore } }));
+    await supabase.from("patient_slots").update({ alternanza_fissa: valore }).eq("id", slot.id);
+  }
+
   const FREQ_LABEL = { 7: "Settimanale", 14: "Quindicinale", 28: "Mensile" };
   const GIORNI_LABEL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
 
@@ -715,6 +813,7 @@ export default function PazientiPage() {
             <button className="btn btn-primary" onClick={addPatient}>+ Nuovo paziente</button>
             <button className="btn btn-ghost" onClick={() => apriRinumerazione(null)}>Rinumera tutti (calendario)</button>
             <button className="btn btn-ghost" onClick={apriGeneraOccorrenze}>Genera occorrenze future</button>
+            <button className="btn btn-ghost" onClick={apriChiusure}>Chiusure calendario</button>
           </div>
         </header>
 
@@ -753,6 +852,7 @@ export default function PazientiPage() {
                 {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
                 {visibleCols.giorno && <th>Giorno</th>}
                 {visibleCols.ora && <th>Ora</th>}
+                {visibleCols.alternanza_fissa && <th title="Il turno di questo paziente non può spostarsi (es. solo 1°/3° del mese): le chiusure/indisponibilità non lo fanno slittare in automatico">Alternanza fissa</th>}
                 {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
                 {visibleCols.tipologia && <SortableTh label="Tipologia" sortKey="tipologia" sort={sort} setSort={setSort} />}
                 {visibleCols.regime_tariffario && <SortableTh label="Regime" sortKey="regime_tariffario" sort={sort} setSort={setSort} />}
@@ -840,6 +940,20 @@ export default function PazientiPage() {
                             cambia
                           </button>
                         </span>
+                      ) : (
+                        <span className="muted mono">—</span>
+                      )}
+                    </td>
+                  )}
+                  {visibleCols.alternanza_fissa && (
+                    <td>
+                      {slotsByPatientId[p.id] ? (
+                        <input
+                          type="checkbox"
+                          checked={!!slotsByPatientId[p.id].alternanza_fissa}
+                          title="Il turno non si sposta mai in automatico per una chiusura/indisponibilità"
+                          onChange={(e) => toggleAlternanzaFissa(p, e.target.checked)}
+                        />
                       ) : (
                         <span className="muted mono">—</span>
                       )}
@@ -1127,6 +1241,183 @@ export default function PazientiPage() {
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiGeneraOccorrenze}>Chiudi</button>
+              </div>
+            </>
+          )}
+        </Modal>
+      )}
+
+      {chiuStep && (
+        <Modal maxWidth={640}>
+          <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Chiusure calendario</h2>
+
+          {chiuStep === "form" && (
+            <>
+              <p className="muted small">
+                Segna un giorno intero chiuso (ferie, weekend lungo) o solo una fascia da un certo orario in poi
+                (es. &quot;parto alle 15:30&quot;). Le occorrenze future degli slot fissi coinvolti slittano in avanti
+                di una settimana — chi ha &quot;alternanza fissa&quot; non si sposta, resta a te decidere. Viene creato
+                anche un evento &quot;occupato&quot; sul calendario reale, così la pagina di prenotazione online non
+                proporrà più questi orari.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  Dal
+                  <input
+                    type="date"
+                    value={chiuForm.dataInizio}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, dataInizio: e.target.value }))}
+                  />
+                  al
+                  <input
+                    type="date"
+                    value={chiuForm.dataFine}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, dataFine: e.target.value }))}
+                  />
+                </label>
+                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={chiuForm.giornataIntera}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, giornataIntera: e.target.checked }))}
+                  />
+                  Giornata intera (studio chiuso)
+                </label>
+                {!chiuForm.giornataIntera && (
+                  <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    Indisponibile dalle
+                    <input
+                      type="time"
+                      value={chiuForm.oraDa}
+                      onChange={(e) => setChiuForm((f) => ({ ...f, oraDa: e.target.value }))}
+                    />
+                    in poi (ogni giorno dell&apos;intervallo)
+                  </label>
+                )}
+                <label className="small" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  Nota (facoltativa)
+                  <input
+                    type="text"
+                    style={{ flex: 1 }}
+                    value={chiuForm.note}
+                    onChange={(e) => setChiuForm((f) => ({ ...f, note: e.target.value }))}
+                    placeholder="es. ferie natalizie"
+                  />
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiChiusure}>Annulla</button>
+                <button
+                  className="btn btn-primary"
+                  disabled={!chiuForm.dataInizio || !chiuForm.dataFine || (!chiuForm.giornataIntera && !chiuForm.oraDa)}
+                  onClick={calcolaAnteprimaChiusura}
+                >
+                  Calcola anteprima
+                </button>
+              </div>
+            </>
+          )}
+
+          {chiuStep === "loading" && <p>Calcolo dell&apos;anteprima in corso…</p>}
+
+          {chiuStep === "error" && (
+            <>
+              <p style={{ color: "crimson" }}>{chiuError}</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-ghost" onClick={chiudiChiusure}>Chiudi</button>
+              </div>
+            </>
+          )}
+
+          {chiuStep === "preview" && chiuAnteprima && (
+            <>
+              {chiuAnteprima.nuoveChiusure.length === 0 ? (
+                <p className="muted">Questa chiusura è già registrata (o non coinvolge nessuna fascia attiva) — nulla da fare.</p>
+              ) : (
+                <>
+                  <p className="muted small">
+                    <strong>{chiuAnteprima.nuoveChiusure.length}</strong> fasce/date verranno chiuse. Dopo aver
+                    confermato, rilancia &quot;Genera occorrenze future&quot; per creare le date corrette slittate.
+                  </p>
+
+                  {chiuAnteprima.daCancellare.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      <p className="muted small" style={{ marginBottom: 4 }}>
+                        <strong>Da cancellare</strong> — eventi &quot;da confermare&quot; già creati sulle date ora
+                        chiuse, non più corrette (deseleziona per lasciarli):
+                      </p>
+                      {chiuAnteprima.daCancellare.map((r) => {
+                        const escluso = chiuEsclusi.has(r.eventId);
+                        return (
+                          <label key={r.eventId} className="small" style={{ display: "flex", alignItems: "center", gap: 8, opacity: escluso ? 0.5 : 1 }}>
+                            <input
+                              type="checkbox"
+                              checked={!escluso}
+                              onChange={() =>
+                                setChiuEsclusi((s) => {
+                                  const next = new Set(s);
+                                  if (next.has(r.eventId)) next.delete(r.eventId);
+                                  else next.add(r.eventId);
+                                  return next;
+                                })
+                              }
+                            />
+                            {r.nome} — {r.data} {r.ora}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {chiuAnteprima.daVerificare.length > 0 && (
+                    <div className="tone-warn" style={{ marginBottom: 12, padding: 10, borderRadius: 8 }}>
+                      <p className="small" style={{ marginTop: 0, marginBottom: 4 }}>
+                        <strong>Da verificare a mano</strong> — già confermati col paziente o prenotati online, mai
+                        toccati in automatico:
+                      </p>
+                      <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+                        {chiuAnteprima.daVerificare.map((r) => (
+                          <li key={r.eventId}>{r.nome} — {r.data} {r.ora}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {chiuAnteprima.alternanzaCoinvolta.length > 0 && (
+                    <div className="tone-warn" style={{ marginBottom: 12, padding: 10, borderRadius: 8 }}>
+                      <p className="small" style={{ margin: 0 }}>
+                        <strong>Alternanza fissa</strong> — non spostati in automatico, decidi tu:{" "}
+                        {chiuAnteprima.alternanzaCoinvolta.map((r) => r.nome).join(", ")}
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button className="btn btn-ghost" onClick={chiudiChiusure}>Annulla</button>
+                {chiuAnteprima.nuoveChiusure.length > 0 && (
+                  <button className="btn btn-primary" onClick={confermaChiusura}>Conferma chiusura</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {chiuStep === "writing" && <p>Registrazione della chiusura in corso…</p>}
+
+          {chiuStep === "done" && chiuRisultato && (
+            <>
+              <p>
+                {chiuRisultato.chiuse} fasce chiuse, {chiuRisultato.cancellati} eventi obsoleti cancellati
+                {chiuRisultato.falliti > 0 ? `, ${chiuRisultato.falliti} falliti` : ""}.
+              </p>
+              <p className={chiuRisultato.bloccoCreato ? "muted small" : "small"} style={!chiuRisultato.bloccoCreato ? { color: "crimson" } : undefined}>
+                {chiuRisultato.bloccoCreato
+                  ? "Evento \"occupato\" creato sul calendario: la pagina di prenotazione online non proporrà più questi orari."
+                  : `Attenzione: l'evento "occupato" sul calendario NON è stato creato (${chiuRisultato.bloccoErrore}) — la pagina di prenotazione potrebbe ancora proporre questi orari, crealo a mano.`}
+              </p>
+              <p className="muted small">Ora vai su &quot;Genera occorrenze future&quot; per creare le date corrette.</p>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="btn btn-primary" onClick={chiudiChiusure}>Chiudi</button>
               </div>
             </>
           )}

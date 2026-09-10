@@ -49,15 +49,23 @@ export function toDateObj(dateStr) {
 // senza logica differenziata per "chi tocca a chi".
 // ---------------------------------------------------------------------
 
-// patientSlot: { weekday, time_of_day, interval_days, anchor_date }
-// closures: tutte le righe di slot_closures (vengono filtrate qui per
-// weekday+time_of_day, non serve prefiltrarle prima di chiamare).
+// patientSlot: { weekday, time_of_day, interval_days, anchor_date,
+// alternanza_fissa }. closures: tutte le righe di slot_closures (vengono
+// filtrate qui per weekday+time_of_day, non serve prefiltrarle prima di
+// chiamare). Se il patient_slot ha alternanza_fissa (il suo turno non può
+// spostarsi, es. solo 1°/3° lunedì del mese) le chiusure vengono ignorate
+// del tutto per questo paziente — resta il ritmo fisso, anche se la stessa
+// fascia condivisa da un altro paziente (non fisso) viene invece scalata in
+// avanti normalmente: è Maurizio a decidere caso per caso cosa fare
+// dell'occorrenza caduta su una data indisponibile.
 // Ritorna le date reali (YYYY-MM-DD), ordinate, da oggi a oggi+orizzonteGiorni.
 export function occorrenzeFuture(patientSlot, closures, orizzonteGiorni = 60, oggi = todayISO()) {
-  const closureDates = (closures || [])
-    .filter((c) => c.weekday === patientSlot.weekday && c.time_of_day === patientSlot.time_of_day)
-    .map((c) => c.closure_date)
-    .sort();
+  const closureDates = patientSlot.alternanza_fissa
+    ? []
+    : (closures || [])
+        .filter((c) => c.weekday === patientSlot.weekday && c.time_of_day === patientSlot.time_of_day)
+        .map((c) => c.closure_date)
+        .sort();
 
   const dataLimite = addDays(oggi, orizzonteGiorni);
   const risultati = [];
@@ -589,6 +597,93 @@ export function computePrenotazioniPreview(events, patients) {
     ambigue: righe.filter((r) => !r.patientId && r.confidence === "ambiguo"),
     nuove: righe.filter((r) => !r.patientId && r.confidence !== "ambiguo"),
   };
+}
+
+// ---------------------------------------------------------------------
+// Chiusure/indisponibilità (ferie, mezze giornate, weekend lunghi): quando
+// Maurizio stesso non è disponibile, le occorrenze future degli slot fissi
+// coinvolti slittano in avanti (occorrenzeFuture già lo fa); quando è il
+// paziente a disdire, invece, NON deve scattare nessuno slittamento — resta
+// tutto com'è, si applica solo il normale flusso "Registra disdette".
+// ---------------------------------------------------------------------
+
+// Espande una richiesta di chiusura (un intervallo di date, giornata intera
+// oppure — se oraDa è indicata — solo dall'orario indicato in poi) in righe
+// slot_closures pronte da inserire: una per ogni fascia weekday+ora
+// effettivamente occupata da uno slot fisso attivo in quel momento (una
+// coppia alternata che condivide la stessa fascia produce una sola riga,
+// non due). Include anche gli slot con alternanza_fissa: la riga rappresenta
+// il fatto oggettivo "quella fascia quel giorno non c'è" — è
+// occorrenzeFuture, non l'espansione, a decidere se applicarla o no per un
+// singolo paziente. Pura: non tocca il database, restituisce solo le righe.
+export function espandiChiusura({ dataInizio, dataFine, oraDa, note }, patientSlots) {
+  const righe = [];
+  let d = dataInizio;
+  while (d <= dataFine) {
+    const weekday = toDateObj(d).getDay();
+    const fasce = new Set(
+      (patientSlots || [])
+        .filter((s) => s.active && s.weekday === weekday && (!oraDa || s.time_of_day.slice(0, 5) >= oraDa))
+        .map((s) => s.time_of_day)
+    );
+    for (const time_of_day of fasce) {
+      righe.push({ weekday, time_of_day, closure_date: d, note: note || null });
+    }
+    d = addDays(d, 1);
+  }
+  return righe;
+}
+
+// Dato l'insieme di chiusure aggiornato (comprese quelle appena proposte) e
+// gli eventi reali del calendario, trova per ogni slot fisso attivo (non ad
+// alternanza fissa) gli eventi già creati che non corrispondono più alle
+// date corrette ricalcolate: "daCancellare" se ancora "da confermare"
+// (colorId "6", mai stati confermati col paziente), "daVerificare" se hanno
+// un altro colore (già confermati, o prenotati online) — questi ultimi non
+// vanno MAI proposti per la cancellazione automatica, solo segnalati perché
+// Maurizio li gestisca a mano. Segnala anche gli slot con alternanza_fissa
+// la cui fascia è coinvolta dalle chiusure appena proposte, perché lì lo
+// slittamento non si applica.
+export function computeImpattoChiusura(patientSlots, patients, allEvents, closures, nuoveChiusure, orizzonteGiorni, oggi) {
+  const patientsById = Object.fromEntries(patients.map((p) => [p.id, p]));
+  const nuoveFasce = new Set((nuoveChiusure || []).map((c) => `${c.weekday}|${c.time_of_day}`));
+  const dataLimite = addDays(oggi, orizzonteGiorni);
+  const daCancellare = [];
+  const daVerificare = [];
+  const alternanzaCoinvolta = [];
+
+  for (const slot of patientSlots || []) {
+    if (!slot.active) continue;
+    const patient = patientsById[slot.patient_id];
+    if (!patient || !patient.nome_calendario) continue;
+
+    if (slot.alternanza_fissa) {
+      if (nuoveFasce.has(`${slot.weekday}|${slot.time_of_day}`)) {
+        alternanzaCoinvolta.push({ patientId: patient.id, nome: patient.nome_calendario });
+      }
+      continue;
+    }
+
+    const dateCorrette = new Set(occorrenzeFuture(slot, closures, orizzonteGiorni, oggi));
+    const eventiPaziente = allEvents.filter(
+      (e) =>
+        e.data > oggi &&
+        e.data <= dataLimite &&
+        matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id
+    );
+    for (const ev of eventiPaziente) {
+      if (dateCorrette.has(ev.data)) continue;
+      const riga = { eventId: ev.id, patientId: patient.id, nome: patient.nome_calendario, data: ev.data, ora: ev.ora, colorId: ev.colorId };
+      // Solo "da confermare" (mandarino) entra in proposta di cancellazione
+      // automatica: mai toccati in automatico gli eventi già confermati col
+      // paziente (colore di default) o prenotati online (vinaccia) — quelli
+      // vanno sempre e solo segnalati per la gestione manuale di Maurizio.
+      if (ev.colorId === "6") daCancellare.push(riga);
+      else daVerificare.push(riga);
+    }
+  }
+
+  return { daCancellare, daVerificare, alternanzaCoinvolta };
 }
 
 // ---------------------------------------------------------------------

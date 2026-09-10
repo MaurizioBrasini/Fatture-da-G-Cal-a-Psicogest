@@ -93,8 +93,10 @@ export default function DashboardPage() {
   // --- Modale "Prenotazioni online da riconciliare" ---
   const [prenStep, setPrenStep] = useState(null); // null | 'loading' | 'preview' | 'writing' | 'done' | 'error'
   const [prenData, setPrenData] = useState(null); // { pronte, inAttesa, ambigue, nuove }
-  const [prenEsclusi, setPrenEsclusi] = useState({}); // { eventId: true } = deselezionata in anteprima
-  const [prenScelte, setPrenScelte] = useState({}); // { eventId: patientId } = override/scelta manuale del paziente
+  // { eventId: "" | "<patientId>" | "__new__" } — un unico select per riga
+  // decide sia il paziente sia se trattarla come nuovo paziente; "" =
+  // ancora non decisa, saltata alla conferma (sostituisce la spunta).
+  const [prenScelte, setPrenScelte] = useState({});
   const [prenRisultato, setPrenRisultato] = useState(null);
   const [prenErrore, setPrenErrore] = useState("");
 
@@ -477,7 +479,6 @@ export default function DashboardPage() {
   async function apriPrenotazioni() {
     setPrenStep("loading");
     setPrenErrore("");
-    setPrenEsclusi({});
     setPrenScelte({});
     setPrenRisultato(null);
     try {
@@ -503,70 +504,70 @@ export default function DashboardPage() {
   function chiudiPrenotazioni() {
     setPrenStep(null);
     setPrenData(null);
-    setPrenEsclusi({});
     setPrenScelte({});
     setPrenRisultato(null);
     setPrenErrore("");
-  }
-
-  async function confermaPrenotazioni() {
-    const righe = [...(prenData?.pronte || []), ...(prenData?.ambigue || [])];
-    const abbinamenti = righe
-      .filter((r) => !prenEsclusi[r.eventId])
-      .map((r) => ({
-        eventId: r.eventId,
-        patientId: prenScelte[r.eventId] ?? r.patientId,
-        bookerEmail: r.bookerEmail,
-      }))
-      .filter((a) => a.patientId);
-    if (!abbinamenti.length) return;
-    setPrenStep("writing");
-    try {
-      const res = await fetch("/api/calendar/prenotazioni-confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ abbinamenti }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setPrenErrore(data.error || "Errore durante la riconnessione.");
-        setPrenStep("error");
-        return;
-      }
-      setPrenRisultato(data);
-      setPrenStep("done");
-      load();
-    } catch (e) {
-      setPrenErrore(e.message);
-      setPrenStep("error");
-    }
   }
 
   function capitalizzaParola(w) {
     return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : w;
   }
 
-  // Aggiunge un rigo minimo in anagrafica (nome, cognome, email) per una
-  // prenotazione online senza nessun paziente corrispondente — nome_calendario
-  // resta vuoto apposta: lo sceglie Maurizio in Pazienti insieme a
-  // tipologia/regime/cadenza, poi il prossimo giro di questa scansione la
-  // ritrova già come "in attesa" pronta a riconnettersi.
-  async function aggiungiNuovoPaziente(riga) {
-    const parti = (riga.bookerNome || "").trim().split(/\s+/).filter(Boolean).map(capitalizzaParola);
-    const nome = parti[0] || "";
-    const cognome = parti.slice(1).join(" ");
-    const { data: userData } = await supabase.auth.getUser();
-    const { error } = await supabase.from("patients").insert({
-      user_id: userData.user.id,
-      nome,
-      cognome,
-      email: riga.bookerEmail || "",
-    });
-    if (error) {
-      setPrenErrore("Errore nell'aggiungere il paziente: " + error.message);
-      return;
+  // Scelta di default per il select di una riga "da gestire": il paziente
+  // proposto se c'è (forte/debole), "__new__" se non c'è nessun candidato
+  // (nessuna ambiguità: è chiaramente nuovo), altrimenti vuota — un
+  // ambiguo richiede sempre una scelta attiva, mai indovinata.
+  function prenScelteDefault(r) {
+    if (r.patientId) return String(r.patientId);
+    if (r.confidence !== "ambiguo") return "__new__";
+    return "";
+  }
+
+  async function confermaPrenotazioni() {
+    const tutte = [...(prenData?.pronte || []), ...(prenData?.ambigue || []), ...(prenData?.nuove || [])];
+    const selezionate = tutte
+      .map((r) => ({ r, scelta: prenScelte[r.eventId] ?? prenScelteDefault(r) }))
+      .filter((x) => x.scelta);
+
+    const abbinamenti = selezionate
+      .filter((x) => x.scelta !== "__new__")
+      .map((x) => ({ eventId: x.r.eventId, patientId: Number(x.scelta), bookerEmail: x.r.bookerEmail }));
+    const nuovi = selezionate.filter((x) => x.scelta === "__new__").map((x) => x.r);
+
+    if (!abbinamenti.length && !nuovi.length) return;
+    setPrenStep("writing");
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      for (const r of nuovi) {
+        const parti = (r.bookerNome || "").trim().split(/\s+/).filter(Boolean).map(capitalizzaParola);
+        const { error } = await supabase.from("patients").insert({
+          user_id: userData.user.id,
+          nome: parti[0] || "",
+          cognome: parti.slice(1).join(" "),
+          email: r.bookerEmail || "",
+        });
+        if (error) throw new Error("Errore nell'aggiungere " + r.bookerNome + ": " + error.message);
+      }
+
+      let esito = { riconnessi: 0, rinumerati: 0, falliti: 0 };
+      if (abbinamenti.length) {
+        const res = await fetch("/api/calendar/prenotazioni-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ abbinamenti }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Errore durante la riconnessione.");
+        esito = data;
+      }
+
+      setPrenRisultato({ ...esito, nuovi: nuovi.length });
+      setPrenStep("done");
+      load();
+    } catch (e) {
+      setPrenErrore(e.message);
+      setPrenStep("error");
     }
-    apriPrenotazioni();
   }
 
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
@@ -585,20 +586,20 @@ export default function DashboardPage() {
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
+              <span className="small" style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}>
+                1. Registra disdette
+              </span>
+              <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
               <span className="small" style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}>
-                1. Aggiorna dal calendario
+                2. Aggiorna dal calendario
               </span>
               <button className="btn-small" onClick={handleSync} disabled={syncing}>
                 {syncing ? "Lettura…" : "Fai ora"}
               </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
-              <span className="small" style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}>
-                2. Registra disdette
-              </span>
-              <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
@@ -1087,13 +1088,14 @@ export default function DashboardPage() {
           )}
 
           {prenStep === "preview" && prenData && (() => {
-            const daRiconnettere = [...prenData.pronte, ...prenData.ambigue];
+            const daGestire = [...prenData.pronte, ...prenData.ambigue, ...prenData.nuove];
             const opzioniPazienti = [...patients]
               .filter((p) => p.nome_calendario)
               .sort((a, b) => a.nome_calendario.localeCompare(b.nome_calendario));
             const coloreCorrettoCount = [
               ...prenData.pronte, ...prenData.inAttesa, ...prenData.ambigue, ...prenData.nuove,
             ].filter((r) => r.coloreCorretto).length;
+            const numDaAgire = daGestire.filter((r) => (prenScelte[r.eventId] ?? prenScelteDefault(r))).length;
             return (
               <>
                 {prenErrore && <p style={{ color: "crimson" }}>{prenErrore}</p>}
@@ -1101,51 +1103,44 @@ export default function DashboardPage() {
                   <p className="muted small">Colore vinaccia corretto in automatico su {coloreCorrettoCount} evento{coloreCorrettoCount === 1 ? "" : "i"}.</p>
                 )}
 
-                {daRiconnettere.length === 0 && prenData.inAttesa.length === 0 && prenData.nuove.length === 0 ? (
+                {daGestire.length === 0 && prenData.inAttesa.length === 0 ? (
                   <p className="muted">Nessuna prenotazione online da gestire al momento.</p>
                 ) : (
                   <>
-                    {daRiconnettere.length > 0 && (
+                    {daGestire.length > 0 && (
                       <>
                         <p className="muted small" style={{ marginBottom: 4 }}>
-                          <strong>Da riconnettere</strong> — rinomino solo il titolo dell&apos;evento (nessun altro
-                          appuntamento toccato, colore vinaccia invariato) e rilancio subito Rinumera per il paziente.
+                          Per ciascuna scegli il paziente giusto (già proposto quando c&apos;è un solo candidato),
+                          oppure <strong>＋ Nuovo paziente</strong> se non è ancora in elenco — aggiungo nome/cognome/
+                          email, il resto lo compili tu. Lascia su &quot;non ancora deciso&quot; per saltarla per ora.
+                          Confermando rinomino solo il titolo dell&apos;evento (colore vinaccia invariato, nessun altro
+                          appuntamento toccato) e rilancio subito Rinumera.
                         </p>
                         <table style={{ width: "100%", fontSize: 13, marginBottom: 12 }}>
                           <thead>
                             <tr>
-                              <th></th>
                               <th style={{ textAlign: "left" }}>Data</th>
                               <th style={{ textAlign: "left" }}>Prenotato da</th>
                               <th style={{ textAlign: "left" }}>Paziente</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {daRiconnettere.map((r) => (
+                            {daGestire.map((r) => (
                               <tr key={r.eventId}>
-                                <td>
-                                  <input
-                                    type="checkbox"
-                                    checked={!prenEsclusi[r.eventId]}
-                                    onChange={() => setPrenEsclusi((prev) => ({ ...prev, [r.eventId]: !prev[r.eventId] }))}
-                                  />
-                                </td>
                                 <td className="mono" style={{ whiteSpace: "nowrap" }}>{r.data}{r.ora ? ` ${r.ora}` : ""}</td>
                                 <td>
                                   {r.bookerNome}
-                                  {r.confidence && (
-                                    <span className="muted small"> ({r.confidence})</span>
-                                  )}
                                   {r.candidati?.length > 0 && (
                                     <div className="muted small">possibili: {r.candidati.map((c) => c.nome).join(", ")}</div>
                                   )}
                                 </td>
                                 <td>
                                   <select
-                                    value={prenScelte[r.eventId] ?? r.patientId ?? ""}
-                                    onChange={(e) => setPrenScelte((prev) => ({ ...prev, [r.eventId]: e.target.value ? Number(e.target.value) : null }))}
+                                    value={prenScelte[r.eventId] ?? prenScelteDefault(r)}
+                                    onChange={(e) => setPrenScelte((prev) => ({ ...prev, [r.eventId]: e.target.value }))}
                                   >
-                                    <option value="">-- scegli --</option>
+                                    <option value="">-- non ancora deciso --</option>
+                                    <option value="__new__">＋ Nuovo paziente</option>
                                     {opzioniPazienti.map((p) => (
                                       <option key={p.id} value={p.id}>{p.nome_calendario}</option>
                                     ))}
@@ -1159,7 +1154,7 @@ export default function DashboardPage() {
                     )}
 
                     {prenData.inAttesa.length > 0 && (
-                      <div style={{ marginBottom: 12 }}>
+                      <div>
                         <p className="muted small" style={{ marginBottom: 4 }}>
                           <strong>In attesa</strong> — paziente già in anagrafica, manca solo il nome calendario
                           (impostalo in Pazienti, poi torna qui a riconnettere).
@@ -1176,45 +1171,14 @@ export default function DashboardPage() {
                         </ul>
                       </div>
                     )}
-
-                    {prenData.nuove.length > 0 && (
-                      <div>
-                        <p className="muted small" style={{ marginBottom: 4 }}>
-                          <strong>Nuovi</strong> — nessun paziente corrispondente in anagrafica. Aggiungo solo nome,
-                          cognome ed email: scegli tu il resto (tipologia, regime, cadenza) in Pazienti.
-                        </p>
-                        <table style={{ width: "100%", fontSize: 13 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ textAlign: "left" }}>Data</th>
-                              <th style={{ textAlign: "left" }}>Prenotato da</th>
-                              <th style={{ textAlign: "left" }}>Email</th>
-                              <th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {prenData.nuove.map((r) => (
-                              <tr key={r.eventId}>
-                                <td className="mono" style={{ whiteSpace: "nowrap" }}>{r.data}{r.ora ? ` ${r.ora}` : ""}</td>
-                                <td>{r.bookerNome}</td>
-                                <td className="muted small">{r.bookerEmail || "—"}</td>
-                                <td>
-                                  <button className="btn-small" onClick={() => aggiungiNuovoPaziente(r)}>Aggiungi a Pazienti</button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </>
                 )}
 
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                   <button className="btn btn-ghost" onClick={chiudiPrenotazioni}>Chiudi</button>
-                  {daRiconnettere.filter((r) => !prenEsclusi[r.eventId] && (prenScelte[r.eventId] ?? r.patientId)).length > 0 && (
+                  {numDaAgire > 0 && (
                     <button className="btn btn-primary" onClick={confermaPrenotazioni}>
-                      Riconnetti e rinumera
+                      Conferma ({numDaAgire})
                     </button>
                   )}
                 </div>
@@ -1228,8 +1192,8 @@ export default function DashboardPage() {
             <>
               <p>
                 {prenRisultato.ok
-                  ? `Fatto: ${prenRisultato.riconnessi} riconnessi, ${prenRisultato.rinumerati} pazienti rinumerati.`
-                  : `${prenRisultato.riconnessi} riconnessi, ${prenRisultato.falliti} falliti.`}
+                  ? `Fatto: ${prenRisultato.riconnessi} riconnessi, ${prenRisultato.rinumerati} pazienti rinumerati, ${prenRisultato.nuovi} nuovi aggiunti a Pazienti.`
+                  : `${prenRisultato.riconnessi} riconnessi, ${prenRisultato.falliti} falliti, ${prenRisultato.nuovi} nuovi aggiunti.`}
               </p>
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiPrenotazioni}>Chiudi</button>
