@@ -479,6 +479,33 @@ test("computeImpattoChiusura propone la cancellazione solo per gli eventi 'da co
   assert.equal(alternanzaCoinvolta[0].patientId, 2);
 });
 
+test("computeImpattoChiusura non tocca MAI uno slot la cui fascia non è tra le chiusure appena proposte (bug reale 2026-09-10)", () => {
+  // Bug reale: chiudendo un solo giorno/fascia (martedì 15:00), la prima
+  // versione ricontrollava TUTTI gli slot attivi, non solo quello coinvolto
+  // — un paziente su una fascia completamente diversa (mercoledì 18:00) con
+  // uno scarto storico preesistente tra anchor_date e il calendario reale
+  // (niente a che vedere con questa chiusura) veniva proposto per errore in
+  // cancellazione.
+  const patientSlots = [
+    { active: true, patient_id: 1, weekday: 2, time_of_day: "15:00:00", interval_days: 14, anchor_date: "2026-10-06" }, // il paziente coinvolto dalla chiusura
+    { active: true, patient_id: 2, weekday: 3, time_of_day: "18:00:00", interval_days: 7, anchor_date: "2026-01-01" }, // slot estraneo, con anchor_date lontano/sfasato
+  ];
+  const patients = [
+    { id: 1, nome_calendario: "Mario R." },
+    { id: 2, nome_calendario: "Estraneo E." },
+  ];
+  const closures = [{ weekday: 2, time_of_day: "15:00:00", closure_date: "2026-10-06" }];
+  const nuoveChiusure = closures;
+  const events = [
+    { id: "ev1", data: "2026-10-06", ora: "15:00", titolo: "Mario R.", colorId: "6" },
+    // Evento reale dello slot estraneo, su una data che il ricalcolo puro da anchor_date="2026-01-01" non riprodurrebbe mai identica
+    { id: "ev2", data: "2026-10-07", ora: "18:00", titolo: "Estraneo E.", colorId: "6" },
+  ];
+  const { daCancellare } = computeImpattoChiusura(patientSlots, patients, events, closures, nuoveChiusure, 60, "2026-10-01");
+  assert.equal(daCancellare.length, 1);
+  assert.equal(daCancellare[0].eventId, "ev1"); // solo lo slot davvero coinvolto dalla chiusura, mai "ev2"
+});
+
 console.log(`\n${passed} test superati.`);
 if (process.exitCode) {
   console.error("Alcuni test sono falliti.");

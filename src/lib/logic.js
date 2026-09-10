@@ -649,15 +649,26 @@ export function espandiChiusura({ dataInizio, oraInizio, dataFine, oraFine, note
 }
 
 // Dato l'insieme di chiusure aggiornato (comprese quelle appena proposte) e
-// gli eventi reali del calendario, trova per ogni slot fisso attivo (non ad
-// alternanza fissa) gli eventi già creati che non corrispondono più alle
+// gli eventi reali del calendario, trova — SOLO per gli slot fissi la cui
+// fascia weekday+ora è davvero coinvolta dalle chiusure appena proposte
+// (`nuoveFasce`) — gli eventi già creati che non corrispondono più alle
 // date corrette ricalcolate: "daCancellare" se ancora "da confermare"
 // (colorId "6", mai stati confermati col paziente), "daVerificare" se hanno
 // un altro colore (già confermati, o prenotati online) — questi ultimi non
 // vanno MAI proposti per la cancellazione automatica, solo segnalati perché
 // Maurizio li gestisca a mano. Segnala anche gli slot con alternanza_fissa
-// la cui fascia è coinvolta dalle chiusure appena proposte, perché lì lo
-// slittamento non si applica.
+// coinvolti, perché lì lo slittamento non si applica.
+// IMPORTANTE: qualunque slot la cui fascia NON è in nuoveFasce va escluso a
+// monte, non solo "non ricalcolato" — il suo occorrenzeFuture è
+// matematicamente identico con o senza questa chiusura (il filtro closures
+// dentro occorrenzeFuture è per weekday+time_of_day), quindi ricontrollarlo
+// qui non potrebbe mai trovare un'incoerenza dovuta a QUESTA chiusura — solo
+// scarti storici preesistenti e non correlati tra anchor_date/interval_days
+// e il calendario reale (bug reale scoperto 2026-09-10: chiudendo un solo
+// giorno/fascia, la prima versione proponeva la cancellazione di eventi di
+// pazienti/date completamente estranei, su settimane diverse, solo perché
+// il loro ricalcolo "da zero" non coincideva col calendario per altri
+// motivi — niente a che vedere con la chiusura appena inserita).
 export function computeImpattoChiusura(patientSlots, patients, allEvents, closures, nuoveChiusure, orizzonteGiorni, oggi) {
   const patientsById = Object.fromEntries(patients.map((p) => [p.id, p]));
   const nuoveFasce = new Set((nuoveChiusure || []).map((c) => `${c.weekday}|${c.time_of_day}`));
@@ -668,13 +679,12 @@ export function computeImpattoChiusura(patientSlots, patients, allEvents, closur
 
   for (const slot of patientSlots || []) {
     if (!slot.active) continue;
+    if (!nuoveFasce.has(`${slot.weekday}|${slot.time_of_day}`)) continue;
     const patient = patientsById[slot.patient_id];
     if (!patient || !patient.nome_calendario) continue;
 
     if (slot.alternanza_fissa) {
-      if (nuoveFasce.has(`${slot.weekday}|${slot.time_of_day}`)) {
-        alternanzaCoinvolta.push({ patientId: patient.id, nome: patient.nome_calendario });
-      }
+      alternanzaCoinvolta.push({ patientId: patient.id, nome: patient.nome_calendario });
       continue;
     }
 
