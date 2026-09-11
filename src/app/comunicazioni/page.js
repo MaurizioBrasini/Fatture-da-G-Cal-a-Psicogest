@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import { computePatientState, personalizzaTesto, formatDataItaliana, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 
 export default function ComunicazioniPage() {
   const supabase = createClient();
@@ -79,15 +80,28 @@ export default function ComunicazioniPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: l }] = await Promise.all([
-      supabase.from("patients").select("id,nome_calendario,fatturare_a,email,stato").order("nome_calendario"),
+    const [{ data: p }, { data: l }, syncRes] = await Promise.all([
+      supabase.from("patients").select("id,nome,nome_calendario,fatturare_a,email,stato").order("nome_calendario"),
       supabase
         .from("email_log")
         .select("*, patients(nome_calendario,fatturare_a)")
         .order("created_at", { ascending: false })
         .limit(300),
+      fetch("/api/calendar/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from: todayISO(), to: addDays(todayISO(), 200) }),
+      }).then((r) => r.json()),
     ]);
-    setPatients(p || []);
+    // Prossimo appuntamento di ciascuno, per personalizzare [data] — non
+    // servono qui ne' cancellazioni ne' impostazioni vere (contano solo per
+    // il conteggio sedute/soglia, non per prossimaData).
+    const eventiFuturi = syncRes?.events || [];
+    const conProssimaData = (p || []).map((pat) => ({
+      ...pat,
+      prossimaData: computePatientState(pat, eventiFuturi, DEFAULT_SETTINGS, [], p || []).prossimaData,
+    }));
+    setPatients(conProssimaData);
     setLog(l || []);
     setLoading(false);
   }, [supabase]);
@@ -120,10 +134,18 @@ export default function ComunicazioniPage() {
     setInvioStato("invio");
     setInvioErrore("");
     try {
+      const destinatari = selezionati.map((p) => {
+        const valori = { nome: p.nome || (p.nome_calendario || "").split(" ")[0], data: formatDataItaliana(p.prossimaData) };
+        return {
+          patientId: p.id,
+          oggetto: personalizzaTesto(oggetto, valori),
+          corpoTesto: personalizzaTesto(corpoTesto, valori),
+        };
+      });
       const res = await fetch("/api/email/broadcast-send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ oggetto, corpoTesto, patientIds: selezionati.map((p) => p.id) }),
+        body: JSON.stringify({ destinatari }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -243,9 +265,13 @@ export default function ComunicazioniPage() {
               rows={8}
               value={corpoTesto}
               onChange={(e) => setCorpoTesto(e.target.value)}
-              placeholder={"Gentile paziente,\n\nlo studio resterà chiuso dal ... al ...\n\nCordiali saluti,\nDr. Maurizio Brasini"}
+              placeholder={"Gentile [nome],\n\nin vista del suo prossimo appuntamento programmato del [data]...\n\nCordiali saluti,\nDr. Maurizio Brasini"}
               style={{ width: "100%", fontFamily: "inherit", fontSize: 14, padding: 8 }}
             />
+            <span className="muted small">
+              Puoi usare <code>[nome]</code> e <code>[data]</code> nell&apos;oggetto e nel testo: verranno sostituiti col nome e la
+              prossima data di appuntamento di ciascun destinatario, uno per uno.
+            </span>
           </label>
         </div>
 
@@ -274,6 +300,7 @@ export default function ComunicazioniPage() {
                   <th></th>
                   <th style={{ textAlign: "left" }}>Paziente</th>
                   <th style={{ textAlign: "left" }}>Email</th>
+                  <th style={{ textAlign: "left" }}>Prossimo appuntamento</th>
                 </tr>
               </thead>
               <tbody>
@@ -289,6 +316,9 @@ export default function ComunicazioniPage() {
                     </td>
                     <td>{p.nome_calendario || p.fatturare_a}</td>
                     <td className={p.email ? "mono" : "muted small"}>{p.email || "manca"}</td>
+                    <td className={p.prossimaData ? "" : "muted small"}>
+                      {p.prossimaData ? formatDataItaliana(p.prossimaData) : "nessuno pianificato"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

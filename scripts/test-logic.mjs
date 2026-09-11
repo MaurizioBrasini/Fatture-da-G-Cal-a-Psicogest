@@ -31,6 +31,8 @@ import {
   computeRiprenotazioniPendenti,
   computeOccorrenzeDaGenerare,
   computeDuplicatiDaRipulire,
+  formatDataItaliana,
+  personalizzaTesto,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -640,6 +642,23 @@ test("computeDuplicatiDaRipulire non propone nulla se l'evento è già stato dav
   const patients = [{ id: 1, nome_calendario: "Mario R." }];
   const r = computeDuplicatiDaRipulire([], patients, cancellazioni);
   assert.equal(r.length, 0);
+});
+
+// --- personalizzaTesto / formatDataItaliana (mail merge Comunicazioni) ---
+test("personalizzaTesto sostituisce [nome] e [data]", () => {
+  assert.equal(
+    personalizzaTesto("Gentile [nome], il suo appuntamento del [data] è confermato.", { nome: "Jessica", data: "28 settembre 2026" }),
+    "Gentile Jessica, il suo appuntamento del 28 settembre 2026 è confermato."
+  );
+});
+test("personalizzaTesto sostituisce più occorrenze dello stesso segnaposto", () => {
+  assert.equal(personalizzaTesto("[nome] [nome]", { nome: "Mario" }), "Mario Mario");
+});
+test("personalizzaTesto lascia vuoto un segnaposto senza valore, senza sollevare errori", () => {
+  assert.equal(personalizzaTesto("Gentile [nome], del [data]", { nome: "Mario" }), "Gentile Mario, del ");
+});
+test("formatDataItaliana formatta una data ISO in italiano esteso", () => {
+  assert.equal(formatDataItaliana("2026-09-28"), "28 settembre 2026");
 });
 
 console.log(`\n${passed} test superati.`);

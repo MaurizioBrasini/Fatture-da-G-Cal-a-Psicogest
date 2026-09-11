@@ -35,6 +35,25 @@ export function titleCaseNomeCalendario(s) {
     .join(" ");
 }
 
+// Formatta una data ISO (YYYY-MM-DD) in italiano esteso per un testo
+// scritto a mano (es. "28 settembre 2026") — usata per personalizzare le
+// email in Comunicazioni con la data del prossimo appuntamento di ciascun
+// destinatario.
+export function formatDataItaliana(dataISO) {
+  if (!dataISO) return "";
+  const [y, m, d] = dataISO.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString("it-IT", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+// Sostituisce i segnaposto [nome] e [data] in un testo scritto da Maurizio
+// (Comunicazioni) con i valori del singolo destinatario — mail merge
+// minimale, senza sintassi complessa da imparare. Segnaposto non
+// riconosciuti restano invariati (non c'è un elenco chiuso da rispettare).
+export function personalizzaTesto(testo, { nome, data } = {}) {
+  return (testo || "").replaceAll("[nome]", nome || "").replaceAll("[data]", data || "");
+}
+
 export function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
