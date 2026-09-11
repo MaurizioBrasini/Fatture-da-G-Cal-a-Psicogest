@@ -46,7 +46,7 @@ function normalizeCF(s) {
 }
 
 const APPLY = process.argv.includes("--apply");
-const xlsPath = process.argv[2] || "Appunti/Settings/psicogest pazienti.xls";
+const xlsPath = process.argv.slice(2).find((a) => !a.startsWith("--")) || "Appunti/Settings/psicogest pazienti.xls";
 
 function loadPsicogest(path) {
   const wb = XLSX.readFile(path);
