@@ -11,6 +11,30 @@ export function normalizeName(s) {
     .replace(/\s+/g, " ");
 }
 
+// Uniforma il "lettering" di nome_calendario (es. "DAVIDE S." o "MIchela M."
+// -> "Davide S.") indipendentemente da come è stato digitato: prima lettera
+// di ogni parola maiuscola, resto minuscolo. Due eccezioni per lo stile già
+// in uso su questo campo:
+// - il connettivo "e" tra due nomi di coppia (es. "Giulia e Daniel") resta
+//   sempre minuscolo, mai un'iniziale;
+// - le iniziali puntate, anche multiple (es. "S.", "D.L.", "P.G."), restano
+//   una lettera maiuscola per segmento — split su "." e ricapitalizza ogni
+//   pezzo, così "D.L." resta "D.L." e non diventa "D.l.".
+export function titleCaseNomeCalendario(s) {
+  return (s || "")
+    .toString()
+    .trim()
+    .split(/\s+/)
+    .map((parola) => {
+      if (/^e$/i.test(parola)) return "e";
+      return parola
+        .split(".")
+        .map((pezzo) => (pezzo ? pezzo[0].toUpperCase() + pezzo.slice(1).toLowerCase() : pezzo))
+        .join(".");
+    })
+    .join(" ");
+}
+
 export function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }

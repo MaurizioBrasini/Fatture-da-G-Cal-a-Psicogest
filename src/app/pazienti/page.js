@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
-import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -641,7 +641,7 @@ export default function PazientiPage() {
       let added = 0,
         updated = 0;
       for (const row of rows) {
-        const nomeCal = String(row["Nome calendario"] || "").trim();
+        const nomeCal = titleCaseNomeCalendario(String(row["Nome calendario"] || "").trim());
         const nomeCol = String(row["Nome"] || "").trim();
         const cognomeCol = String(row["Cognome"] || "").trim();
         let fatturareA = String(row["Fatturare a"] || "").trim();
@@ -857,7 +857,7 @@ export default function PazientiPage() {
               {filtered.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateLocal(p.id, "nome_calendario", e.target.value)} onBlur={(e) => persistField(p.id, "nome_calendario", e.target.value)} />
+                    <input value={p.nome_calendario || ""} placeholder="manca" className={!p.nome_calendario ? "input-missing" : ""} onChange={(e) => updateLocal(p.id, "nome_calendario", e.target.value)} onBlur={(e) => updateField(p.id, "nome_calendario", titleCaseNomeCalendario(e.target.value))} />
                   </td>
                   {visibleCols.nome && (
                     <td><input value={p.nome || ""} onChange={(e) => updateLocal(p.id, "nome", e.target.value)} onBlur={(e) => persistField(p.id, "nome", e.target.value)} /></td>

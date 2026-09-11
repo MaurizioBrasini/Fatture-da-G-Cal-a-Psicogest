@@ -23,10 +23,14 @@ export default function StoricoPage() {
     })();
   }, [supabase]);
 
+  // Tutto maiuscolo qui volutamente (a differenza di Pazienti/Dashboard, che
+  // usano il lettering "solo iniziali"): lo storico fatture segue la
+  // convenzione delle fatture vere, non quella dei contatti — richiesto da
+  // Maurizio 2026-09-11.
   function nomePaziente(h) {
     const p = patientsById[h.patient_id];
-    if (p && (p.nome || p.cognome)) return `${p.nome || ""} ${p.cognome || ""}`.trim();
-    return p?.nome_calendario || p?.fatturare_a || h.codice_fiscale;
+    const nome = p && (p.nome || p.cognome) ? `${p.nome || ""} ${p.cognome || ""}`.trim() : p?.nome_calendario || p?.fatturare_a || h.codice_fiscale;
+    return nome.toUpperCase();
   }
 
   // L'importo salvato (h.onorario) è l'onorario già scorporato del 2% ENPAP

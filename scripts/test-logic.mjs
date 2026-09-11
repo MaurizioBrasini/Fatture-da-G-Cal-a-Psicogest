@@ -7,6 +7,7 @@ import {
   addDays,
   daysBetween,
   normalizeName,
+  titleCaseNomeCalendario,
   matchPatientForEvent,
   computePatientState,
   buildInvoiceRow,
@@ -64,6 +65,20 @@ test("daysBetween conta i giorni tra due date", () => {
 // --- normalizeName / matchPatientForEvent ---
 test("normalizeName ignora accenti, maiuscole e spazi doppi", () => {
   assert.equal(normalizeName("  Andréa   Ross  "), "ANDREA ROSS");
+});
+test("titleCaseNomeCalendario uniforma il lettering (tutto maiuscolo -> solo iniziali)", () => {
+  assert.equal(titleCaseNomeCalendario("DAVIDE S."), "Davide S.");
+  assert.equal(titleCaseNomeCalendario("MIchela M."), "Michela M.");
+});
+test("titleCaseNomeCalendario tiene minuscolo il connettivo 'e' tra due nomi di coppia", () => {
+  assert.equal(titleCaseNomeCalendario("GIULIA E DANIEL"), "Giulia e Daniel");
+});
+test("titleCaseNomeCalendario preserva iniziali multiple puntate", () => {
+  assert.equal(titleCaseNomeCalendario("GIOVANNI D.L."), "Giovanni D.L.");
+  assert.equal(titleCaseNomeCalendario("JOSEPHINE P.G."), "Josephine P.G.");
+});
+test("titleCaseNomeCalendario è idempotente su un nome già corretto", () => {
+  assert.equal(titleCaseNomeCalendario("Jessica M."), "Jessica M.");
 });
 test("matchPatientForEvent trova corrispondenza esatta", () => {
   const patients = [{ nome_calendario: "Mario Rossi" }];
