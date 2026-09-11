@@ -26,6 +26,10 @@ const COLONNE_OPZIONALI = [
   { key: "fatturare_a", label: "Fatturare a" },
   { key: "email", label: "Email" },
   { key: "telefono", label: "Telefono" },
+  { key: "indirizzo", label: "Indirizzo" },
+  { key: "localita", label: "Località" },
+  { key: "provincia", label: "Provincia" },
+  { key: "cap", label: "CAP" },
   { key: "frequenza", label: "Frequenza" },
   { key: "giorno", label: "Giorno" },
   { key: "ora", label: "Ora" },
@@ -596,6 +600,10 @@ export default function PazientiPage() {
       "Fatturare a": p.fatturare_a,
       Email: p.email || "",
       Telefono: p.telefono || "",
+      Indirizzo: p.indirizzo || "",
+      Località: p.localita || "",
+      Provincia: p.provincia || "",
+      CAP: p.cap || "",
       "Codice fiscale": p.codice_fiscale,
       Tipologia: TIPOLOGIA_LABEL[p.tipologia] || p.tipologia,
       Regime: p.regime_tariffario === "agevolata" ? "Agevolata" : "Regolare",
@@ -642,6 +650,10 @@ export default function PazientiPage() {
         const rawTariffa = row["Tariffa"];
         const email = String(row["Email"] || "").trim();
         const telefono = String(row["Telefono"] || "").trim();
+        const indirizzo = String(row["Indirizzo"] || "").trim();
+        const localita = String(row["Località"] || "").trim();
+        const provincia = String(row["Provincia"] || "").trim();
+        const cap = String(row["CAP"] || "").trim();
 
         if (existing) {
           const patch = {
@@ -651,6 +663,10 @@ export default function PazientiPage() {
             fatturare_a: fatturareA,
             email: email || existing.email,
             telefono: telefono || existing.telefono,
+            indirizzo: indirizzo || existing.indirizzo,
+            localita: localita || existing.localita,
+            provincia: provincia || existing.provincia,
+            cap: cap || existing.cap,
             tipologia,
             regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || existing.costo_unitario,
@@ -669,6 +685,10 @@ export default function PazientiPage() {
             fatturare_a: fatturareA,
             email,
             telefono,
+            indirizzo,
+            localita,
+            provincia,
+            cap,
             tipologia,
             regime_tariffario: regime,
             costo_unitario: parseFloat(rawTariffa) || 80,
@@ -791,6 +811,10 @@ export default function PazientiPage() {
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
                 {visibleCols.email && <th>Email</th>}
                 {visibleCols.telefono && <th>Telefono</th>}
+                {visibleCols.indirizzo && <th>Indirizzo</th>}
+                {visibleCols.localita && <th>Località</th>}
+                {visibleCols.provincia && <th>Provincia</th>}
+                {visibleCols.cap && <th>CAP</th>}
                 {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
                 {visibleCols.giorno && <th>Giorno</th>}
                 {visibleCols.ora && <th>Ora</th>}
@@ -830,6 +854,18 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.telefono && (
                     <td><input value={p.telefono || ""} onChange={(e) => updateLocal(p.id, "telefono", e.target.value)} onBlur={(e) => persistField(p.id, "telefono", e.target.value)} /></td>
+                  )}
+                  {visibleCols.indirizzo && (
+                    <td><input value={p.indirizzo || ""} onChange={(e) => updateLocal(p.id, "indirizzo", e.target.value)} onBlur={(e) => persistField(p.id, "indirizzo", e.target.value)} /></td>
+                  )}
+                  {visibleCols.localita && (
+                    <td><input value={p.localita || ""} onChange={(e) => updateLocal(p.id, "localita", e.target.value)} onBlur={(e) => persistField(p.id, "localita", e.target.value)} /></td>
+                  )}
+                  {visibleCols.provincia && (
+                    <td><input value={p.provincia || ""} maxLength={2} style={{ width: "3.5em" }} onChange={(e) => updateLocal(p.id, "provincia", e.target.value.toUpperCase())} onBlur={(e) => persistField(p.id, "provincia", e.target.value.toUpperCase())} /></td>
+                  )}
+                  {visibleCols.cap && (
+                    <td><input value={p.cap || ""} maxLength={5} style={{ width: "4.5em" }} onChange={(e) => updateLocal(p.id, "cap", e.target.value)} onBlur={(e) => persistField(p.id, "cap", e.target.value)} /></td>
                   )}
                   {visibleCols.frequenza && (
                     <td>

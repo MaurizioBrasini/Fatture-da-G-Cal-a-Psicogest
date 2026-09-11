@@ -360,6 +360,10 @@ export function buildPsicogestAnagraficaRow(patient) {
   };
   if (patient.telefono) row["Telefono 1"] = patient.telefono;
   if (patient.email) row["Email"] = patient.email;
+  if (patient.indirizzo) row["Indirizzo 1"] = patient.indirizzo;
+  if (patient.localita) row["Località"] = patient.localita;
+  if (patient.provincia) row["Provincia"] = patient.provincia;
+  if (patient.cap) row["CAP"] = patient.cap;
   if (patient.note) row["Note"] = patient.note;
   return row;
 }
