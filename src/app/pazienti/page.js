@@ -60,12 +60,23 @@ function caricaColonneVisibili() {
   }
 }
 
-function sortRows(list, sort) {
+// `sort` è una pila di criteri [{ key, dir }, ...] in ordine di priorità
+// (il primo è il primario) — vedi SortableTh per come si costruisce
+// cliccando le intestazioni. A parità su tutti i criteri richiesti, ordina
+// in ultima istanza per nome (alfabetico) come prima.
+function sortRows(list, sortStack, slotsByPatientId) {
   const arr = [...list];
-  const getVal = (p) => {
-    switch (sort.key) {
+  const getVal = (p, key) => {
+    const slot = slotsByPatientId?.[p.id];
+    switch (key) {
       case "nome_calendario": return (p.nome_calendario || "").toUpperCase();
+      case "nome": return (p.nome || "").toUpperCase();
+      case "cognome": return (p.cognome || "").toUpperCase();
       case "fatturare_a": return (p.fatturare_a || "").toUpperCase();
+      // "Su richiesta" (nessuno slot) in fondo; settimanale < quindicinale < mensile
+      case "frequenza": return slot ? slot.interval_days : Infinity;
+      // Lunedì..Domenica (weekday 0=Domenica va in fondo); senza slot fisso, in fondo
+      case "giorno": return slot ? (slot.weekday === 0 ? 7 : slot.weekday) : Infinity;
       case "tipologia": return p.tipologia || "";
       case "regime_tariffario": return p.regime_tariffario || "regolare";
       case "costo_unitario": return p.costo_unitario || 0;
@@ -76,14 +87,13 @@ function sortRows(list, sort) {
       default: return "";
     }
   };
-  // A parità di valore sulla chiave scelta, ordina in secondo luogo per
-  // nome (alfabetico) — utile soprattutto per "Regime", dove i pazienti si
-  // dividono solo in due gruppi.
   const nomeOrdinamento = (p) => (p.nome_calendario || p.fatturare_a || "").toUpperCase();
   arr.sort((a, b) => {
-    const va = getVal(a), vb = getVal(b);
-    if (va < vb) return sort.dir === "asc" ? -1 : 1;
-    if (va > vb) return sort.dir === "asc" ? 1 : -1;
+    for (const { key, dir } of sortStack) {
+      const va = getVal(a, key), vb = getVal(b, key);
+      if (va < vb) return dir === "asc" ? -1 : 1;
+      if (va > vb) return dir === "asc" ? 1 : -1;
+    }
     const na = nomeOrdinamento(a), nb = nomeOrdinamento(b);
     if (na < nb) return -1;
     if (na > nb) return 1;
@@ -98,7 +108,7 @@ export default function PazientiPage() {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
-  const [sort, setSort] = useState({ key: "fatturare_a", dir: "asc" });
+  const [sort, setSort] = useState([{ key: "fatturare_a", dir: "asc" }]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const fileInputRef = useRef(null);
   const [visibleCols, setVisibleCols] = useState(() => Object.fromEntries(COLONNE_OPZIONALI.map((c) => [c.key, true])));
@@ -740,7 +750,8 @@ export default function PazientiPage() {
     patients
       .filter((p) => normalizeName((p.nome_calendario || "") + " " + (p.fatturare_a || "")).includes(normalizeName(query)))
       .filter((p) => !onlyIncomplete || !p.nome_calendario || !p.codice_fiscale),
-    sort
+    sort,
+    slotsByPatientId
   );
 
   return (
@@ -806,8 +817,8 @@ export default function PazientiPage() {
             <thead>
               <tr>
                 <SortableTh label="Nome in calendario" sortKey="nome_calendario" sort={sort} setSort={setSort} />
-                {visibleCols.nome && <th>Nome</th>}
-                {visibleCols.cognome && <th>Cognome</th>}
+                {visibleCols.nome && <SortableTh label="Nome" sortKey="nome" sort={sort} setSort={setSort} />}
+                {visibleCols.cognome && <SortableTh label="Cognome" sortKey="cognome" sort={sort} setSort={setSort} />}
                 {visibleCols.fatturare_a && <SortableTh label="Fatturare a" sortKey="fatturare_a" sort={sort} setSort={setSort} />}
                 {visibleCols.email && <th>Email</th>}
                 {visibleCols.telefono && <th>Telefono</th>}
@@ -815,8 +826,16 @@ export default function PazientiPage() {
                 {visibleCols.localita && <th>Località</th>}
                 {visibleCols.provincia && <th>Provincia</th>}
                 {visibleCols.cap && <th>CAP</th>}
-                {visibleCols.frequenza && <th title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso">Frequenza</th>}
-                {visibleCols.giorno && <th>Giorno</th>}
+                {visibleCols.frequenza && (
+                  <SortableTh
+                    label="Frequenza"
+                    sortKey="frequenza"
+                    sort={sort}
+                    setSort={setSort}
+                    title="Cadenza dello slot fisso, oppure 'Su richiesta' per chi prenota di volta in volta senza slot fisso"
+                  />
+                )}
+                {visibleCols.giorno && <SortableTh label="Giorno" sortKey="giorno" sort={sort} setSort={setSort} />}
                 {visibleCols.ora && <th>Ora</th>}
                 {visibleCols.alternanza_fissa && <th title="Il turno di questo paziente non può spostarsi (es. solo 1°/3° del mese): le chiusure/indisponibilità non lo fanno slittare in automatico">Alternanza fissa</th>}
                 {visibleCols.codice_fiscale && <th>Codice fiscale</th>}
