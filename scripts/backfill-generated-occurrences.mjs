@@ -33,7 +33,8 @@ async function supaGet(pathAndQuery) {
   return res.json();
 }
 async function supaUpsert(pathAndQuery, body) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}`, {
+  const sep = pathAndQuery.includes("?") ? "&" : "?";
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${pathAndQuery}${sep}on_conflict=patient_id,data`, {
     method: "POST",
     headers: {
       apikey: SERVICE_KEY,
@@ -80,8 +81,10 @@ async function main() {
 
   const [{ user_id }] = await supaGet("patient_slots?select=user_id&limit=1");
   console.log("\nScrittura in corso...");
-  for (const r of daScrivere) {
-    await supaUpsert("generated_occurrences", { user_id, patient_id: r.patient_id, data: r.data });
+  const CHUNK = 200;
+  for (let i = 0; i < daScrivere.length; i += CHUNK) {
+    const blocco = daScrivere.slice(i, i + CHUNK).map((r) => ({ user_id, patient_id: r.patient_id, data: r.data }));
+    await supaUpsert("generated_occurrences", blocco);
   }
   console.log(`Fatto: ${daScrivere.length} righe scritte (upsert, eventuali duplicati ignorati).`);
 }
