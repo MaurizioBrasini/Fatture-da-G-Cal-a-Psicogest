@@ -616,21 +616,33 @@ export default function DashboardPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.prenotazioni} onChange={() => segna("prenotazioni", !routine.prenotazioni)} />
-              <span className="small" style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}>
+              <span
+                className="small"
+                style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}
+                title={'Cerca gli appuntamenti presi dai pazienti tramite il link "Prenotazioni online dr. Brasini" (li riconosce dal titolo grezzo che mette Google). Per ognuno: lo colora vinaccia (per riconoscerlo a colpo d\'occhio), prova ad abbinarlo a un paziente esistente (via email, con margine anche solo su nome/cognome), e — se confermi l\'abbinamento — rinomina il titolo con il nome giusto e salva l\'email sul profilo paziente se mancava. Chi non è riconosciuto resta segnalato come "nuovo paziente da creare".'}
+              >
                 1. Prenotazioni online
               </span>
               <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
-              <span className="small" style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}>
+              <span
+                className="small"
+                style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}
+                title={'Cerca gli eventi con la nota "disdetto" scritta sopra, calcola in automatico se vanno addebitati o no (regola delle 48h di preavviso, comunque modificabile a mano), e alla conferma: cancella l\'evento dal calendario se non addebitata, registra tutto nello storico. Include anche la sezione "Duplicati da ripulire" per i casi già registrati ma il cui evento è ancora fisicamente presente.'}
+              >
                 2. Registra disdette
               </span>
               <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
-              <span className="small" style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}>
+              <span
+                className="small"
+                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
+                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
+              >
                 3. Aggiorna dal calendario
               </span>
               <button className="btn-small" onClick={handleSync} disabled={syncing}>
@@ -639,7 +651,11 @@ export default function DashboardPage() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
-              <span className="small" style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}>
+              <span
+                className="small"
+                style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}
+                title={'Rilegge tutti gli eventi live di ogni paziente in ordine cronologico e riscrive il codice R/A/S + numero progressivo sulla nota di ciascuno (con "fatturare" quando si arriva alla soglia di 5). Va per ultimo apposta: deve vedere titoli ed eventi già sistemati dai passaggi precedenti.'}
+              >
                 4. Rinumera tutti
               </span>
               <button className="btn-small" onClick={() => apriRinumerazione(null)}>Fai ora</button>
