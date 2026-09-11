@@ -29,6 +29,8 @@ import {
   rilevaConflittiChiusura,
   computeImpattoChiusura,
   computeRiprenotazioniPendenti,
+  computeOccorrenzeDaGenerare,
+  computeDuplicatiDaRipulire,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -584,6 +586,59 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
   const cancellazioni = [{ patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" }];
   const patients = [{ id: 1, nome_calendario: "Mario R.", email: null }];
   const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
+  assert.equal(r.length, 0);
+});
+
+// --- computeOccorrenzeDaGenerare ---
+test("computeOccorrenzeDaGenerare propone come 'mancante' una data mai generata prima", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const { mancanti, anomale } = computeOccorrenzeDaGenerare(slots, patients, [], [], new Set(), new Set(), 14, "2026-10-01");
+  assert.equal(anomale.length, 0);
+  assert.equal(mancanti.length, 1);
+  assert.deepEqual(mancanti[0].date, ["2026-10-06", "2026-10-13"]);
+});
+test("computeOccorrenzeDaGenerare segnala come 'anomala' (mai come mancante) una data gia' generata in passato e ora assente, non skippata (bug reale 2026-09-11)", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const generatedSet = new Set(["1|2026-10-06"]);
+  const { mancanti, anomale } = computeOccorrenzeDaGenerare(slots, patients, [], [], new Set(), generatedSet, 14, "2026-10-01");
+  assert.equal(anomale.length, 1);
+  assert.equal(anomale[0].data, "2026-10-06");
+  assert.ok(!mancanti.some((p) => p.date.includes("2026-10-06")));
+  assert.deepEqual(mancanti[0].date, ["2026-10-13"]);
+});
+test("computeOccorrenzeDaGenerare non propone nulla per una data gia' skippata, anche se era stata generata", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const skippedSet = new Set(["1|2026-10-06"]);
+  const generatedSet = new Set(["1|2026-10-06"]);
+  const { mancanti, anomale } = computeOccorrenzeDaGenerare(slots, patients, [], [], skippedSet, generatedSet, 14, "2026-10-01");
+  assert.equal(anomale.length, 0);
+  assert.deepEqual(mancanti[0].date, ["2026-10-13"]);
+});
+test("computeOccorrenzeDaGenerare non propone nulla per una data con un evento reale gia' presente", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [{ data: "2026-10-06", ora: "15:00", titolo: "Mario R.", descrizione: "" }];
+  const { mancanti, anomale } = computeOccorrenzeDaGenerare(slots, patients, events, [], new Set(), new Set(), 14, "2026-10-01");
+  assert.equal(anomale.length, 0);
+  assert.deepEqual(mancanti[0].date, ["2026-10-13"]);
+});
+
+// --- computeDuplicatiDaRipulire ---
+test("computeDuplicatiDaRipulire trova un evento reale ancora presente per una disdetta già registrata (bug reale 2026-09-11)", () => {
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-09-15", billing_status: "not_charged" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [{ id: "ev1", data: "2026-09-15", ora: "13:30", titolo: "Mario R.", descrizione: "R3" }];
+  const r = computeDuplicatiDaRipulire(events, patients, cancellazioni);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].eventId, "ev1");
+});
+test("computeDuplicatiDaRipulire non propone nulla se l'evento è già stato davvero cancellato", () => {
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-09-15", billing_status: "not_charged" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const r = computeDuplicatiDaRipulire([], patients, cancellazioni);
   assert.equal(r.length, 0);
 });
 

@@ -91,6 +91,12 @@ export default function DashboardPage() {
   const [aggCandidati, setAggCandidati] = useState(null);
   const [aggEsclusi, setAggEsclusi] = useState({}); // { eventId: true } = deselezionato in anteprima
   const [aggEmailSelezionate, setAggEmailSelezionate] = useState({}); // { eventId: true } = manda anche l'email di riprenotazione
+  // Disdette già registrate in cancellations ma il cui evento fisico è
+  // ancora sul calendario (bug reale 2026-09-11: computeAggiornamentoPreview
+  // le scarta perché "già note", senza controllare se andavano ripulite) —
+  // vedi computeDuplicatiDaRipulire in logic.js.
+  const [aggDuplicati, setAggDuplicati] = useState(null);
+  const [aggDuplicatiEsclusi, setAggDuplicatiEsclusi] = useState({});
   const [aggRisultato, setAggRisultato] = useState(null);
   const [aggErrore, setAggErrore] = useState("");
   // Form "Aggiungi disdetta manuale": per un evento già eliminato a mano da
@@ -380,6 +386,8 @@ export default function DashboardPage() {
     setAggErrore("");
     setAggEsclusi({});
     setAggEmailSelezionate({});
+    setAggDuplicati(null);
+    setAggDuplicatiEsclusi({});
     setAggRisultato(null);
     try {
       const res = await fetch("/api/calendar/aggiorna-preview", {
@@ -394,10 +402,11 @@ export default function DashboardPage() {
         return;
       }
       setAggCandidati(data.candidati || []);
+      setAggDuplicati(data.duplicati || []);
       setAggStep("preview");
-      // Se non c'è nulla da registrare, il passaggio è comunque "fatto":
-      // l'utente ha controllato, non c'era nessuna disdetta da gestire oggi.
-      if (!data.candidati?.length) segna("disdette");
+      // Se non c'è nulla da registrare né da ripulire, il passaggio è
+      // comunque "fatto": l'utente ha controllato, nulla da gestire oggi.
+      if (!data.candidati?.length && !data.duplicati?.length) segna("disdette");
     } catch (e) {
       setAggErrore(e.message);
       setAggStep("error");
@@ -408,13 +417,17 @@ export default function DashboardPage() {
     const daConfermare = (aggCandidati || [])
       .filter((c) => !aggEsclusi[c.eventId])
       .map((c) => ({ ...c, inviaEmail: !!aggEmailSelezionate[c.eventId] }));
-    if (!daConfermare.length) return;
+    const daRipulire = (aggDuplicati || [])
+      .filter((d) => !aggDuplicatiEsclusi[d.eventId])
+      .map((d) => ({ ...d, cancelledAt: new Date().toISOString(), billingStatus: "not_charged" }));
+    const tutte = [...daConfermare, ...daRipulire];
+    if (!tutte.length) return;
     setAggStep("writing");
     try {
       const res = await fetch("/api/calendar/aggiorna-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidati: daConfermare }),
+        body: JSON.stringify({ candidati: tutte }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -437,6 +450,8 @@ export default function DashboardPage() {
     setAggCandidati(null);
     setAggEsclusi({});
     setAggEmailSelezionate({});
+    setAggDuplicati(null);
+    setAggDuplicatiEsclusi({});
     setAggRisultato(null);
     setAggErrore("");
     setManPatientId("");
@@ -974,8 +989,49 @@ export default function DashboardPage() {
           {aggStep === "preview" && (
             <>
               {aggErrore && <p style={{ color: "crimson" }}>{aggErrore}</p>}
+
+              {aggDuplicati && aggDuplicati.length > 0 && (
+                <div style={{ marginBottom: 16, padding: 10, border: "1px solid #C77", borderRadius: 8, background: "#FFF5F5" }}>
+                  <p className="muted small" style={{ marginTop: 0 }}>
+                    <strong>Duplicati da ripulire</strong> — la disdetta era già registrata, ma l&apos;evento è ancora
+                    sul calendario (occupa lo slot). Non serve riscrivere &quot;disdetto&quot;: basta confermare qui
+                    per eliminarlo.
+                  </p>
+                  <table style={{ width: "100%", fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th style={{ textAlign: "left" }}>Data</th>
+                        <th style={{ textAlign: "left" }}>Paziente</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aggDuplicati.map((d) => (
+                        <tr key={d.eventId}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={!aggDuplicatiEsclusi[d.eventId]}
+                              onChange={() =>
+                                setAggDuplicatiEsclusi((prev) => ({ ...prev, [d.eventId]: !prev[d.eventId] }))
+                              }
+                            />
+                          </td>
+                          <td className="mono" style={{ whiteSpace: "nowrap" }}>
+                            {d.data}{d.ora ? ` ${d.ora}` : ""}
+                          </td>
+                          <td>{d.nome}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
               {(!aggCandidati || aggCandidati.length === 0) ? (
-                <p className="muted">Nessuna disdetta nuova trovata dalla scansione delle note.</p>
+                (!aggDuplicati || aggDuplicati.length === 0) && (
+                  <p className="muted">Nessuna disdetta nuova trovata dalla scansione delle note.</p>
+                )
               ) : (
                 <>
                   <p className="muted small">
@@ -1075,7 +1131,8 @@ export default function DashboardPage() {
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiRegistraDisdette}>Annulla</button>
-                {aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0 && (
+                {((aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0) ||
+                  (aggDuplicati && aggDuplicati.filter((d) => !aggDuplicatiEsclusi[d.eventId]).length > 0)) && (
                   <button className="btn btn-primary" onClick={confermaRegistraDisdette}>
                     Conferma e registra
                   </button>

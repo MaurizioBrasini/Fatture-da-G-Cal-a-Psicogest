@@ -6,7 +6,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { computeAggiornamentoPreview, todayISO, addDays } from "@/lib/logic";
+import { computeAggiornamentoPreview, computeDuplicatiDaRipulire, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -23,10 +23,11 @@ export async function POST(request) {
   const giorniIndietro = Number(body.giorniIndietro) || 30;
   const giorniAvanti = Number(body.giorniAvanti) || 60;
 
-  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }] = await Promise.all([
+  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }, { data: cancellazioniNotCharged }] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
     supabase.from("cancellations").select("patient_id, original_date").eq("user_id", user.id),
+    supabase.from("cancellations").select("patient_id, original_date, billing_status").eq("user_id", user.id).eq("billing_status", "not_charged"),
   ]);
 
   if (tokenError || !tokenRow) {
@@ -42,7 +43,8 @@ export async function POST(request) {
   try {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
     const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []);
-    return NextResponse.json({ ok: true, candidati, dataMinima, dataMassima });
+    const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []);
+    return NextResponse.json({ ok: true, candidati, duplicati, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

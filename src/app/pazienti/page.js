@@ -209,7 +209,55 @@ export default function PazientiPage() {
   const [genOccError, setGenOccError] = useState("");
   const [genOccProgress, setGenOccProgress] = useState(null);
   const [genOccEsclusi, setGenOccEsclusi] = useState(new Set()); // chiavi "patientId|data" deselezionate
+  const [genOccAnomalie, setGenOccAnomalie] = useState([]); // [{patientId, nome, data, ora, durataMinuti}]
+  const [genOccAnomalieSelezionate, setGenOccAnomalieSelezionate] = useState(new Set()); // opt-in: "sì, ricreala comunque"
+  const [genOccAnomalieRisolte, setGenOccAnomalieRisolte] = useState(new Set()); // "patientId|data" confermate come disdetta, tolte dalla lista
   const GENOCC_CHUNK_SIZE = 15;
+
+  function toggleGenOccAnomaliaRicrea(patientId, data) {
+    const chiave = `${patientId}|${data}`;
+    setGenOccAnomalieSelezionate((s) => {
+      const next = new Set(s);
+      if (next.has(chiave)) next.delete(chiave);
+      else next.add(chiave);
+      return next;
+    });
+  }
+
+  // Conferma che una data "anomala" (generata in passato, ora assente dal
+  // calendario) è davvero una disdetta e non un errore: stessa identica
+  // scrittura di "Aggiungi disdetta manuale" in Registra disdette
+  // (cancellations not_charged + skipped_occurrences), così non ricompare
+  // mai più né qui né nell'elenco riprenotazioni.
+  async function confermaCancellazioneAnomala(a) {
+    const chiave = `${a.patientId}|${a.data}`;
+    const candidato = {
+      eventId: `manual-${a.patientId}-${a.data}-${Date.now()}`,
+      patientId: a.patientId,
+      nome: a.nome,
+      data: a.data,
+      ora: "",
+      cancelledAt: new Date().toISOString(),
+      billingStatus: "not_charged",
+      manual: true,
+    };
+    const res = await fetch("/api/calendar/aggiorna-confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidati: [candidato] }),
+    });
+    if (res.ok) {
+      setGenOccAnomalieRisolte((s) => new Set(s).add(chiave));
+      setGenOccAnomalieSelezionate((s) => {
+        const next = new Set(s);
+        next.delete(chiave);
+        return next;
+      });
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setGenOccError(data.error || "Errore nella conferma della cancellazione.");
+    }
+  }
 
   function toggleGenOccData(patientId, data) {
     const chiave = `${patientId}|${data}`;
@@ -238,6 +286,8 @@ export default function PazientiPage() {
       }
       setGenOccData(data.pazienti || []);
       setGenOccEsclusi(new Set());
+      setGenOccAnomalie(data.anomalie || []);
+      setGenOccAnomalieSelezionate(new Set());
       setGenOccStep("preview");
     } catch (e) {
       setGenOccError(e.message);
@@ -249,6 +299,9 @@ export default function PazientiPage() {
     setGenOccGiorni(45);
     setGenOccData(null);
     setGenOccWriteResult(null);
+    setGenOccAnomalie([]);
+    setGenOccAnomalieSelezionate(new Set());
+    setGenOccAnomalieRisolte(new Set());
     caricaAnteprimaGeneraOccorrenze(45);
   }
 
@@ -259,6 +312,13 @@ export default function PazientiPage() {
         .filter((data) => !genOccEsclusi.has(`${p.patientId}|${data}`))
         .map((data) => ({ patientId: p.patientId, data, ora: p.ora, durataMinuti: p.durataMinuti }))
     );
+    // Anomalie per cui Maurizio ha scelto esplicitamente "ricreala comunque"
+    // (default: nessuna, mai automatico) si creano come le altre.
+    for (const a of genOccAnomalie) {
+      if (genOccAnomalieSelezionate.has(`${a.patientId}|${a.data}`)) {
+        eventi.push({ patientId: a.patientId, data: a.data, ora: a.ora, durataMinuti: a.durataMinuti });
+      }
+    }
     // Le date deselezionate vengono ricordate lato server (skipped_occurrences),
     // cosi' i prossimi giri non le riproporranno piu'.
     const esclusioni = (genOccData || []).flatMap((p) =>
@@ -314,6 +374,9 @@ export default function PazientiPage() {
     setGenOccWriteResult(null);
     setGenOccError("");
     setGenOccProgress(null);
+    setGenOccAnomalie([]);
+    setGenOccAnomalieSelezionate(new Set());
+    setGenOccAnomalieRisolte(new Set());
   }
 
   // --- Chiusure/indisponibilità (weekend lunghi, mezze giornate, ferie):
@@ -1081,8 +1144,44 @@ export default function PazientiPage() {
                 Ogni nuovo appuntamento nasce &quot;da confermare&quot; (arancione) — nessuna occorrenza già presente viene toccata o duplicata.
               </p>
 
+              {genOccAnomalie.filter((a) => !genOccAnomalieRisolte.has(`${a.patientId}|${a.data}`)).length > 0 && (
+                <div style={{ marginBottom: 16, padding: 10, border: "1px solid #C77", borderRadius: 8, background: "#FFF5F5" }}>
+                  <p className="muted small" style={{ marginTop: 0 }}>
+                    <strong>Date anomale</strong> — erano già state generate in passato ma ora non hanno un evento sul
+                    calendario, senza essere state registrate come disdetta: probabile cancellazione fatta a mano su
+                    Google Calendar. <strong>Non vengono ricreate in automatico.</strong> Per ciascuna, scegli cosa è
+                    successo davvero.
+                  </p>
+                  {genOccAnomalie
+                    .filter((a) => !genOccAnomalieRisolte.has(`${a.patientId}|${a.data}`))
+                    .map((a) => {
+                      const chiave = `${a.patientId}|${a.data}`;
+                      return (
+                        <div key={chiave} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid #F0D0D0" }}>
+                          <span className="small" style={{ minWidth: 220 }}>
+                            <strong>{a.nome}</strong> — {a.data} (ore {a.ora})
+                          </span>
+                          <label className="small" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                            <input
+                              type="checkbox"
+                              checked={genOccAnomalieSelezionate.has(chiave)}
+                              onChange={() => toggleGenOccAnomaliaRicrea(a.patientId, a.data)}
+                            />
+                            Ricreala comunque
+                          </label>
+                          <button className="btn-small" onClick={() => confermaCancellazioneAnomala(a)}>
+                            Non è un errore: registra come disdetta
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+
               {(!genOccData || genOccData.length === 0) ? (
-                <p className="muted">Nessuna occorrenza mancante: il calendario copre già l&apos;orizzonte scelto per tutti.</p>
+                genOccAnomalie.length === 0 && (
+                  <p className="muted">Nessuna occorrenza mancante: il calendario copre già l&apos;orizzonte scelto per tutti.</p>
+                )
               ) : (
                 <>
                   <p className="muted small">
@@ -1111,7 +1210,7 @@ export default function PazientiPage() {
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiGeneraOccorrenze}>Annulla</button>
-                {genOccData && genOccData.length > 0 && (
+                {((genOccData && genOccData.length > 0) || genOccAnomalieSelezionate.size > 0) && (
                   <button className="btn btn-primary" onClick={confermaGeneraOccorrenze}>Conferma e crea sul calendario</button>
                 )}
               </div>

@@ -57,6 +57,15 @@ export async function POST(request) {
         descrizione: patient.note || "",
         colorId: "6",
       });
+      // Ricordato per sempre (a prescindere da cosa ne sarà di questo
+      // evento): se in futuro sparisce dal calendario senza passare da
+      // nessun flusso dell'app, "Genera occorrenze future" lo riconoscerà
+      // come anomalia invece di ricrearlo in automatico — vedi
+      // computeOccorrenzeDaGenerare in logic.js.
+      await supabase.from("generated_occurrences").upsert(
+        { user_id: user.id, patient_id: ev.patientId, data: ev.data },
+        { onConflict: "patient_id,data", ignoreDuplicates: true }
+      );
       risultati.push({ patientId: ev.patientId, data: ev.data, ok: true });
     } catch (e) {
       risultati.push({ patientId: ev.patientId, data: ev.data, ok: false, error: e.message });

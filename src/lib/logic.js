@@ -186,6 +186,38 @@ export function computeAggiornamentoPreview(events, patients, cancellazioniEsist
   return risultati.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
 }
 
+// Bug reale 2026-09-11: computeAggiornamentoPreview scarta a monte le
+// disdette già registrate in `cancellations` (giaRegistrate), assumendo
+// implicitamente che l'evento sia già stato cancellato allora. Non è
+// sempre vero — se l'evento è stato ricreato DOPO quella registrazione
+// (es. da "Genera occorrenze future" prima che skipped_occurrences
+// coprisse quella data, o da qualunque altra causa), resta un duplicato
+// fisico sul calendario che "Registra disdette" non vedrà mai più, perché
+// per lui è già tutto a posto — a prescindere da quante volte si riscriva
+// "disdetto" sulla nota e si rilanci il controllo. Confronta invece
+// DIRETTAMENTE le cancellations not_charged con il calendario reale (fonte
+// di verità), a prescindere dalla nota: propone solo la pulizia
+// dell'evento fisico, la disdetta è già registrata correttamente.
+export function computeDuplicatiDaRipulire(events, patients, cancellazioniNotCharged) {
+  const risultati = [];
+  for (const c of cancellazioniNotCharged || []) {
+    const patient = patients.find((p) => p.id === c.patient_id);
+    if (!patient) continue;
+    const eventoReale = events.find(
+      (e) => e.data === c.original_date && matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id
+    );
+    if (!eventoReale) continue;
+    risultati.push({
+      eventId: eventoReale.id,
+      patientId: patient.id,
+      nome: patient.nome_calendario || patient.fatturare_a,
+      data: c.original_date,
+      ora: eventoReale.ora,
+    });
+  }
+  return risultati.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+}
+
 // Elenco "da confermare" per l'invio del link di riprenotazione: pazienti
 // con una disdetta registrata (in `cancellations`, qualunque billing_status:
 // anche una buca addebitata va comunque riprenotata) per cui NON risulta
@@ -856,6 +888,59 @@ export function computeImpattoChiusura(patientSlots, patients, allEvents, closur
   }
 
   return { daCancellare, daVerificare, alternanzaCoinvolta };
+}
+
+// Date attese (occorrenzeFuture) per ogni slot fisso attivo che NON hanno
+// già un evento reale sul calendario. Bug reale 2026-09-11 (Alessandra C.,
+// Flavia e Edoardo, Clara e Christian ricomparsi più volte): prima
+// qualunque data "assente" veniva proposta per la creazione automatica,
+// senza distinguere "non è mai esistita" da "esisteva ed è stata cancellata
+// direttamente su Google Calendar, senza passare da nessun flusso
+// dell'app" — quest'ultimo caso NON va mai ricreato in automatico, è quasi
+// sempre una disdetta reale mai registrata. Serve quindi un terzo insieme,
+// `generatedSet` (patient_id|data di ogni occorrenza MAI creata da "Genera
+// occorrenze future", a prescindere da cosa ne è stato poi), per
+// distinguere le due situazioni:
+// - "mancanti": mai generata prima — sicura da proporre.
+// - "anomale": generata in passato, ora assente, MAI esplicitamente
+//   skippata — sospetta, va segnalata per una decisione esplicita
+//   (ricreare, o confermare che è una disdetta e va lasciata libera).
+// Una data skippata (skippedSet) è sempre esclusa da entrambi gli insiemi,
+// qualunque sia la sua storia: è già stata gestita.
+export function computeOccorrenzeDaGenerare(slots, patients, events, closures, skippedSet, generatedSet, giorniAvanti, oggi) {
+  const patientsById = Object.fromEntries(patients.map((p) => [p.id, p]));
+  const mancanti = [];
+  const anomale = [];
+
+  for (const slot of slots || []) {
+    if (!slot.active) continue;
+    const patient = patientsById[slot.patient_id];
+    if (!patient || !patient.nome_calendario) continue;
+
+    const date = occorrenzeFuture(slot, closures, giorniAvanti, oggi);
+    const eventoDiQuestoPaziente = (e) => matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id;
+    const eventoRecente = events
+      .filter((e) => eventoDiQuestoPaziente(e) && e.ora)
+      .sort((a, b) => (a.data < b.data ? 1 : -1))[0];
+    const durataMinuti = eventoRecente?.durataMinuti || 60;
+    const ora = slot.time_of_day.slice(0, 5);
+    const nome = patient.nome_calendario || patient.fatturare_a;
+
+    const dateMancanti = [];
+    for (const d of date) {
+      if (d <= oggi) continue;
+      if (events.some((e) => e.data === d && eventoDiQuestoPaziente(e))) continue; // presente, niente da fare
+      if (skippedSet.has(`${patient.id}|${d}`)) continue; // esplicitamente gestita
+      if (generatedSet.has(`${patient.id}|${d}`)) {
+        anomale.push({ patientId: patient.id, nome, data: d, ora, durataMinuti });
+      } else {
+        dateMancanti.push(d);
+      }
+    }
+    if (dateMancanti.length) mancanti.push({ patientId: patient.id, nome, ora, durataMinuti, date: dateMancanti });
+  }
+
+  return { mancanti, anomale };
 }
 
 // ---------------------------------------------------------------------
