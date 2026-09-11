@@ -417,6 +417,9 @@ export const DEFAULT_SETTINGS = {
   tariffa_consulenza_regolare: 80,
   tariffa_consulenza_agevolata: 50,
   ultimo_numero_fattura: null,
+  email_mittente_nome: "Dr. Maurizio Brasini",
+  email_mittente_indirizzo: "maurizio.brasini@psiconet.it",
+  link_prenotazioni_online: "https://calendar.app.google/eWXK76xeVknxzeM86",
 };
 
 export function tariffaStandard(tipologia, regime, settings) {

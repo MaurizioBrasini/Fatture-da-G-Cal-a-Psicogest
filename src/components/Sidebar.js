@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 const ITEMS = [
   { href: "/", label: "Da fatturare" },
   { href: "/pazienti", label: "Pazienti" },
+  { href: "/comunicazioni", label: "Comunicazioni" },
   { href: "/storico", label: "Storico fatture" },
   { href: "/impostazioni", label: "Impostazioni" },
 ];

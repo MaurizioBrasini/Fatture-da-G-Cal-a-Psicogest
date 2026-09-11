@@ -141,6 +141,25 @@ export default function ImpostazioniPage() {
           </label>
         </div>
 
+        <h2 className="sub-heading">Email</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Usate per le email inviate dall&apos;app (Comunicazioni, riprenotazione dopo una disdetta).
+        </p>
+        <div className="settings-grid">
+          <label>
+            Nome mittente
+            <input value={settings.email_mittente_nome || ""} onChange={(e) => set("email_mittente_nome", e.target.value)} />
+          </label>
+          <label>
+            Indirizzo mittente
+            <input type="email" value={settings.email_mittente_indirizzo || ""} onChange={(e) => set("email_mittente_indirizzo", e.target.value)} />
+          </label>
+          <label>
+            Link prenotazioni online
+            <input value={settings.link_prenotazioni_online || ""} onChange={(e) => set("link_prenotazioni_online", e.target.value)} />
+          </label>
+        </div>
+
         <h2 className="sub-heading">Strumenti diagnostici</h2>
         <p className="sub" style={{ marginBottom: 12 }}>
           Prova a vuoto (sola lettura, non scrive nulla su Google): controlla le note del calendario nell&apos;intervallo

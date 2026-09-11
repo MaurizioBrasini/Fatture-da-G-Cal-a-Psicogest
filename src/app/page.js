@@ -90,6 +90,7 @@ export default function DashboardPage() {
   const [aggStep, setAggStep] = useState(null); // null | 'loading' | 'preview' | 'writing' | 'done' | 'error'
   const [aggCandidati, setAggCandidati] = useState(null);
   const [aggEsclusi, setAggEsclusi] = useState({}); // { eventId: true } = deselezionato in anteprima
+  const [aggEmailSelezionate, setAggEmailSelezionate] = useState({}); // { eventId: true } = manda anche l'email di riprenotazione
   const [aggRisultato, setAggRisultato] = useState(null);
   const [aggErrore, setAggErrore] = useState("");
   // Form "Aggiungi disdetta manuale": per un evento già eliminato a mano da
@@ -378,6 +379,7 @@ export default function DashboardPage() {
     setAggStep("loading");
     setAggErrore("");
     setAggEsclusi({});
+    setAggEmailSelezionate({});
     setAggRisultato(null);
     try {
       const res = await fetch("/api/calendar/aggiorna-preview", {
@@ -403,7 +405,9 @@ export default function DashboardPage() {
   }
 
   async function confermaRegistraDisdette() {
-    const daConfermare = (aggCandidati || []).filter((c) => !aggEsclusi[c.eventId]);
+    const daConfermare = (aggCandidati || [])
+      .filter((c) => !aggEsclusi[c.eventId])
+      .map((c) => ({ ...c, inviaEmail: !!aggEmailSelezionate[c.eventId] }));
     if (!daConfermare.length) return;
     setAggStep("writing");
     try {
@@ -432,6 +436,7 @@ export default function DashboardPage() {
     setAggStep(null);
     setAggCandidati(null);
     setAggEsclusi({});
+    setAggEmailSelezionate({});
     setAggRisultato(null);
     setAggErrore("");
     setManPatientId("");
@@ -978,7 +983,8 @@ export default function DashboardPage() {
                     <strong> modificabile riga per riga</strong> prima di confermare. <strong>Non addebitata</strong>{" "}
                     rimuove l&apos;evento dal calendario per liberare lo slot e non conta la seduta;{" "}
                     <strong>addebitata</strong> (buca) lascia l&apos;evento invariato e conta la seduta. Deseleziona
-                    una riga per lasciarla da gestire a mano.
+                    una riga per lasciarla da gestire a mano. La colonna &quot;Email&quot; è per chi non ha già il
+                    prossimo appuntamento pianificato: manda il link di prenotazione online.
                   </p>
                   <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
                     <thead>
@@ -987,39 +993,54 @@ export default function DashboardPage() {
                         <th style={{ textAlign: "left" }}>Data</th>
                         <th style={{ textAlign: "left" }}>Paziente</th>
                         <th style={{ textAlign: "left" }}>Esito</th>
+                        <th style={{ textAlign: "left" }}>Email</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {aggCandidati.map((c) => (
-                        <tr key={c.eventId}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={!aggEsclusi[c.eventId]}
-                              onChange={() =>
-                                setAggEsclusi((prev) => ({ ...prev, [c.eventId]: !prev[c.eventId] }))
-                              }
-                            />
-                          </td>
-                          <td className="mono" style={{ whiteSpace: "nowrap" }}>
-                            {c.data}{c.ora ? ` ${c.ora}` : ""}
-                          </td>
-                          <td>
-                            {c.nome}
-                            {c.manual && <span className="muted small"> (manuale, evento già eliminato)</span>}
-                          </td>
-                          <td>
-                            {c.manual ? (
-                              <span>Non addebitata</span>
-                            ) : (
-                              <select value={c.billingStatus} onChange={(e) => cambiaEsitoDisdetta(c.eventId, e.target.value)}>
-                                <option value="not_charged">Non addebitata — rimuove l&apos;evento</option>
-                                <option value="charged">Addebitata (buca) — evento invariato</option>
-                              </select>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {aggCandidati.map((c) => {
+                        const paziente = patients.find((p) => p.id === c.patientId);
+                        return (
+                          <tr key={c.eventId}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={!aggEsclusi[c.eventId]}
+                                onChange={() =>
+                                  setAggEsclusi((prev) => ({ ...prev, [c.eventId]: !prev[c.eventId] }))
+                                }
+                              />
+                            </td>
+                            <td className="mono" style={{ whiteSpace: "nowrap" }}>
+                              {c.data}{c.ora ? ` ${c.ora}` : ""}
+                            </td>
+                            <td>
+                              {c.nome}
+                              {c.manual && <span className="muted small"> (manuale, evento già eliminato)</span>}
+                            </td>
+                            <td>
+                              {c.manual ? (
+                                <span>Non addebitata</span>
+                              ) : (
+                                <select value={c.billingStatus} onChange={(e) => cambiaEsitoDisdetta(c.eventId, e.target.value)}>
+                                  <option value="not_charged">Non addebitata — rimuove l&apos;evento</option>
+                                  <option value="charged">Addebitata (buca) — evento invariato</option>
+                                </select>
+                              )}
+                            </td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                disabled={!paziente?.email || !!aggEsclusi[c.eventId]}
+                                title={paziente?.email ? `Manda a ${paziente.email}` : "Paziente senza email registrata"}
+                                checked={!!aggEmailSelezionate[c.eventId]}
+                                onChange={() =>
+                                  setAggEmailSelezionate((prev) => ({ ...prev, [c.eventId]: !prev[c.eventId] }))
+                                }
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </>
@@ -1072,6 +1093,14 @@ export default function DashboardPage() {
                   ? `Fatto: ${aggRisultato.registrati} disdette registrate.`
                   : `${aggRisultato.registrati} registrate, ${aggRisultato.falliti} fallite.`}
               </p>
+              {aggRisultato.dettagli?.some((d) => d.emailInviata) && (
+                <p className="muted small">
+                  Email di riprenotazione: {aggRisultato.dettagli.filter((d) => d.emailInviata === "ok").length} inviate
+                  {aggRisultato.dettagli.some((d) => d.emailInviata === "errore") &&
+                    `, ${aggRisultato.dettagli.filter((d) => d.emailInviata === "errore").length} non riuscite`}
+                  .
+                </p>
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiRegistraDisdette}>Chiudi</button>
               </div>

@@ -27,6 +27,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
+import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -53,8 +54,21 @@ export async function POST(request) {
     );
   }
 
+  const vogliomoEmail = candidati.some((c) => c.inviaEmail);
+  let settings = null;
+  let emailByPatientId = {};
+  if (vogliomoEmail) {
+    const [{ data: s }, { data: pazienti }] = await Promise.all([
+      supabase.from("settings").select("*").maybeSingle(),
+      supabase.from("patients").select("id,email").in("id", [...new Set(candidati.filter((c) => c.inviaEmail).map((c) => c.patientId))]),
+    ]);
+    settings = s;
+    emailByPatientId = Object.fromEntries((pazienti || []).map((p) => [p.id, p.email]));
+  }
+
   const risultati = [];
   for (const c of candidati) {
+    let emailInviata = null; // null = non richiesta, altrimenti "ok" | "errore"
     try {
       const { error: insertError } = await supabase.from("cancellations").insert({
         user_id: user.id,
@@ -82,9 +96,40 @@ export async function POST(request) {
           { onConflict: "patient_id,data", ignoreDuplicates: true }
         );
       }
-      risultati.push({ eventId: c.eventId, ok: true });
+      if (c.inviaEmail) {
+        const email = emailByPatientId[c.patientId];
+        const oggettoEmail = "Prenota il tuo prossimo appuntamento";
+        let erroreEmail = null;
+        if (email && settings?.link_prenotazioni_online) {
+          try {
+            await sendEmail({
+              settings,
+              to: email,
+              subject: oggettoEmail,
+              html: buildEmailRiprenotazioneHtml({ nomePaziente: c.nome, linkPrenotazioni: settings.link_prenotazioni_online }),
+            });
+          } catch (e) {
+            erroreEmail = e.message;
+          }
+        } else {
+          erroreEmail = !email ? "Paziente senza email registrata." : "Link prenotazioni non impostato in Impostazioni.";
+        }
+        emailInviata = erroreEmail ? "errore" : "ok";
+        if (email) {
+          await supabase.from("email_log").insert({
+            user_id: user.id,
+            patient_id: c.patientId,
+            email,
+            oggetto: oggettoEmail,
+            tipo: "riprenotazione",
+            stato: emailInviata,
+            errore: erroreEmail,
+          });
+        }
+      }
+      risultati.push({ eventId: c.eventId, ok: true, emailInviata });
     } catch (e) {
-      risultati.push({ eventId: c.eventId, ok: false, error: e.message });
+      risultati.push({ eventId: c.eventId, ok: false, error: e.message, emailInviata });
     }
     // piccola pausa tra un'operazione e l'altra, per non sforare i limiti di
     // frequenza imposti da Google sulle chiamate API
