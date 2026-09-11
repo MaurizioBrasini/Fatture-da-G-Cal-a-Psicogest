@@ -28,6 +28,7 @@ import {
   occorrenzeFuture,
   rilevaConflittiChiusura,
   computeImpattoChiusura,
+  computeRiprenotazioniPendenti,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -551,6 +552,39 @@ test("computeImpattoChiusura non tocca MAI uno slot la cui fascia non è tra le 
   const { daCancellare } = computeImpattoChiusura(patientSlots, patients, events, closures, nuoveChiusure, 60, "2026-10-01");
   assert.equal(daCancellare.length, 1);
   assert.equal(daCancellare[0].eventId, "ev1"); // solo lo slot davvero coinvolto dalla chiusura, mai "ev2"
+});
+
+// --- computeRiprenotazioniPendenti ---
+test("computeRiprenotazioniPendenti propone una disdetta senza email di riprenotazione già mandata", () => {
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R.", email: "mario@example.com" }];
+  const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].patientId, 1);
+});
+test("computeRiprenotazioniPendenti esclude chi ha già ricevuto l'email dopo quella disdetta", () => {
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R.", email: "mario@example.com" }];
+  const emailLog = [{ patient_id: 1, created_at: "2026-09-10T11:00:00Z" }];
+  const r = computeRiprenotazioniPendenti(cancellazioni, patients, emailLog);
+  assert.equal(r.length, 0);
+});
+test("computeRiprenotazioniPendenti ripropone una NUOVA disdetta anche se una email precedente era già stata mandata", () => {
+  const cancellazioni = [
+    { patient_id: 1, original_date: "2026-09-01", billing_status: "not_charged", created_at: "2026-09-01T10:00:00Z" },
+    { patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" },
+  ];
+  const patients = [{ id: 1, nome_calendario: "Mario R.", email: "mario@example.com" }];
+  const emailLog = [{ patient_id: 1, created_at: "2026-09-01T11:00:00Z" }]; // mandata dopo la prima disdetta, non dopo la seconda
+  const r = computeRiprenotazioniPendenti(cancellazioni, patients, emailLog);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].data, "2026-09-10");
+});
+test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R.", email: null }];
+  const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
+  assert.equal(r.length, 0);
 });
 
 console.log(`\n${passed} test superati.`);

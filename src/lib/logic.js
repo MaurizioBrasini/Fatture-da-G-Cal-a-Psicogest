@@ -186,6 +186,43 @@ export function computeAggiornamentoPreview(events, patients, cancellazioniEsist
   return risultati.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
 }
 
+// Elenco "da confermare" per l'invio del link di riprenotazione: pazienti
+// con una disdetta registrata (in `cancellations`, qualunque billing_status:
+// anche una buca addebitata va comunque riprenotata) per cui NON risulta
+// già un'email di riprenotazione mandata con successo DOPO quella disdetta
+// (confronto sui timestamp `created_at`, non un flag — così una disdetta
+// successiva alla stessa persona ricompare come nuovo "da confermare" anche
+// se una email precedente era già stata inviata). Un solo candidato per
+// paziente, con la disdetta più recente. Pazienti senza email non compaiono
+// (niente da mandare). Non scrive nulla: solo l'elenco da mostrare prima
+// della conferma.
+export function computeRiprenotazioniPendenti(cancellazioni, patients, emailRiprenotazioneInviate) {
+  const patientsById = Object.fromEntries((patients || []).map((p) => [p.id, p]));
+  const ultimoInvioOkPerPaziente = {};
+  for (const riga of emailRiprenotazioneInviate || []) {
+    const attuale = ultimoInvioOkPerPaziente[riga.patient_id];
+    if (!attuale || riga.created_at > attuale) ultimoInvioOkPerPaziente[riga.patient_id] = riga.created_at;
+  }
+  const perPaziente = {};
+  for (const c of cancellazioni || []) {
+    const patient = patientsById[c.patient_id];
+    if (!patient || !patient.email) continue;
+    const ultimoInvio = ultimoInvioOkPerPaziente[c.patient_id];
+    if (ultimoInvio && ultimoInvio >= c.created_at) continue; // già mandata dopo questa disdetta
+    const esistente = perPaziente[c.patient_id];
+    if (!esistente || c.original_date > esistente.data) {
+      perPaziente[c.patient_id] = {
+        patientId: c.patient_id,
+        nome: patient.nome_calendario || patient.fatturare_a,
+        email: patient.email,
+        data: c.original_date,
+        billingStatus: c.billing_status,
+      };
+    }
+  }
+  return Object.values(perPaziente).sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
+}
+
 // Toglie un'eventuale iniziale di cognome finale ("Francesca F." ->
 // "Francesca", "Giovanni D.L." -> "Giovanni") — serve per riconoscere note
 // storiche scritte PRIMA che il nome calendario di un paziente venisse

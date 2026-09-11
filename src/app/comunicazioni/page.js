@@ -19,6 +19,64 @@ export default function ComunicazioniPage() {
   const [invioErrore, setInvioErrore] = useState("");
   const [invioRisultato, setInvioRisultato] = useState(null);
 
+  // --- Riprenotazioni da confermare (disdette senza email già mandata) ---
+  const [ripStato, setRipStato] = useState(null); // null | 'loading' | 'preview' | 'invio' | 'fatto' | 'errore'
+  const [ripCandidati, setRipCandidati] = useState(null);
+  const [ripEsclusi, setRipEsclusi] = useState({}); // { patientId: true } = tolto dall'invio
+  const [ripErrore, setRipErrore] = useState("");
+  const [ripRisultato, setRipRisultato] = useState(null);
+
+  async function generaElencoRiprenotazioni() {
+    setRipStato("loading");
+    setRipErrore("");
+    setRipEsclusi({});
+    setRipRisultato(null);
+    try {
+      const res = await fetch("/api/email/riprenotazioni-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRipErrore(data.error || "Errore nel calcolo dell'elenco.");
+        setRipStato("errore");
+        return;
+      }
+      setRipCandidati(data.candidati || []);
+      setRipStato("preview");
+    } catch (e) {
+      setRipErrore(e.message);
+      setRipStato("errore");
+    }
+  }
+
+  async function confermaRiprenotazioni() {
+    const daMandare = (ripCandidati || []).filter((c) => !ripEsclusi[c.patientId]);
+    if (!daMandare.length) return;
+    if (!window.confirm(`Confermi l'invio a ${daMandare.length} pazient${daMandare.length === 1 ? "e" : "i"}?`)) return;
+    setRipStato("invio");
+    try {
+      const res = await fetch("/api/email/riprenotazioni-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidati: daMandare }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRipErrore(data.error || "Errore durante l'invio.");
+        setRipStato("errore");
+        return;
+      }
+      setRipRisultato(data);
+      setRipStato("fatto");
+      load();
+    } catch (e) {
+      setRipErrore(e.message);
+      setRipStato("errore");
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     const [{ data: p }, { data: l }] = await Promise.all([
@@ -109,6 +167,71 @@ export default function ComunicazioniPage() {
           </div>
         </header>
 
+        <h2 className="sub-heading" style={{ marginTop: 0 }}>Riprenotazioni da confermare</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Elenco di chi ha disdetto senza aver ancora ricevuto il link di riprenotazione. Generalo a fine giornata o
+          ogni pochi giorni, togli la spunta a chi non deve riceverlo, conferma.
+        </p>
+        <button className="btn btn-ghost" onClick={generaElencoRiprenotazioni} disabled={ripStato === "loading"} style={{ marginBottom: 12 }}>
+          {ripStato === "loading" ? "Ricerca in corso…" : "Genera elenco"}
+        </button>
+
+        {ripStato === "errore" && <div className="error-box" style={{ marginBottom: 12 }}>{ripErrore}</div>}
+
+        {(ripStato === "preview" || ripStato === "invio" || ripStato === "fatto") && (
+          <>
+            {(!ripCandidati || ripCandidati.length === 0) ? (
+              <p className="muted" style={{ marginBottom: 16 }}>Nessuna disdetta in attesa di riprenotazione.</p>
+            ) : (
+              <>
+                <div className="table-scroll" style={{ marginBottom: 12 }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th style={{ textAlign: "left" }}>Data disdetta</th>
+                        <th style={{ textAlign: "left" }}>Paziente</th>
+                        <th style={{ textAlign: "left" }}>Email</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ripCandidati.map((c) => (
+                        <tr key={c.patientId}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={!ripEsclusi[c.patientId]}
+                              onChange={() => setRipEsclusi((prev) => ({ ...prev, [c.patientId]: !prev[c.patientId] }))}
+                            />
+                          </td>
+                          <td className="mono">{c.data}</td>
+                          <td>{c.nome}</td>
+                          <td className="mono">{c.email}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {ripStato === "fatto" && ripRisultato ? (
+                  <p className="muted small" style={{ marginBottom: 16 }}>
+                    Fatto: {ripRisultato.inviate} inviate{ripRisultato.fallite > 0 && `, ${ripRisultato.fallite} fallite`}.
+                  </p>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    onClick={confermaRiprenotazioni}
+                    disabled={ripStato === "invio" || ripCandidati.every((c) => ripEsclusi[c.patientId])}
+                    style={{ marginBottom: 16 }}
+                  >
+                    {ripStato === "invio" ? "Invio in corso…" : `Invia a ${ripCandidati.filter((c) => !ripEsclusi[c.patientId]).length} pazienti`}
+                  </button>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        <h2 className="sub-heading">Invio a più pazienti</h2>
         <div className="settings-grid" style={{ marginBottom: 16 }}>
           <label style={{ gridColumn: "1 / -1" }}>
             Oggetto
