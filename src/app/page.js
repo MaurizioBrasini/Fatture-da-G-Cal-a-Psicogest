@@ -523,6 +523,7 @@ export default function DashboardPage() {
       }
       setPrenData(data);
       setPrenStep("preview");
+      segna("prenotazioni");
     } catch (e) {
       setPrenErrore(e.message);
       setPrenStep("error");
@@ -614,16 +615,23 @@ export default function DashboardPage() {
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.prenotazioni} onChange={() => segna("prenotazioni", !routine.prenotazioni)} />
+              <span className="small" style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}>
+                1. Prenotazioni online
+              </span>
+              <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
               <span className="small" style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}>
-                1. Registra disdette
+                2. Registra disdette
               </span>
               <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
               <span className="small" style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}>
-                2. Aggiorna dal calendario
+                3. Aggiorna dal calendario
               </span>
               <button className="btn-small" onClick={handleSync} disabled={syncing}>
                 {syncing ? "Lettura…" : "Fai ora"}
@@ -632,7 +640,7 @@ export default function DashboardPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
               <span className="small" style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}>
-                3. Rinumera tutti
+                4. Rinumera tutti
               </span>
               <button className="btn-small" onClick={() => apriRinumerazione(null)}>Fai ora</button>
             </div>
