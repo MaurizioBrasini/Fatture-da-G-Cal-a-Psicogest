@@ -269,8 +269,8 @@ export default function ComunicazioniPage() {
               style={{ width: "100%", fontFamily: "inherit", fontSize: 14, padding: 8 }}
             />
             <span className="muted small">
-              Puoi usare <code>[nome]</code> e <code>[data]</code> nell&apos;oggetto e nel testo: verranno sostituiti col nome e la
-              prossima data di appuntamento di ciascun destinatario, uno per uno.
+              Puoi usare <code>[nome]</code> e <code>[data]</code> (nome e prossimo appuntamento di ciascun destinatario) e{" "}
+              <code>[link]</code> (diventa un bottone &quot;Prenota appuntamento&quot;, link impostabile in Impostazioni).
             </span>
           </label>
         </div>

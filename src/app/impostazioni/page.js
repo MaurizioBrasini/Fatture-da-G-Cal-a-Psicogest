@@ -157,6 +157,15 @@ export default function ImpostazioniPage() {
           <label>
             Link prenotazioni online
             <input value={settings.link_prenotazioni_online || ""} onChange={(e) => set("link_prenotazioni_online", e.target.value)} />
+            <span className="muted small">Usato nell&apos;email automatica di riprenotazione dopo una disdetta.</span>
+          </label>
+          <label>
+            Link prenotazione per Comunicazioni
+            <input value={settings.link_comunicazioni || ""} onChange={(e) => set("link_comunicazioni", e.target.value)} />
+            <span className="muted small">
+              Usato dal segnaposto <code>[link]</code> nei messaggi di Comunicazioni (diventa un bottone &quot;Prenota
+              appuntamento&quot;).
+            </span>
           </label>
         </div>
 

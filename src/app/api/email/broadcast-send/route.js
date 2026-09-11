@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
-import { sendEmail, testoInHtml } from "@/lib/email";
+import { sendEmail, buildBroadcastHtml } from "@/lib/email";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -48,7 +48,7 @@ export async function POST(request) {
     let stato = "ok";
     let errore = null;
     try {
-      await sendEmail({ settings, to: p.email, subject: d.oggetto, html: testoInHtml(d.corpoTesto) });
+      await sendEmail({ settings, to: p.email, subject: d.oggetto, html: buildBroadcastHtml(d.corpoTesto, settings) });
     } catch (e) {
       stato = "errore";
       errore = e.message;

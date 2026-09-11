@@ -31,6 +31,21 @@ export async function sendEmail({ settings, to, subject, html }) {
   if (error) throw new Error(error.message || "Errore Resend non specificato.");
 }
 
+// Converte il testo di un messaggio "Comunicazioni" in HTML, sostituendo il
+// segnaposto [link] (se presente) con un bottone "Prenota appuntamento" che
+// punta a settings.link_comunicazioni — impossibile da rendere in puro
+// testo semplice, per questo è un passaggio separato da testoInHtml/
+// personalizzaTesto (quello gestisce solo [nome]/[data], sempre testo).
+export function buildBroadcastHtml(corpoTesto, settings) {
+  let html = testoInHtml(corpoTesto);
+  const url = settings?.link_comunicazioni;
+  if (url) {
+    const bottone = `<a href="${url}" style="display:inline-block;padding:10px 18px;background:#3E6B4F;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;">Prenota appuntamento</a>`;
+    html = html.replaceAll("[link]", bottone);
+  }
+  return html;
+}
+
 export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni }) {
   return testoInHtml(
     `Gentile ${nomePaziente},\n\n` +

@@ -532,6 +532,7 @@ export const DEFAULT_SETTINGS = {
   email_mittente_nome: "Dr. Maurizio Brasini",
   email_mittente_indirizzo: "maurizio.brasini@psiconet.it",
   link_prenotazioni_online: "https://calendar.app.google/eWXK76xeVknxzeM86",
+  link_comunicazioni: "https://calendar.app.google/cYP4PBewfvmv4rKV9",
 };
 
 export function tariffaStandard(tipologia, regime, settings) {
