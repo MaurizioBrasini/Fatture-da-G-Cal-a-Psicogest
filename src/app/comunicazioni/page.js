@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
-import { computePatientState, personalizzaTesto, formatDataItaliana, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
+import { computePatientState, computePazientiConSalto, personalizzaTesto, formatDataItaliana, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 
 export default function ComunicazioniPage() {
   const supabase = createClient();
@@ -14,6 +14,8 @@ export default function ComunicazioniPage() {
   const [corpoTesto, setCorpoTesto] = useState("");
   const [includiAttivi, setIncludiAttivi] = useState(true);
   const [includiSospesi, setIncludiSospesi] = useState(false);
+  const [includiSalto, setIncludiSalto] = useState(false);
+  const [salto, setSalto] = useState({}); // { patientId: {tipo, gapGiorni, intervalAtteso} } — chi ha disdetto di recente con un buco
   const [deselezionati, setDeselezionati] = useState({}); // { patientId: true } = tolto a mano dall'invio
 
   const [invioStato, setInvioStato] = useState(null); // null | 'invio' | 'fatto' | 'errore'
@@ -80,28 +82,34 @@ export default function ComunicazioniPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: l }, syncRes] = await Promise.all([
+    const [{ data: p }, { data: l }, { data: slots }, { data: cancellazioni }, syncRes] = await Promise.all([
       supabase.from("patients").select("id,nome,nome_calendario,fatturare_a,email,stato").order("nome_calendario"),
       supabase
         .from("email_log")
         .select("*, patients(nome_calendario,fatturare_a)")
         .order("created_at", { ascending: false })
         .limit(300),
+      supabase.from("patient_slots").select("patient_id,active,interval_days").eq("active", true),
+      supabase.from("cancellations").select("patient_id,cancelled_at"),
+      // Orizzonte ampio anche all'indietro: computePazientiConSalto deve
+      // vedere l'ultimo appuntamento passato per calcolare il gap, non solo
+      // i futuri usati per [data].
       fetch("/api/calendar/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: todayISO(), to: addDays(todayISO(), 200) }),
+        body: JSON.stringify({ from: addDays(todayISO(), -90), to: addDays(todayISO(), 200) }),
       }).then((r) => r.json()),
     ]);
+    const eventi = syncRes?.events || [];
     // Prossimo appuntamento di ciascuno, per personalizzare [data] — non
     // servono qui ne' cancellazioni ne' impostazioni vere (contano solo per
     // il conteggio sedute/soglia, non per prossimaData).
-    const eventiFuturi = syncRes?.events || [];
     const conProssimaData = (p || []).map((pat) => ({
       ...pat,
-      prossimaData: computePatientState(pat, eventiFuturi, DEFAULT_SETTINGS, [], p || []).prossimaData,
+      prossimaData: computePatientState(pat, eventi, DEFAULT_SETTINGS, [], p || []).prossimaData,
     }));
     setPatients(conProssimaData);
+    setSalto(Object.fromEntries(computePazientiConSalto(p || [], slots || [], eventi, cancellazioni || []).map((s) => [s.patientId, s])));
     setLog(l || []);
     setLoading(false);
   }, [supabase]);
@@ -113,7 +121,7 @@ export default function ComunicazioniPage() {
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
   const statiInclusi = new Set([...(includiAttivi ? ["attivo"] : []), ...(includiSospesi ? ["sospeso"] : [])]);
-  const candidati = patients.filter((p) => statiInclusi.has(p.stato));
+  const candidati = patients.filter((p) => statiInclusi.has(p.stato) || (includiSalto && salto[p.id]));
   const conEmail = candidati.filter((p) => p.email);
   const senzaEmail = candidati.length - conEmail.length;
   const selezionati = conEmail.filter((p) => !deselezionati[p.id]);
@@ -285,6 +293,13 @@ export default function ComunicazioniPage() {
             <input type="checkbox" checked={includiSospesi} onChange={(e) => setIncludiSospesi(e.target.checked)} />
             Pazienti sospesi
           </label>
+          <label
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Chi ha disdetto negli ultimi 30 giorni e ora ha un buco doppio della sua cadenza abituale (o nessun appuntamento futuro), più chi è a schema libero senza alcuna data pianificata — il target più utile per un invito a prenotare un incontro intermedio."
+          >
+            <input type="checkbox" checked={includiSalto} onChange={(e) => setIncludiSalto(e.target.checked)} />
+            Pazienti con disdetta/salto ({Object.keys(salto).length})
+          </label>
         </div>
 
         <p className="muted small">
@@ -301,26 +316,38 @@ export default function ComunicazioniPage() {
                   <th style={{ textAlign: "left" }}>Paziente</th>
                   <th style={{ textAlign: "left" }}>Email</th>
                   <th style={{ textAlign: "left" }}>Prossimo appuntamento</th>
+                  <th style={{ textAlign: "left" }}>Segnale</th>
                 </tr>
               </thead>
               <tbody>
-                {candidati.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        disabled={!p.email}
-                        checked={!!p.email && !deselezionati[p.id]}
-                        onChange={() => setDeselezionati((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
-                      />
-                    </td>
-                    <td>{p.nome_calendario || p.fatturare_a}</td>
-                    <td className={p.email ? "mono" : "muted small"}>{p.email || "manca"}</td>
-                    <td className={p.prossimaData ? "" : "muted small"}>
-                      {p.prossimaData ? formatDataItaliana(p.prossimaData) : "nessuno pianificato"}
-                    </td>
-                  </tr>
-                ))}
+                {candidati.map((p) => {
+                  const s = salto[p.id];
+                  const etichettaSalto = !s
+                    ? ""
+                    : s.tipo === "salto"
+                    ? `Salto: ${s.gapGiorni}gg (atteso ${s.intervalAtteso}gg)`
+                    : s.tipo === "nessun_futuro"
+                    ? "Disdetta recente, nessun appuntamento futuro"
+                    : "Schema libero, nessuna data pianificata";
+                  return (
+                    <tr key={p.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          disabled={!p.email}
+                          checked={!!p.email && !deselezionati[p.id]}
+                          onChange={() => setDeselezionati((prev) => ({ ...prev, [p.id]: !prev[p.id] }))}
+                        />
+                      </td>
+                      <td>{p.nome_calendario || p.fatturare_a}</td>
+                      <td className={p.email ? "mono" : "muted small"}>{p.email || "manca"}</td>
+                      <td className={p.prossimaData ? "" : "muted small"}>
+                        {p.prossimaData ? formatDataItaliana(p.prossimaData) : "nessuno pianificato"}
+                      </td>
+                      <td className="muted small">{etichettaSalto}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

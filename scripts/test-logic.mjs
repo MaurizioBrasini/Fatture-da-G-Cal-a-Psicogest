@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   addDays,
   daysBetween,
+  todayISO,
   normalizeName,
   titleCaseNomeCalendario,
   matchPatientForEvent,
@@ -29,6 +30,7 @@ import {
   rilevaConflittiChiusura,
   computeImpattoChiusura,
   computeRiprenotazioniPendenti,
+  computePazientiConSalto,
   computeOccorrenzeDaGenerare,
   computeDuplicatiDaRipulire,
   formatDataItaliana,
@@ -588,6 +590,80 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
   const cancellazioni = [{ patient_id: 1, original_date: "2026-09-10", billing_status: "not_charged", created_at: "2026-09-10T10:00:00Z" }];
   const patients = [{ id: 1, nome_calendario: "Mario R.", email: null }];
   const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
+  assert.equal(r.length, 0);
+});
+
+// --- computePazientiConSalto ---
+test("computePazientiConSalto segnala un salto solo se c'è ANCHE una disdetta recente (gap doppio da solo non basta)", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const slots = [{ patient_id: 1, active: true, interval_days: 7 }];
+  const events = [
+    { data: addDays(oggi, -10), titolo: "Mario R." },
+    { data: addDays(oggi, 4), titolo: "Mario R." },
+  ]; // gap = 14 giorni = 2x7
+  const cancellazioniRecenti = [{ patient_id: 1, cancelled_at: `${addDays(oggi, -2)}T10:00:00Z` }];
+  assert.equal(computePazientiConSalto(patients, slots, events, []).length, 0, "senza disdetta recente non deve segnalare");
+  const r = computePazientiConSalto(patients, slots, events, cancellazioniRecenti);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].tipo, "salto");
+  assert.equal(r[0].gapGiorni, 14);
+});
+test("computePazientiConSalto non segnala nulla se il gap è quello normale, anche con una disdetta recente", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const slots = [{ patient_id: 1, active: true, interval_days: 7 }];
+  const events = [
+    { data: addDays(oggi, -3), titolo: "Mario R." },
+    { data: addDays(oggi, 4), titolo: "Mario R." },
+  ]; // gap = 7 giorni, normale
+  const cancellazioniRecenti = [{ patient_id: 1, cancelled_at: `${addDays(oggi, -2)}T10:00:00Z` }];
+  const r = computePazientiConSalto(patients, slots, events, cancellazioniRecenti);
+  assert.equal(r.length, 0);
+});
+test("computePazientiConSalto segnala chi ha uno slot attivo, una disdetta recente, e nessun appuntamento futuro", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const slots = [{ patient_id: 1, active: true, interval_days: 14 }];
+  const events = [{ data: addDays(oggi, -5), titolo: "Mario R." }];
+  const cancellazioniRecenti = [{ patient_id: 1, cancelled_at: `${addDays(oggi, -1)}T10:00:00Z` }];
+  const r = computePazientiConSalto(patients, slots, events, cancellazioniRecenti);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].tipo, "nessun_futuro");
+});
+test("computePazientiConSalto ignora una disdetta troppo vecchia (fuori dalla finestra)", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const slots = [{ patient_id: 1, active: true, interval_days: 7 }];
+  const events = [
+    { data: addDays(oggi, -10), titolo: "Mario R." },
+    { data: addDays(oggi, 4), titolo: "Mario R." },
+  ];
+  const cancellazioniVecchie = [{ patient_id: 1, cancelled_at: `${addDays(oggi, -90)}T10:00:00Z` }];
+  const r = computePazientiConSalto(patients, slots, events, cancellazioniVecchie);
+  assert.equal(r.length, 0);
+});
+test("computePazientiConSalto segnala uno schema libero senza appuntamenti futuri, anche SENZA disdetta recente", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [{ data: addDays(oggi, -30), titolo: "Mario R." }];
+  const r = computePazientiConSalto(patients, [], events, []); // nessuna disdetta, nessuno slot
+  assert.equal(r.length, 1);
+  assert.equal(r[0].tipo, "schema_libero_senza_data");
+});
+test("computePazientiConSalto NON segnala uno schema libero che ha comunque una data futura", () => {
+  const oggi = todayISO();
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [
+    { data: addDays(oggi, -30), titolo: "Mario R." },
+    { data: addDays(oggi, 10), titolo: "Mario R." },
+  ];
+  const r = computePazientiConSalto(patients, [], events, []);
+  assert.equal(r.length, 0);
+});
+test("computePazientiConSalto NON segnala uno schema libero mai visto prima (nessuno storico)", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const r = computePazientiConSalto(patients, [], [], []);
   assert.equal(r.length, 0);
 });
 

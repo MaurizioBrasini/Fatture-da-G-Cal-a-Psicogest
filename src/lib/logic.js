@@ -274,6 +274,91 @@ export function computeRiprenotazioniPendenti(cancellazioni, patients, emailRipr
   return Object.values(perPaziente).sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0));
 }
 
+// Pazienti che hanno DISDETTO DI RECENTE (una riga in `cancellazioni` con
+// cancelled_at negli ultimi `giorniIndietroDisdetta` giorni, non solo un
+// gap generico) E il cui salto tra ultimo e prossimo appuntamento supera il
+// doppio della cadenza attesa (settimanale diventato quindicinale,
+// quindicinale diventato mensile, ecc.) — o senza alcun appuntamento futuro
+// nonostante lo slot attivo. Entrambe le condizioni servono: un gap grande
+// senza una disdetta recente potrebbe essere semplicemente come è sempre
+// stato programmato quel paziente (non un buco da colmare, vedi
+// "alternanza_fissa"); una disdetta recente su uno slot fisso di solito NON
+// crea alcun buco (il prossimo turno regolare è già pianificato) — qui si
+// individua chi è rimasto davvero scoperto dopo aver disdetto: il target
+// giusto per un messaggio di riprenotazione mirato (richiesta di Maurizio
+// 2026-09-11). Include anche i pazienti "a schema libero" (nessuno slot
+// fisso attivo, es. fuori_schema/"su richiesta") che non hanno alcuna data
+// futura già pianificata — per loro non serve una disdetta recente: non
+// esiste una cadenza attesa da violare, "nessuna data pianificata" è già di
+// per sé il segnale interessante. Richiede `events` su un orizzonte che
+// copra sia il passato recente sia almeno 2x l'intervallo più lungo in
+// futuro, altrimenti "nessun futuro" darebbe falsi positivi per semplice
+// mancanza di dati letti.
+export function computePazientiConSalto(patients, slots, events, cancellazioni, giorniIndietroDisdetta = 30) {
+  const slotAttivoByPatientId = Object.fromEntries((slots || []).filter((s) => s.active).map((s) => [s.patient_id, s]));
+  const oggi = todayISO();
+  const dataMinimaDisdetta = addDays(oggi, -giorniIndietroDisdetta);
+  const haDisdettoRecente = new Set(
+    (cancellazioni || []).filter((c) => c.cancelled_at && c.cancelled_at.slice(0, 10) >= dataMinimaDisdetta).map((c) => c.patient_id)
+  );
+  const risultati = [];
+  for (const patient of patients || []) {
+    const slot = slotAttivoByPatientId[patient.id];
+    const matched = (events || []).filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id);
+    const passate = matched.filter((e) => e.data <= oggi).map((e) => e.data).sort();
+    const future = matched.filter((e) => e.data > oggi).map((e) => e.data).sort();
+    const ultima = passate.length ? passate[passate.length - 1] : null;
+    const prossima = future.length ? future[0] : null;
+
+    if (!slot) {
+      // Schema libero: nessuna cadenza attesa da confrontare, quindi
+      // nessuna disdetta recente richiesta — basta non avere già una data
+      // futura pianificata (e uno storico reale, non un lead mai visto).
+      if (ultima && !prossima) {
+        risultati.push({
+          patientId: patient.id,
+          nome: patient.nome_calendario || patient.fatturare_a,
+          tipo: "schema_libero_senza_data",
+          ultima,
+          prossima: null,
+          gapGiorni: null,
+          intervalAtteso: null,
+        });
+      }
+      continue;
+    }
+    if (!haDisdettoRecente.has(patient.id)) continue; // solo chi ha disdetto di recente, non un gap qualunque
+
+    if (!prossima) {
+      risultati.push({
+        patientId: patient.id,
+        nome: patient.nome_calendario || patient.fatturare_a,
+        tipo: "nessun_futuro",
+        ultima,
+        prossima: null,
+        gapGiorni: null,
+        intervalAtteso: slot.interval_days,
+      });
+      continue;
+    }
+    if (!ultima) continue; // nessuno storico da confrontare (paziente nuovo)
+
+    const gap = daysBetween(ultima, prossima);
+    if (gap >= slot.interval_days * 2) {
+      risultati.push({
+        patientId: patient.id,
+        nome: patient.nome_calendario || patient.fatturare_a,
+        tipo: "salto",
+        ultima,
+        prossima,
+        gapGiorni: gap,
+        intervalAtteso: slot.interval_days,
+      });
+    }
+  }
+  return risultati;
+}
+
 // Toglie un'eventuale iniziale di cognome finale ("Francesca F." ->
 // "Francesca", "Giovanni D.L." -> "Giovanni") — serve per riconoscere note
 // storiche scritte PRIMA che il nome calendario di un paziente venisse
