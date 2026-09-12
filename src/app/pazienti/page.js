@@ -1464,6 +1464,22 @@ export default function PazientiPage() {
               />
             </label>
           </div>
+          {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {
+            const weekday = new Date(`${nuovoSlotModal.data}T12:00:00Z`).getUTCDay();
+            const timeOfDay = `${nuovoSlotModal.ora}:00`;
+            const conflitto = Object.entries(slotsByPatientId).find(
+              ([pid, sl]) => Number(pid) !== nuovoSlotModal.patientId && sl.weekday === weekday && sl.time_of_day === timeOfDay
+            );
+            if (!conflitto) return null;
+            const altroPatient = patients.find((pp) => pp.id === Number(conflitto[0]));
+            const altroNome = altroPatient ? altroPatient.nome_calendario || altroPatient.fatturare_a : `paziente #${conflitto[0]}`;
+            return (
+              <p className="small" style={{ color: "#b45309", marginTop: 10, marginBottom: 0 }}>
+                Attenzione: {GIORNI_LABEL[weekday]} alle {nuovoSlotModal.ora} è già lo slot fisso di <strong>{altroNome}</strong>.
+                Se non è una sovrapposizione voluta (es. alternanza tra due pazienti), scegli un altro giorno/ora.
+              </p>
+            );
+          })()}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
             <button className="btn btn-ghost" onClick={chiudiNuovoSlot}>Annulla</button>
             <button className="btn btn-primary" disabled={!nuovoSlotModal.data || !nuovoSlotModal.ora} onClick={confermaNuovoSlot}>
