@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
-import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -1467,16 +1467,23 @@ export default function PazientiPage() {
           {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {
             const weekday = new Date(`${nuovoSlotModal.data}T12:00:00Z`).getUTCDay();
             const timeOfDay = `${nuovoSlotModal.ora}:00`;
+            const nuovoSlot = {
+              weekday,
+              time_of_day: timeOfDay,
+              interval_days: nuovoSlotModal.intervalDays,
+              anchor_date: nuovoSlotModal.data,
+            };
             const conflitto = Object.entries(slotsByPatientId).find(
-              ([pid, sl]) => Number(pid) !== nuovoSlotModal.patientId && sl.weekday === weekday && sl.time_of_day === timeOfDay
+              ([pid, sl]) => Number(pid) !== nuovoSlotModal.patientId && slotsInConflitto(nuovoSlot, sl)
             );
             if (!conflitto) return null;
             const altroPatient = patients.find((pp) => pp.id === Number(conflitto[0]));
             const altroNome = altroPatient ? altroPatient.nome_calendario || altroPatient.fatturare_a : `paziente #${conflitto[0]}`;
             return (
               <p className="small" style={{ color: "#b45309", marginTop: 10, marginBottom: 0 }}>
-                Attenzione: {GIORNI_LABEL[weekday]} alle {nuovoSlotModal.ora} è già lo slot fisso di <strong>{altroNome}</strong>.
-                Se non è una sovrapposizione voluta (es. alternanza tra due pazienti), scegli un altro giorno/ora.
+                Attenzione: {GIORNI_LABEL[weekday]} alle {nuovoSlotModal.ora} coincide, prima o poi, con lo slot fisso di{" "}
+                <strong>{altroNome}</strong> (le due cadenze non si alternano). Scegli un altro giorno/ora, oppure controlla
+                la data di partenza se dovrebbe trattarsi di un'alternanza.
               </p>
             );
           })()}

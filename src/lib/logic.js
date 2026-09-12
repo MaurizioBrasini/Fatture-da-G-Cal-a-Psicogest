@@ -130,6 +130,32 @@ export function occorrenzeFuture(patientSlot, closures, orizzonteGiorni = 60, og
   return risultati;
 }
 
+function mcd(a, b) {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+// Due slot con lo stesso weekday+orario NON sono per forza in conflitto: se
+// entrambi sono quindicinali (o comunque a cadenza multipla) ma le ancore
+// cadono su settimane diverse, si alternano e non generano mai lo stesso
+// giorno reale (caso voluto, es. Livia/Pietro). Le due sequenze di date
+// (anchor + n*interval_days) si intersecano se e solo se la differenza tra
+// le due ancore è multipla del MCD dei due interval_days — se si
+// intersecano lo fanno periodicamente, quindi è un vero conflitto ricorrente,
+// non un caso limite isolato.
+export function slotsInConflitto(slotA, slotB) {
+  if (slotA.weekday !== slotB.weekday || slotA.time_of_day !== slotB.time_of_day) return false;
+  const diffGiorni = Math.round(
+    (new Date(`${slotB.anchor_date}T00:00:00Z`) - new Date(`${slotA.anchor_date}T00:00:00Z`)) / 86400000
+  );
+  const g = mcd(slotA.interval_days, slotB.interval_days);
+  return diffGiorni % g === 0;
+}
+
 // ---------------------------------------------------------------------
 // Disdette/buche: rilevamento della nota "disdetto" e calcolo automatico
 // dello stato di fatturazione (charged/not_charged) dalla soglia di
