@@ -574,13 +574,25 @@ export const COLUMN_ORDER = [
 // dall'oggetto invece di essere scritto come stringa vuota — stessa cautela
 // già imparata con fatturaDATAPAGAMENTO in buildInvoiceRow.
 //
-// Il validatore di Psicogest è rigido su telefono/CAP/email: spazi nel
-// telefono ("+39 393 917 4851") e CAP con lettere ("2311XX", dato sporco in
-// anagrafica) mandano in errore l'intera riga. Anziché rimandare dati
-// sporchi e far fallire l'import, li ripuliamo o li omettiamo qui — stessa
-// logica di "chiave assente invece di dato invalido" già usata sopra.
+// Il validatore di Psicogest è rigido su telefono/CAP/email: "+39", spazi
+// nel telefono ("+39 393 917 4851") e CAP con lettere ("2311XX", indirizzo
+// estero nei Paesi Bassi — i CAP olandesi hanno davvero delle lettere,
+// incompatibili con un campo italiano "solo numeri") mandano in errore
+// l'intera riga. Anziché rimandare dati sporchi e far fallire l'import, li
+// ripuliamo o li omettiamo qui — stessa logica di "chiave assente invece di
+// dato invalido" già usata sopra.
+//
+// Telefono: il prefisso internazionale "+39" va tolto del tutto (non solo
+// gli spazi) — Psicogest vuole evidentemente il numero in formato
+// nazionale puro, cifre senza "+". Per prefissi esteri diversi da +39 (un
+// solo paziente, vive in Germania) non abbiamo un formato nazionale da
+// ricostruire: teniamo solo le cifre, "+" compreso, meglio di niente.
 function soloNumeri(s) {
   return String(s).replace(/\D/g, "");
+}
+function normalizzaTelefono(raw) {
+  const t = raw.trim().replace(/^\+39\s*/, "");
+  return soloNumeri(t);
 }
 function emailValida(s) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
@@ -592,20 +604,21 @@ export function buildPsicogestAnagraficaRow(patient) {
     pazienteNOME: patient.nome || "",
     pazienteCOGNOME: patient.cognome || "",
     pazientePRIVATO: "s",
-    pazienteNAZIONE: "IT",
     pazienteCF: cf,
     pazienteOPPONETS: "n",
   };
-  if (patient.indirizzo) row.pazienteINDIRIZZO1 = patient.indirizzo;
-  if (patient.localita) row.pazienteLOCALITA = patient.localita;
-  if (patient.provincia) row.pazientePROVINCIA = patient.provincia;
-  if (patient.cap && /^\d+$/.test(patient.cap.trim())) row.pazienteCAP = patient.cap.trim();
-  if (patient.telefono) {
-    // Il "+" iniziale (prefisso internazionale) non è una cifra ma va
-    // preservato; tutto il resto (spazi, spazio iniziale) va via.
-    const t = patient.telefono.trim();
-    row.pazienteTELEFONO = (t.startsWith("+") ? "+" : "") + soloNumeri(t);
+  // Provincia mancante è il segnale già in uso in anagrafica per "indirizzo
+  // estero" (vedi audit indirizzi 2026-09-11): in quel caso non dichiariamo
+  // Nazione "IT" né mandiamo località/provincia/CAP, che per un indirizzo
+  // non italiano non hanno lo stesso significato/formato.
+  if (patient.provincia) {
+    row.pazienteNAZIONE = "IT";
+    row.pazientePROVINCIA = patient.provincia;
+    if (patient.localita) row.pazienteLOCALITA = patient.localita;
+    if (patient.cap && /^\d+$/.test(patient.cap.trim())) row.pazienteCAP = patient.cap.trim();
   }
+  if (patient.indirizzo) row.pazienteINDIRIZZO1 = patient.indirizzo;
+  if (patient.telefono) row.pazienteTELEFONO = normalizzaTelefono(patient.telefono);
   if (patient.email && emailValida(patient.email.trim())) row.pazienteEMAIL = patient.email.trim();
   if (patient.note) row.pazienteNOTE = patient.note;
   return row;

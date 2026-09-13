@@ -189,13 +189,26 @@ test("buildInvoiceRow: fatturaDATAPAGAMENTO non è presente come chiave (non pag
 
 // --- buildPsicogestAnagraficaRow: export anagrafica per l'import Psicogest ---
 test("buildPsicogestAnagraficaRow: valorizza nome/cognome/CF e i default fissi", () => {
-  const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" });
+  const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U", provincia: "RM" });
   assert.equal(row.pazienteNOME, "Mario");
   assert.equal(row.pazienteCOGNOME, "Rossi");
   assert.equal(row.pazienteID, "RSSMRA80A01H501U");
   assert.equal(row.pazienteCF, "RSSMRA80A01H501U");
   assert.equal(row.pazientePRIVATO, "s");
   assert.equal(row.pazienteNAZIONE, "IT");
+});
+test("buildPsicogestAnagraficaRow: senza provincia (indirizzo estero) niente Nazione/Località/CAP", () => {
+  const row = buildPsicogestAnagraficaRow({
+    nome: "Mario",
+    cognome: "Rossi",
+    codice_fiscale: "RSSMRA80A01H501U",
+    localita: "Leiden",
+    cap: "2311XX",
+  });
+  assert.ok(!("pazienteNAZIONE" in row));
+  assert.ok(!("pazienteLOCALITA" in row));
+  assert.ok(!("pazienteCAP" in row));
+  assert.ok(!("pazientePROVINCIA" in row));
 });
 test("buildPsicogestAnagraficaRow: email/telefono/note assenti come chiave se non compilati (non stringa vuota)", () => {
   const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" });
@@ -216,13 +229,14 @@ test("buildPsicogestAnagraficaRow: email/telefono/note inclusi quando presenti",
   assert.equal(row.pazienteTELEFONO, "3331234567");
   assert.equal(row.pazienteNOTE, "deve 50€");
 });
-test("buildPsicogestAnagraficaRow: telefono - spazi rimossi, prefisso + preservato", () => {
+test("buildPsicogestAnagraficaRow: telefono - prefisso +39 e spazi rimossi del tutto", () => {
   const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" };
-  assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: "+39 393 917 4851" }).pazienteTELEFONO, "+393939174851");
+  assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: "+39 393 917 4851" }).pazienteTELEFONO, "3939174851");
+  assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: "+393477581957" }).pazienteTELEFONO, "3477581957");
   assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: " 3665465056" }).pazienteTELEFONO, "3665465056");
 });
-test("buildPsicogestAnagraficaRow: CAP con lettere omesso, CAP numerico incluso e trimmato", () => {
-  const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" };
+test("buildPsicogestAnagraficaRow: CAP con lettere omesso, CAP numerico incluso e trimmato (solo con provincia)", () => {
+  const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U", provincia: "RM" };
   assert.ok(!("pazienteCAP" in buildPsicogestAnagraficaRow({ ...patient, cap: "2311XX" })));
   assert.equal(buildPsicogestAnagraficaRow({ ...patient, cap: " 00168 " }).pazienteCAP, "00168");
 });
