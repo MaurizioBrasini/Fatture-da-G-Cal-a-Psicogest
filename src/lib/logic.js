@@ -556,74 +556,66 @@ export const COLUMN_ORDER = [
 ];
 
 // Riga per l'import "anagrafica pazienti" di Psicogest (Strumenti → Importa,
-// distinto dall'import fatture sopra) — stesse colonne/ordine del file
-// d'esempio scaricato da Psicogest (Appunti/Settings/psicogest pazienti.xls).
-// Psicogest deduplica per Codice Fiscale/Partita IVA, quindi è sicuro
-// riesportare l'anagrafica intera ogni volta: i pazienti già presenti
-// vengono semplicemente ignorati.
+// distinto dall'import fatture sopra) — colonne/ordine del vero modello di
+// importazione di Psicogest (Appunti/Settings/esempio_importazione_pazienti,
+// arrivato da Maurizio come .zip), NON quelle di un file di export "umano"
+// (tentativo precedente, mai testato, fallito al primo import reale con
+// "ID paziente vuoto" su ogni riga: l'export e l'import hanno schemi
+// diversi, esattamente come già successo con le fatture).
 //
-// Solo i campi che abbiamo davvero vengono valorizzati; tutto il resto (ID
-// personale, indirizzo, data di nascita, dati fiscali che non teniamo, "Data
-// creazione in Psicogest"...) resta fuori dall'oggetto invece di essere
-// scritto come stringa vuota — stessa cautela già imparata con
-// fatturaDATAPAGAMENTO in buildInvoiceRow, per non rischiare che un parser
-// lato Psicogest tratti una cella vuota diversamente da una chiave assente.
+// pazienteID va valorizzato con CF (o PIVA per le aziende, che non
+// gestiamo), ripetuto identico anche in pazienteCF — istruzione esplicita
+// nel file d'esempio di Psicogest. Nazione vuole il codice ISO ("IT"), non
+// il nome per esteso. Privato/Opposizione trasm. S.T.S. sono stringhe
+// "s"/"n", non "Privato"/"No" come nel formato di export.
+//
+// Solo i campi che abbiamo davvero vengono valorizzati; tutto il resto
+// (Ragione sociale, PIVA, data/luogo di nascita, telefono 2...) resta fuori
+// dall'oggetto invece di essere scritto come stringa vuota — stessa cautela
+// già imparata con fatturaDATAPAGAMENTO in buildInvoiceRow.
 export function buildPsicogestAnagraficaRow(patient) {
+  const cf = patient.codice_fiscale || "";
   const row = {
-    Privato: "Privato",
-    Saluto: "Gentile",
-    Nome: patient.nome || "",
-    Cognome: patient.cognome || "",
-    Nazione: "Italia",
-    "Codice Fiscale": patient.codice_fiscale || "",
-    "Opposizione trasm. S.T.S.": "No",
-    "Omette R.A.": "No",
-    "Cliente P.A.": "No",
-    Archiviato: "No",
+    pazienteID: cf,
+    pazienteNOME: patient.nome || "",
+    pazienteCOGNOME: patient.cognome || "",
+    pazientePRIVATO: "s",
+    pazienteNAZIONE: "IT",
+    pazienteCF: cf,
+    pazienteOPPONETS: "n",
   };
-  if (patient.telefono) row["Telefono 1"] = patient.telefono;
-  if (patient.email) row["Email"] = patient.email;
-  if (patient.indirizzo) row["Indirizzo 1"] = patient.indirizzo;
-  if (patient.localita) row["Località"] = patient.localita;
-  if (patient.provincia) row["Provincia"] = patient.provincia;
-  if (patient.cap) row["CAP"] = patient.cap;
-  if (patient.note) row["Note"] = patient.note;
+  if (patient.indirizzo) row.pazienteINDIRIZZO1 = patient.indirizzo;
+  if (patient.localita) row.pazienteLOCALITA = patient.localita;
+  if (patient.provincia) row.pazientePROVINCIA = patient.provincia;
+  if (patient.cap) row.pazienteCAP = patient.cap;
+  if (patient.telefono) row.pazienteTELEFONO = patient.telefono;
+  if (patient.email) row.pazienteEMAIL = patient.email;
+  if (patient.note) row.pazienteNOTE = patient.note;
   return row;
 }
 
 export const PSICOGEST_ANAGRAFICA_COLUMN_ORDER = [
-  "ID personale",
-  "Privato",
-  "Saluto",
-  "Ragione sociale",
-  "Nome",
-  "Cognome",
-  "Indirizzo 1",
-  "Indirizzo 2",
-  "Località",
-  "Provincia",
-  "Telefono 1",
-  "Telefono 2",
-  "Email",
-  "Email 2",
-  "Email PEC",
-  "CAP",
-  "Nazione",
-  "Partita IVA",
-  "Codice Fiscale",
-  "Data nascita",
-  "Luogo nascita",
-  "Note",
-  "Informazioni aggiuntive",
-  "Opposizione trasm. S.T.S.",
-  "Omette R.A.",
-  "Cliente P.A.",
-  "Codice dest. SDI",
-  "Percentuale R.A.",
-  "Percentuale Imponibile per R.A.",
-  "Data creazione in Psicogest",
-  "Tags",
-  "Archiviato",
+  "pazienteID",
+  "pazienteNOME",
+  "pazienteCOGNOME",
+  "pazienteRAGIONESOCIALE",
+  "pazientePRIVATO",
+  "pazienteINDIRIZZO1",
+  "pazienteINDIRIZZO2",
+  "pazienteLOCALITA",
+  "pazientePROVINCIA",
+  "pazienteCAP",
+  "pazienteNAZIONE",
+  "pazienteCF",
+  "pazientePIVA",
+  "pazienteEMAIL",
+  "pazienteEMAILPEC",
+  "pazienteTELEFONO",
+  "pazienteOPPONETS",
+  "pazienteLUOGONASCITA",
+  "pazienteDATANASCITA",
+  "pazienteTELEFONO2",
+  "pazienteNOTE",
 ];
 
 export const DEFAULT_SETTINGS = {
