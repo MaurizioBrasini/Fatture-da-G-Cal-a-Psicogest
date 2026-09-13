@@ -601,8 +601,11 @@ export function buildPsicogestAnagraficaRow(patient) {
   const cf = patient.codice_fiscale || "";
   const row = {
     pazienteID: cf,
-    pazienteNOME: patient.nome || "",
-    pazienteCOGNOME: patient.cognome || "",
+    // Maurizio preferisce Nome/Cognome in maiuscolo su Psicogest (es.
+    // "EDOARDO GRILLO"), anche se in anagrafica app restano in maiuscolo
+    // solo iniziale — tocca solo questo export, non patients.nome/cognome.
+    pazienteNOME: (patient.nome || "").toLocaleUpperCase("it-IT"),
+    pazienteCOGNOME: (patient.cognome || "").toLocaleUpperCase("it-IT"),
     pazientePRIVATO: "s",
     pazienteCF: cf,
     pazienteOPPONETS: "n",

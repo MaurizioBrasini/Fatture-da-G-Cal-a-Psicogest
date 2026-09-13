@@ -190,12 +190,17 @@ test("buildInvoiceRow: fatturaDATAPAGAMENTO non è presente come chiave (non pag
 // --- buildPsicogestAnagraficaRow: export anagrafica per l'import Psicogest ---
 test("buildPsicogestAnagraficaRow: valorizza nome/cognome/CF e i default fissi", () => {
   const row = buildPsicogestAnagraficaRow({ nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U", provincia: "RM" });
-  assert.equal(row.pazienteNOME, "Mario");
-  assert.equal(row.pazienteCOGNOME, "Rossi");
+  assert.equal(row.pazienteNOME, "MARIO");
+  assert.equal(row.pazienteCOGNOME, "ROSSI");
   assert.equal(row.pazienteID, "RSSMRA80A01H501U");
   assert.equal(row.pazienteCF, "RSSMRA80A01H501U");
   assert.equal(row.pazientePRIVATO, "s");
   assert.equal(row.pazienteNAZIONE, "IT");
+});
+test("buildPsicogestAnagraficaRow: nome/cognome in maiuscolo, accenti compresi", () => {
+  const row = buildPsicogestAnagraficaRow({ nome: "Josè", cognome: "Saccà", codice_fiscale: "SCCRFL66L14C352K" });
+  assert.equal(row.pazienteNOME, "JOSÈ");
+  assert.equal(row.pazienteCOGNOME, "SACCÀ");
 });
 test("buildPsicogestAnagraficaRow: senza provincia (indirizzo estero) niente Nazione/Località/CAP", () => {
   const row = buildPsicogestAnagraficaRow({
