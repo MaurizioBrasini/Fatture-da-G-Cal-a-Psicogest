@@ -19,12 +19,26 @@ export async function POST(request) {
   const patientId = body.patientId || null; // assente/null = tutti i pazienti
   const giorniAvanti = Number(body.giorniAvanti) || 90; // orizzonte regolabile per gli eventi futuri
 
-  const [{ data: patients }, { data: settingsRow }, { data: tokenRow, error: tokenError }] = await Promise.all([
+  const [
+    { data: patients, error: patientsError },
+    { data: settingsRow, error: settingsError },
+    { data: tokenRow, error: tokenError },
+  ] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("settings").select("*").maybeSingle(),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
   ]);
 
+  // Senza questo controllo, un errore/timeout transitorio di Supabase su
+  // questa query (data: null) faceva sembrare che il paziente non
+  // esistesse ("Nessun paziente trovato per questa richiesta") invece di
+  // segnalare il vero problema — caso reale con Jessica M. il 2026-09-13.
+  if (patientsError) {
+    return NextResponse.json({ error: "Errore nel caricare i pazienti: " + patientsError.message }, { status: 500 });
+  }
+  if (settingsError) {
+    return NextResponse.json({ error: "Errore nel caricare le impostazioni: " + settingsError.message }, { status: 500 });
+  }
   if (tokenError || !tokenRow) {
     return NextResponse.json(
       { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
