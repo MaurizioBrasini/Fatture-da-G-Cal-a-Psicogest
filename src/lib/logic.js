@@ -573,6 +573,18 @@ export const COLUMN_ORDER = [
 // (Ragione sociale, PIVA, data/luogo di nascita, telefono 2...) resta fuori
 // dall'oggetto invece di essere scritto come stringa vuota — stessa cautela
 // già imparata con fatturaDATAPAGAMENTO in buildInvoiceRow.
+//
+// Il validatore di Psicogest è rigido su telefono/CAP/email: spazi nel
+// telefono ("+39 393 917 4851") e CAP con lettere ("2311XX", dato sporco in
+// anagrafica) mandano in errore l'intera riga. Anziché rimandare dati
+// sporchi e far fallire l'import, li ripuliamo o li omettiamo qui — stessa
+// logica di "chiave assente invece di dato invalido" già usata sopra.
+function soloNumeri(s) {
+  return String(s).replace(/\D/g, "");
+}
+function emailValida(s) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
 export function buildPsicogestAnagraficaRow(patient) {
   const cf = patient.codice_fiscale || "";
   const row = {
@@ -587,9 +599,14 @@ export function buildPsicogestAnagraficaRow(patient) {
   if (patient.indirizzo) row.pazienteINDIRIZZO1 = patient.indirizzo;
   if (patient.localita) row.pazienteLOCALITA = patient.localita;
   if (patient.provincia) row.pazientePROVINCIA = patient.provincia;
-  if (patient.cap) row.pazienteCAP = patient.cap;
-  if (patient.telefono) row.pazienteTELEFONO = patient.telefono;
-  if (patient.email) row.pazienteEMAIL = patient.email;
+  if (patient.cap && /^\d+$/.test(patient.cap.trim())) row.pazienteCAP = patient.cap.trim();
+  if (patient.telefono) {
+    // Il "+" iniziale (prefisso internazionale) non è una cifra ma va
+    // preservato; tutto il resto (spazi, spazio iniziale) va via.
+    const t = patient.telefono.trim();
+    row.pazienteTELEFONO = (t.startsWith("+") ? "+" : "") + soloNumeri(t);
+  }
+  if (patient.email && emailValida(patient.email.trim())) row.pazienteEMAIL = patient.email.trim();
   if (patient.note) row.pazienteNOTE = patient.note;
   return row;
 }

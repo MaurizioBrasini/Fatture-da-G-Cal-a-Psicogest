@@ -213,8 +213,22 @@ test("buildPsicogestAnagraficaRow: email/telefono/note inclusi quando presenti",
     note: "deve 50€",
   });
   assert.equal(row.pazienteEMAIL, "mario@example.com");
-  assert.equal(row.pazienteTELEFONO, "333 1234567");
+  assert.equal(row.pazienteTELEFONO, "3331234567");
   assert.equal(row.pazienteNOTE, "deve 50€");
+});
+test("buildPsicogestAnagraficaRow: telefono - spazi rimossi, prefisso + preservato", () => {
+  const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" };
+  assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: "+39 393 917 4851" }).pazienteTELEFONO, "+393939174851");
+  assert.equal(buildPsicogestAnagraficaRow({ ...patient, telefono: " 3665465056" }).pazienteTELEFONO, "3665465056");
+});
+test("buildPsicogestAnagraficaRow: CAP con lettere omesso, CAP numerico incluso e trimmato", () => {
+  const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" };
+  assert.ok(!("pazienteCAP" in buildPsicogestAnagraficaRow({ ...patient, cap: "2311XX" })));
+  assert.equal(buildPsicogestAnagraficaRow({ ...patient, cap: " 00168 " }).pazienteCAP, "00168");
+});
+test("buildPsicogestAnagraficaRow: email tronca/invalida omessa", () => {
+  const patient = { nome: "Mario", cognome: "Rossi", codice_fiscale: "RSSMRA80A01H501U" };
+  assert.ok(!("pazienteEMAIL" in buildPsicogestAnagraficaRow({ ...patient, email: "r.sacca@fondimpres" })));
 });
 
 // --- Numerazione sedute su calendario ---
