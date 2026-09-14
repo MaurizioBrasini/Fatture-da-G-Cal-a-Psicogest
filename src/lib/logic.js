@@ -156,6 +156,86 @@ export function slotsInConflitto(slotA, slotB) {
   return diffGiorni % g === 0;
 }
 
+const GIORNI_GRIGLIA = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
+
+// Fase di anchor_date dentro il ciclo di interval_days/7 settimane (1 per
+// settimanale, 2 per quindicinale, 4 per "ogni 4 settimane") relativa a un
+// lunedì di riferimento fisso — serve a sapere non solo "c'è già qualcuno su
+// questa fascia" ma quante delle sue settimane sono davvero libere.
+const EPOCH_LUNEDI = new Date("2020-01-06T00:00:00Z");
+function faseSettimana(anchorDate, intervalDays) {
+  const cicloSettimane = intervalDays / 7;
+  const weekIndex = Math.round((new Date(`${anchorDate}T00:00:00Z`) - EPOCH_LUNEDI) / (7 * 86400000));
+  return ((weekIndex % cicloSettimane) + cicloSettimane) % cicloSettimane;
+}
+
+// Ricava dai patient_slots attivi (uno per riga: {weekday, time_of_day,
+// interval_days, anchor_date, nome, stato}) il prospetto usato dalla pagina
+// "Disponibilità": per ogni fascia weekday+orario, quali pazienti la
+// occupano e quante fasi del ciclo (settimanale/quindicinale/mensile)
+// restano libere — sostituisce la lettura manuale del vecchio calendario
+// Excel. `conflitto` segnala due pazienti sulla stessa fase (sovrapposizione
+// reale, mai dovrebbe succedere se `slotsInConflitto` è stato controllato
+// all'inserimento).
+export function computeGrigliaDisponibilita(patientSlots) {
+  const gruppi = new Map();
+  for (const s of patientSlots) {
+    const key = `${s.weekday}|${s.time_of_day}`;
+    if (!gruppi.has(key)) gruppi.set(key, []);
+    gruppi.get(key).push(s);
+  }
+
+  const settimanali = [];
+  const quindicinaliPieni = [];
+  const quindicinaliSingoli = [];
+  const mensili = [];
+
+  for (const [key, righe] of gruppi) {
+    const [weekday, time] = key.split("|");
+    const cicloMax = Math.max(...righe.map((r) => r.interval_days));
+    const faseSlots = cicloMax / 7;
+    const fasiOccupate = new Set(righe.map((r) => faseSettimana(r.anchor_date, cicloMax)));
+    const info = {
+      weekday: Number(weekday),
+      giorno: GIORNI_GRIGLIA[Number(weekday)],
+      orario: time.slice(0, 5),
+      fasiTotali: faseSlots,
+      fasiLibere: faseSlots - fasiOccupate.size,
+      conflitto: fasiOccupate.size < righe.length,
+      pazienti: righe.map((r) => ({ nome: r.nome, stato: r.stato, interval_days: r.interval_days, anchor_date: r.anchor_date })),
+    };
+    const intervalli = new Set(righe.map((r) => r.interval_days));
+    if (intervalli.has(7)) settimanali.push(info);
+    else if (intervalli.has(14) && !intervalli.has(28)) (righe.length >= 2 ? quindicinaliPieni : quindicinaliSingoli).push(info);
+    else if (intervalli.has(28)) mensili.push(info);
+  }
+
+  const orariUsati = [...new Set(patientSlots.map((s) => s.time_of_day.slice(0, 5)))].sort();
+  const griglia = orariUsati.map((orario) => {
+    const riga = { orario, giorni: {} };
+    for (const g of [1, 2, 3, 4, 5]) {
+      const righe = gruppi.get(`${g}|${orario}:00`) || [];
+      if (righe.length === 0) {
+        riga.giorni[g] = { stato: "libero", pazienti: [] };
+        continue;
+      }
+      const cicloMax = Math.max(...righe.map((r) => r.interval_days));
+      const faseSlots = cicloMax / 7;
+      const fasiLibere = faseSlots - new Set(righe.map((r) => faseSettimana(r.anchor_date, cicloMax))).size;
+      riga.giorni[g] = {
+        stato: fasiLibere === 0 ? "pieno" : "parziale",
+        cadenza: cicloMax === 7 ? "settimanale" : cicloMax === 14 ? "quindicinale" : "mensile",
+        fasiTotali: faseSlots,
+        fasiLibere,
+        pazienti: righe.map((r) => ({ nome: r.nome, stato: r.stato })),
+      };
+    }
+    return riga;
+  });
+
+  return { settimanali, quindicinaliPieni, quindicinaliSingoli, mensili, griglia, totaleSlotAttivi: patientSlots.length };
+}
+
 // ---------------------------------------------------------------------
 // Disdette/buche: rilevamento della nota "disdetto" e calcolo automatico
 // dello stato di fatturazione (charged/not_charged) dalla soglia di

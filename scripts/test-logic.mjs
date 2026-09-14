@@ -35,6 +35,7 @@ import {
   computeDuplicatiDaRipulire,
   formatDataItaliana,
   personalizzaTesto,
+  computeGrigliaDisponibilita,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -769,6 +770,48 @@ test("personalizzaTesto lascia vuoto un segnaposto senza valore, senza sollevare
 });
 test("formatDataItaliana formatta una data ISO in italiano esteso", () => {
   assert.equal(formatDataItaliana("2026-09-28"), "28 settembre 2026");
+});
+
+// --- computeGrigliaDisponibilita (pagina Disponibilità) ---
+test("computeGrigliaDisponibilita: slot settimanale risulta sempre pieno (0 fasi libere)", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
+  assert.equal(r.settimanali.length, 1);
+  assert.equal(r.settimanali[0].fasiLibere, 0);
+});
+test("computeGrigliaDisponibilita: quindicinale con un solo paziente ha 1 fase libera su 2", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08", nome: "Anna B.", stato: "attivo" }]);
+  assert.equal(r.quindicinaliSingoli.length, 1);
+  assert.equal(r.quindicinaliSingoli[0].fasiLibere, 1);
+});
+test("computeGrigliaDisponibilita: quindicinale con due pazienti alternati sfasati di 7gg è pieno", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08", nome: "Anna B.", stato: "attivo" },
+    { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-15", nome: "Bruno C.", stato: "attivo" },
+  ]);
+  assert.equal(r.quindicinaliPieni.length, 1);
+  assert.equal(r.quindicinaliPieni[0].fasiLibere, 0);
+  assert.equal(r.quindicinaliPieni[0].conflitto, false);
+});
+test("computeGrigliaDisponibilita: mensile con due pazienti su fasi diverse lascia 2 settimane su 4 libere", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 28, anchor_date: "2026-09-24", nome: "Silvia M.", stato: "attivo" },
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 28, anchor_date: "2026-10-01", nome: "Jessica M.", stato: "attivo" },
+  ]);
+  assert.equal(r.mensili.length, 1);
+  assert.equal(r.mensili[0].fasiLibere, 2);
+});
+test("computeGrigliaDisponibilita: due pazienti sulla stessa identica fase segnalano un conflitto", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 3, time_of_day: "11:30:00", interval_days: 14, anchor_date: "2026-09-09", nome: "X", stato: "attivo" },
+    { weekday: 3, time_of_day: "11:30:00", interval_days: 14, anchor_date: "2026-09-23", nome: "Y", stato: "attivo" },
+  ]);
+  assert.equal(r.quindicinaliPieni[0].conflitto, true);
+});
+test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fascia senza pazienti", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
+  const riga = r.griglia.find((x) => x.orario === "09:30");
+  assert.equal(riga.giorni[1].stato, "pieno");
+  assert.equal(riga.giorni[3].stato, "libero");
 });
 
 console.log(`\n${passed} test superati.`);
