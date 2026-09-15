@@ -98,9 +98,11 @@ function main() {
       }
     }
 
-    // universo di tutte le fasce orarie in uso da qualche parte (righe = orari, colonne = giorni 1-5)
+    // universo di tutte le fasce orarie in uso da qualche parte (righe = orari, colonne = giorni 1-4:
+    // il venerdi' non e' piu' un giorno dedicato ai pazienti, vedi richiesta 2026-09-15)
     const orariUsati = [...new Set(slots.map((s) => s.time_of_day.slice(0, 5)))].sort();
-    const giorniUsati = [1, 2, 3, 4, 5]; // lun-ven, anche se venerdi' risultasse vuoto lo mostriamo comunque
+    const giorniUsati = [1, 2, 3, 4];
+    const slotVenerdi = slots.filter((s) => s.weekday === 5);
 
     const griglia = orariUsati.map((orario) => {
       const riga = { orario, giorni: {} };
@@ -127,7 +129,18 @@ function main() {
       return riga;
     });
 
-    const report = { settimanali, quindicinaliPieni, quindicinaliSingoli, mensili, griglia, totaleSlotAttivi: slots.length };
+    const report = {
+      settimanali,
+      quindicinaliPieni,
+      quindicinaliSingoli,
+      mensili,
+      griglia,
+      totaleSlotAttivi: slots.length,
+      slotVenerdi: slotVenerdi.map((s) => ({
+        orario: s.time_of_day.slice(0, 5),
+        nome: s.patients?.nome_calendario || "?",
+      })),
+    };
 
     fs.mkdirSync(new URL("output/", import.meta.url), { recursive: true });
     fs.writeFileSync(new URL("output/slot-report.json", import.meta.url), JSON.stringify(report, null, 2));
