@@ -12,22 +12,23 @@ const GIORNI = [1, 2, 3, 4];
 const GIORNI_COL = { 1: "Lun", 2: "Mar", 3: "Mer", 4: "Gio" };
 const GIORNI_LABEL = { 1: "Lunedì", 2: "Martedì", 3: "Mercoledì", 4: "Giovedì" };
 
-// Fascia mattutina che Maurizio a volte usa per supervisioni anziché
-// pazienti: i posti liberi qui dentro non vanno contati tra i posti per
-// nuovi pazienti, ma tracciati a parte come "disponibile per supervisioni".
-const SUPERVISIONI_DA = "09:30";
-const SUPERVISIONI_A = "14:30";
-const isFasciaSupervisioni = (orario) => orario >= SUPERVISIONI_DA && orario <= SUPERVISIONI_A;
-
-// Da una cella griglia[orario].giorni[g] ricava una riga per ogni "fase"
-// del suo ciclo: una riga per ogni paziente che la occupa, più una riga
-// "libero" per ogni fase ancora senza nessuno — così due pazienti alternati
-// su base quindicinale finiscono su due righe separate anziché sulla stessa.
+// Da una cella griglia[orario].giorni[g] ricava una riga per ogni paziente che
+// la occupa (così due pazienti alternati su base quindicinale finiscono su
+// righe separate anziché sulla stessa), più al massimo UNA riga "Disponibile"
+// che riassume la capacità libera residua in "volte al mese": una fascia ha
+// fasiTotali fasi in un ciclo di fasiTotali settimane, quindi ciascuna fase
+// libera ricorre 4/fasiTotali volte in 4 settimane — es. quindicinale
+// (fasiTotali=2) → 2 volte/mese a fase, mensile (fasiTotali=4) → 1 volta/mese
+// a fase, da cui fasiLibere*(4/fasiTotali) volte/mese libere in quella fascia.
 function righeCella(c) {
   if (!c || c.stato === "libero") return [{ tipo: "libero" }];
   const occupate = c.pazienti.map((p) => ({ tipo: "occupato", nome: p.nome, stato: p.stato }));
-  const libere = Array.from({ length: c.fasiLibere || 0 }, () => ({ tipo: "libero" }));
-  return [...occupate, ...libere];
+  const righe = [...occupate];
+  if (c.fasiLibere > 0) {
+    const alMese = Math.round((c.fasiLibere * 4) / c.fasiTotali);
+    righe.push({ tipo: "libero", cadenza: c.cadenza, alMese });
+  }
+  return righe;
 }
 
 export default function DisponibilitaPage() {
@@ -86,27 +87,16 @@ export default function DisponibilitaPage() {
   );
 
   const disponibili = [];
-  const supervisioni = [];
-  let nLiberiPazienti = 0;
-  let nLiberiSupervisioni = 0;
   r.griglia.forEach((row) => {
-    const mattinaSupervisioni = isFasciaSupervisioni(row.orario);
     GIORNI.forEach((g) => {
       const c = row.giorni[g];
-      const libere = righeCella(c).filter((x) => x.tipo === "libero").length;
-      if (libere === 0) return;
+      const rigaLibera = righeCella(c).find((x) => x.tipo === "libero");
+      if (!rigaLibera) return;
       const detail =
         !c || c.stato === "libero"
           ? "Nessuno slot fisso assegnato su questa fascia."
-          : `Le altre fasi sono occupate da ${c.pazienti.map((p) => p.nome).join(", ")} (${c.cadenza}).`;
-      const voce = { giorno: GIORNI_LABEL[g], orario: row.orario, count: libere, detail };
-      if (mattinaSupervisioni) {
-        supervisioni.push(voce);
-        nLiberiSupervisioni += libere;
-      } else {
-        disponibili.push(voce);
-        nLiberiPazienti += libere;
-      }
+          : `Le altre fasi sono occupate da ${c.pazienti.map((p) => p.nome).join(", ")}.`;
+      disponibili.push({ giorno: GIORNI_LABEL[g], orario: row.orario, cadenza: rigaLibera.cadenza, alMese: rigaLibera.alMese, detail });
     });
   });
 
@@ -141,12 +131,8 @@ export default function DisponibilitaPage() {
             <div className="l">Slot fissi attivi</div>
           </div>
           <div className="disp-stat accent">
-            <div className="n">{nLiberiPazienti}</div>
-            <div className="l">Posti liberi per nuovi pazienti</div>
-          </div>
-          <div className="disp-stat accent">
-            <div className="n">{nLiberiSupervisioni}</div>
-            <div className="l">Disponibile per supervisioni (mattina {SUPERVISIONI_DA}–{SUPERVISIONI_A})</div>
+            <div className="n">{disponibili.length}</div>
+            <div className="l">Fasce con margine per nuovi pazienti</div>
           </div>
           <div className="disp-stat">
             <div className="n">{sospesi.size}</div>
@@ -156,7 +142,7 @@ export default function DisponibilitaPage() {
 
         <h2 className="sub-heading">Griglia settimanale, lunedì–giovedì</h2>
         <div className="disp-legend">
-          <span><span className="disp-swatch" style={{ background: "var(--accent-soft)" }} />Verde "Disponibile" = nessun paziente assegnato</span>
+          <span><span className="disp-swatch" style={{ background: "var(--accent-soft)" }} />Verde "Disponibile" = spazio libero</span>
           <span><span className="disp-swatch" style={{ background: "var(--danger)" }} />Nome in rosso = sospeso</span>
         </div>
         <div className="table-scroll" style={{ marginBottom: 28 }}>
@@ -165,38 +151,36 @@ export default function DisponibilitaPage() {
             {GIORNI.map((g) => (
               <div key={g} className="disp-dayhead">{GIORNI_COL[g]}</div>
             ))}
-            {r.griglia.map((row) => {
-              const mattinaSupervisioni = isFasciaSupervisioni(row.orario);
-              return (
-                <div key={row.orario} style={{ display: "contents" }}>
-                  <div className="disp-timehead">{row.orario}</div>
-                  {GIORNI.map((g) => {
-                    const c = row.giorni[g];
-                    const righe = righeCella(c);
-                    return (
-                      <div key={g} className="disp-cell">
-                        {c && c.stato !== "libero" && <span className="disp-tag">{c.cadenza}</span>}
-                        {righe.map((riga, i) =>
-                          riga.tipo === "libero" ? (
-                            <div key={i} className="disp-subrow libero">
-                              Disponibile{mattinaSupervisioni ? " (supervisioni)" : ""}
-                            </div>
-                          ) : (
-                            <div key={i} className="disp-subrow occupato">
-                              <span className={riga.stato === "sospeso" ? "disp-susp" : ""}>{riga.nome}</span>
-                            </div>
-                          )
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+            {r.griglia.map((row) => (
+              <div key={row.orario} style={{ display: "contents" }}>
+                <div className="disp-timehead">{row.orario}</div>
+                {GIORNI.map((g) => {
+                  const c = row.giorni[g];
+                  const righe = righeCella(c);
+                  return (
+                    <div key={g} className="disp-cell">
+                      {c && c.stato !== "libero" && <span className="disp-tag">{c.cadenza}</span>}
+                      {righe.map((riga, i) =>
+                        riga.tipo === "libero" ? (
+                          <div key={i} className="disp-subrow libero">
+                            Disponibile{riga.cadenza ? ` (${riga.cadenza})` : ""}
+                            {riga.alMese ? ` — ${riga.alMese} al mese` : ""}
+                          </div>
+                        ) : (
+                          <div key={i} className="disp-subrow occupato">
+                            <span className={riga.stato === "sospeso" ? "disp-susp" : ""}>{riga.nome}</span>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </div>
 
-        <h2 className="sub-heading">Posti disponibili per nuovi pazienti ({nLiberiPazienti})</h2>
+        <h2 className="sub-heading">Posti disponibili per nuovi pazienti ({disponibili.length})</h2>
         {disponibili.length === 0 ? (
           <div className="empty-row">Nessuna fascia con margine al momento.</div>
         ) : (
@@ -205,31 +189,14 @@ export default function DisponibilitaPage() {
               <div key={i} className="disp-avail-row">
                 <div className="when">{a.orario}<span className="day">{a.giorno}</span></div>
                 <div className="muted small">{a.detail}</div>
-                <div className="frac-badge">{a.count} {a.count === 1 ? "posto" : "posti"}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <h2 className="sub-heading">Disponibile per supervisioni ({nLiberiSupervisioni})</h2>
-        {supervisioni.length === 0 ? (
-          <div className="empty-row">Nessuna fascia mattutina libera al momento.</div>
-        ) : (
-          <div style={{ marginBottom: 28 }}>
-            {supervisioni.map((a, i) => (
-              <div key={i} className="disp-avail-row">
-                <div className="when">{a.orario}<span className="day">{a.giorno}</span></div>
-                <div className="muted small">{a.detail}</div>
-                <div className="frac-badge">{a.count} {a.count === 1 ? "posto" : "posti"}</div>
+                <div className="frac-badge">{a.cadenza ? `${a.cadenza} — ${a.alMese} al mese` : "disponibile"}</div>
               </div>
             ))}
           </div>
         )}
         <p className="sub" style={{ marginBottom: 28 }}>
-          Il venerdì non è più considerato un giorno dedicato ai pazienti e non compare in questa griglia. Le fasce del
-          mattino ({SUPERVISIONI_DA}–{SUPERVISIONI_A}) ospitano a volte supervisioni: i loro posti liberi sono
-          conteggiati a parte e non tra i posti per nuovi pazienti. I pazienti sospesi occupano ancora formalmente la
-          loro fascia: la decisione di liberarla resta manuale.
+          Il venerdì non è più considerato un giorno dedicato ai pazienti e non compare in questa griglia. I pazienti
+          sospesi occupano ancora formalmente la loro fascia: la decisione di liberarla resta manuale.
         </p>
 
         <h2 className="sub-heading">Slot settimanali — pieni per definizione ({r.settimanali.length})</h2>
