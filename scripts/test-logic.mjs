@@ -807,6 +807,33 @@ test("computeGrigliaDisponibilita: due pazienti sulla stessa identica fase segna
   ]);
   assert.equal(r.quindicinaliPieni[0].conflitto, true);
 });
+test("computeGrigliaDisponibilita: un quindicinale dentro un ciclo mensile occupa 2 fasi, non 1 (bug reale Nele e Enzo/Giovedì 13:30)", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 28, anchor_date: "2026-09-24", nome: "Silvia M.", stato: "attivo" },
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 28, anchor_date: "2026-10-01", nome: "Jessica M.", stato: "attivo" },
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 14, anchor_date: "2026-10-08", nome: "Nele e Enzo", stato: "attivo" },
+  ]);
+  assert.equal(r.mensili.length, 1);
+  // Il quindicinale (interval14, ancora 2 settimane dopo Silvia) occupa la
+  // stessa fase parity di Silvia due volte ogni 4 settimane: vero conflitto
+  // ricorrente con lei, mai con Jessica.
+  assert.equal(r.mensili[0].conflitto, true);
+  assert.equal(r.mensili[0].conflittiDettaglio.length, 1);
+  assert.deepEqual(new Set(r.mensili[0].conflittiDettaglio[0]), new Set(["Silvia M.", "Nele e Enzo"]));
+  assert.equal(r.mensili[0].fasiLibere, 1);
+});
+test("computeGrigliaDisponibilita: quindicinale senza conflitto dentro un ciclo mensile occupa comunque 2 fasi (non sovrastima la disponibilità)", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 28, anchor_date: "2026-09-24", nome: "Silvia M.", stato: "attivo" },
+    { weekday: 4, time_of_day: "13:30:00", interval_days: 14, anchor_date: "2026-10-01", nome: "Quindicinale Q.", stato: "attivo" },
+  ]);
+  assert.equal(r.mensili.length, 1);
+  assert.equal(r.mensili[0].conflitto, false);
+  // Prima del fix: 2 fasi libere (contava il quindicinale come 1 sola
+  // fase occupata). Reale: il quindicinale occupa 2 fasi su 4, quindi ne
+  // resta libera solo 1.
+  assert.equal(r.mensili[0].fasiLibere, 1);
+});
 test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fascia senza pazienti", () => {
   const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
   const riga = r.griglia.find((x) => x.orario === "09:30");

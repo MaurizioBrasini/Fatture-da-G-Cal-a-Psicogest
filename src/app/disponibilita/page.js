@@ -160,6 +160,11 @@ export default function DisponibilitaPage() {
                   return (
                     <div key={g} className="disp-cell">
                       {c && c.stato !== "libero" && <span className="disp-tag">{c.cadenza}</span>}
+                      {c?.conflitto && (
+                        <div className="disp-subrow" style={{ color: "var(--danger)", fontWeight: 600 }}>
+                          Conflitto: {c.conflittiDettaglio.map((coppia) => coppia.join(" vs ")).join(", ")}
+                        </div>
+                      )}
                       {righe.map((riga, i) =>
                         riga.tipo === "libero" ? (
                           <div key={i} className="disp-subrow libero">
@@ -227,7 +232,14 @@ export default function DisponibilitaPage() {
               <tr key={i}>
                 <td>{s.giorno}</td>
                 <td className="mono">{s.orario}</td>
-                <td>{s.pazienti.map((p) => `${p.nome} (${p.anchor_date})`).join(", ")}</td>
+                <td>
+                  {s.pazienti.map((p) => `${p.nome} (${p.anchor_date})`).join(", ")}
+                  {s.conflitto && (
+                    <div style={{ color: "var(--danger)", fontWeight: 600 }}>
+                      Conflitto: {s.conflittiDettaglio.map((coppia) => coppia.join(" vs ")).join(", ")}
+                    </div>
+                  )}
+                </td>
                 <td className="mono">{s.fasiLibere}/4</td>
               </tr>
             ))}

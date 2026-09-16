@@ -169,6 +169,41 @@ function faseSettimana(anchorDate, intervalDays) {
   return ((weekIndex % cicloSettimane) + cicloSettimane) % cicloSettimane;
 }
 
+// Quali fasi (0..cicloMax/7-1) del ciclo più lungo della fascia occupa una
+// singola riga: un paziente con cadenza più corta del ciclo massimo (es.
+// quindicinale dentro un ciclo mensile) ricorre PIÙ volte in quel ciclo,
+// quindi occupa più di una fase — non una sola. Bug reale trovato 2026-09-16
+// (caso Nele e Enzo quindicinale inserito sulla stessa fascia di due
+// pazienti mensili, Giovedì 13:30): il vecchio codice chiamava
+// `faseSettimana(r.anchor_date, cicloMax)`, che restituisce un solo numero
+// anche per un paziente quindicinale dentro un ciclo mensile a 4 fasi — la
+// sua seconda fase (quella 2 settimane dopo) spariva dal conteggio, facendo
+// sembrare libera una fascia in realtà già piena, o nascondendo un vero
+// conflitto quando quella fase coincide con quella di un altro paziente.
+function faseSettimanaRiga(r, cicloMaxSettimane) {
+  const rigaSettimane = r.interval_days / 7;
+  const faseBase = faseSettimana(r.anchor_date, rigaSettimane * 7);
+  const fasi = [];
+  for (let k = 0; k < cicloMaxSettimane; k++) {
+    if (k % rigaSettimane === faseBase) fasi.push(k);
+  }
+  return fasi;
+}
+
+// Occupazione reale di una fascia (weekday+orario): per ogni fase del ciclo
+// più lungo tra i pazienti presenti, chi la occupa — una fase con più di un
+// occupante è un vero conflitto ricorrente (stesso giorno reale, prima o
+// poi), non solo "stessa fascia oraria".
+function occupazioneFascia(righe) {
+  const cicloMax = Math.max(...righe.map((r) => r.interval_days));
+  const cicloMaxSettimane = cicloMax / 7;
+  const occupazione = Array.from({ length: cicloMaxSettimane }, () => []);
+  for (const r of righe) {
+    for (const k of faseSettimanaRiga(r, cicloMaxSettimane)) occupazione[k].push(r);
+  }
+  return { cicloMax, faseSlots: cicloMaxSettimane, occupazione };
+}
+
 // Ricava dai patient_slots attivi (uno per riga: {weekday, time_of_day,
 // interval_days, anchor_date, nome, stato}) il prospetto usato dalla pagina
 // "Disponibilità": per ogni fascia weekday+orario, quali pazienti la
@@ -192,16 +227,16 @@ export function computeGrigliaDisponibilita(patientSlots) {
 
   for (const [key, righe] of gruppi) {
     const [weekday, time] = key.split("|");
-    const cicloMax = Math.max(...righe.map((r) => r.interval_days));
-    const faseSlots = cicloMax / 7;
-    const fasiOccupate = new Set(righe.map((r) => faseSettimana(r.anchor_date, cicloMax)));
+    const { faseSlots, occupazione } = occupazioneFascia(righe);
+    const fasiOccupate = occupazione.filter((occ) => occ.length > 0).length;
     const info = {
       weekday: Number(weekday),
       giorno: GIORNI_GRIGLIA[Number(weekday)],
       orario: time.slice(0, 5),
       fasiTotali: faseSlots,
-      fasiLibere: faseSlots - fasiOccupate.size,
-      conflitto: fasiOccupate.size < righe.length,
+      fasiLibere: faseSlots - fasiOccupate,
+      conflitto: occupazione.some((occ) => occ.length > 1),
+      conflittiDettaglio: occupazione.filter((occ) => occ.length > 1).map((occ) => occ.map((r) => r.nome)),
       pazienti: righe.map((r) => ({ nome: r.nome, stato: r.stato, interval_days: r.interval_days, anchor_date: r.anchor_date })),
     };
     const intervalli = new Set(righe.map((r) => r.interval_days));
@@ -219,14 +254,15 @@ export function computeGrigliaDisponibilita(patientSlots) {
         riga.giorni[g] = { stato: "libero", pazienti: [] };
         continue;
       }
-      const cicloMax = Math.max(...righe.map((r) => r.interval_days));
-      const faseSlots = cicloMax / 7;
-      const fasiLibere = faseSlots - new Set(righe.map((r) => faseSettimana(r.anchor_date, cicloMax))).size;
+      const { cicloMax, faseSlots, occupazione } = occupazioneFascia(righe);
+      const fasiLibere = faseSlots - occupazione.filter((occ) => occ.length > 0).length;
       riga.giorni[g] = {
         stato: fasiLibere === 0 ? "pieno" : "parziale",
         cadenza: cicloMax === 7 ? "settimanale" : cicloMax === 14 ? "quindicinale" : "mensile",
         fasiTotali: faseSlots,
         fasiLibere,
+        conflitto: occupazione.some((occ) => occ.length > 1),
+        conflittiDettaglio: occupazione.filter((occ) => occ.length > 1).map((occ) => occ.map((r) => r.nome)),
         pazienti: righe.map((r) => ({ nome: r.nome, stato: r.stato })),
       };
     }
