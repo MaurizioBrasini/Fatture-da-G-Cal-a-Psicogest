@@ -5,11 +5,21 @@
 // meccanismo di creazione slot già esistente, "Nuovo slot fisso").
 //
 // Qui: disattiva il patient_slot corrente, poi rimuove dal calendario i
-// SOLI appuntamenti futuri NON ANCORA CONFERMATI (colorId "6" — quelli mai
-// confermati col paziente, semplici segnaposto del vecchio ritmo). Gli
-// appuntamenti futuri già confermati (colorId di default) restano intatti:
-// sono impegni reali presi col paziente, non decadono per un cambio di
-// programmazione futura.
+// SOLI appuntamenti futuri NON ANCORA CONFERMATI (colorId "6") che cadono
+// sulla STESSA fascia weekday+orario dello slot appena disattivato — sono
+// i segnaposto del vecchio ritmo, generati da "Genera occorrenze future" su
+// quello slot. Gli appuntamenti futuri già confermati (colorId di default)
+// restano sempre intatti, e così pure qualunque evento mandarino che non
+// appartiene a quella fascia (es. un nuovo appuntamento singolo preso su un
+// altro giorno/orario in vista del nuovo assetto, ancora da confermare) —
+// non è un residuo della vecchia cadenza, non va toccato.
+//
+// Bug reale 2026-09-17: il filtro originale cancellava QUALUNQUE evento
+// futuro mandarino del paziente, senza guardare la fascia — un appuntamento
+// appena creato per il nuovo assetto (weekday/orario diverso), lasciato per
+// errore ancora mandarino, veniva spazzato via insieme ai veri residui della
+// vecchia cadenza. Corretto restringendo il confronto a weekday+time_of_day
+// dello/degli slot appena disattivati.
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent, fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
@@ -43,26 +53,34 @@ export async function POST(request) {
   try {
     // Disattiva lo slot fisso — non lo cancella, resta come storico e
     // riattivabile impostandone uno nuovo al rientro.
-    const { data: slotDisattivato, error: slotError } = await supabase
+    const { data: slotsDisattivati, error: slotError } = await supabase
       .from("patient_slots")
       .update({ active: false })
       .eq("patient_id", patientId)
       .eq("active", true)
-      .select("id");
+      .select("id, weekday, time_of_day");
     if (slotError) throw new Error(slotError.message);
 
     await supabase.from("patients").update({ fuori_schema: true }).eq("id", patientId);
 
     const oggi = todayISO();
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, oggi, addDays(oggi, 365));
+    // Fasce weekday+orario appena disattivate — solo i mandarino che cadono
+    // qui sono residui certi della vecchia cadenza (vedi commento in testa).
+    const weekdayOf = (dataISO) => new Date(`${dataISO}T00:00:00Z`).getUTCDay();
+    const fasceDisattivate = new Set(
+      (slotsDisattivati || []).map((s) => `${s.weekday}|${(s.time_of_day || "").slice(0, 5)}`)
+    );
+
     // Mai la data di oggi: una seduta di oggi non decade per un cambio di
     // programmazione decisa stasera (stessa regola già usata altrove).
-    const daRimuovere = events.filter(
-      (e) => e.data > oggi && e.colorId === "6" && matchPatientForEvent(e.titolo, patients)?.patient.id === patientId
+    const futuriPaziente = events.filter(
+      (e) => e.data > oggi && matchPatientForEvent(e.titolo, patients)?.patient.id === patientId
     );
-    const mantenuti = events.filter(
-      (e) => e.data > oggi && e.colorId !== "6" && matchPatientForEvent(e.titolo, patients)?.patient.id === patientId
-    ).length;
+    const daRimuovere = futuriPaziente.filter(
+      (e) => e.colorId === "6" && fasceDisattivate.has(`${weekdayOf(e.data)}|${e.ora}`)
+    );
+    const mantenuti = futuriPaziente.length - daRimuovere.length;
 
     let cancellati = 0;
     const cancellazioniFallite = [];
@@ -78,7 +96,7 @@ export async function POST(request) {
 
     return NextResponse.json({
       ok: cancellazioniFallite.length === 0,
-      slotDisattivato: (slotDisattivato || []).length > 0,
+      slotDisattivato: (slotsDisattivati || []).length > 0,
       cancellati,
       mantenuti,
       cancellazioniFallite,

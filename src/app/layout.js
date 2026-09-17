@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Fatturazione studio",
+  title: "Gestione pazienti/fatture",
   description: "Conteggio sedute e generazione file Psicogest",
 };
 
