@@ -15,7 +15,13 @@ export default function LoginPage() {
         // (numerazione sedute), quindi passiamo a "calendar.events": dà
         // accesso in lettura+scrittura solo agli EVENTI del calendario, non
         // alle impostazioni generali del calendario stesso.
-        scopes: "https://www.googleapis.com/auth/calendar.events",
+        // "contacts.readonly" (aggiunto in seguito) dà accesso in sola
+        // lettura ai Contatti Google, per la ricerca/verifica contatti in
+        // Pazienti e Comunicazioni. Non serve nessuna migrazione al cambio
+        // scope: "prompt: consent" sotto forza un nuovo consenso ad ogni
+        // login, quindi il refresh_token salvato viene sempre riemesso per
+        // gli scope attuali.
+        scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/contacts.readonly",
         queryParams: {
           access_type: "offline",
           prompt: "consent",

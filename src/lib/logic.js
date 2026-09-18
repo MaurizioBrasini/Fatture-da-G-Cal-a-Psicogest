@@ -1012,6 +1012,41 @@ export function matchBookingToPatient(bookerNome, bookerEmail, patients) {
   return { patient: null, confidence: null, candidati: [] };
 }
 
+// Stessa identica logica a livelli di confidenza di matchBookingToPatient,
+// ma nella direzione opposta: da un paziente già in anagrafica trova il
+// Contatto Google corrispondente (usato per la verifica bulk telefono/
+// email/indirizzo contro i Contatti Google). confidence: "forte" (email
+// combacia, o nome E cognome combaciano su un unico contatto), "debole"
+// (un solo token combacia su un unico contatto), "ambiguo" (più
+// candidati), null (nessun candidato) — stesso significato di lì.
+export function matchPatientToGoogleContact(patient, contacts) {
+  const emailNorm = (patient.email || "").trim().toLowerCase();
+  if (emailNorm) {
+    const perEmail = contacts.filter((c) => (c.email || []).some((e) => (e || "").trim().toLowerCase() === emailNorm));
+    if (perEmail.length === 1) return { contact: perEmail[0], confidence: "forte" };
+  }
+
+  const nomeTok = tokenizzaNome(patient.nome);
+  const cognomeTok = tokenizzaNome(patient.cognome);
+  if (!nomeTok.length && !cognomeTok.length) return { contact: null, confidence: null };
+
+  const scored = contacts
+    .map((c) => {
+      const tokens = tokenizzaNome(c.nome);
+      const haNome = nomeTok.length > 0 && nomeTok.every((t) => tokens.includes(t));
+      const haCognome = cognomeTok.length > 0 && cognomeTok.every((t) => tokens.includes(t));
+      return { contact: c, haNome, haCognome };
+    })
+    .filter((s) => s.haNome || s.haCognome);
+
+  const forti = scored.filter((s) => s.haNome && s.haCognome);
+  if (forti.length === 1) return { contact: forti[0].contact, confidence: "forte" };
+  if (forti.length > 1) return { contact: null, confidence: "ambiguo" };
+  if (scored.length === 1) return { contact: scored[0].contact, confidence: "debole" };
+  if (scored.length > 1) return { contact: null, confidence: "ambiguo" };
+  return { contact: null, confidence: null };
+}
+
 // Scandisce gli eventi alla ricerca delle prenotazioni online (titolo +
 // eventualmente colore), le abbina se possibile e le classifica in 4 gruppi:
 // "pronte" (paziente trovato E nome_calendario già impostato: pronte a

@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
+import VerificaContattiModal from "@/components/VerificaContattiModal";
 import { computePatientState, computePazientiConSalto, personalizzaTesto, formatDataItaliana, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 
 export default function ComunicazioniPage() {
@@ -43,6 +45,8 @@ export default function ComunicazioniPage() {
   const [extraEmail, setExtraEmail] = useState("");
   const [extraErrore, setExtraErrore] = useState("");
   const [extraRecipients, setExtraRecipients] = useState([]); // [{id, nome, email}]
+
+  const [verificaEmailAperto, setVerificaEmailAperto] = useState(false);
 
   // --- Riprenotazioni da confermare (disdette senza email già mandata) ---
   const [ripStato, setRipStato] = useState(null); // null | 'loading' | 'preview' | 'invio' | 'fatto' | 'errore'
@@ -547,6 +551,18 @@ export default function ComunicazioniPage() {
           <button type="button" className="btn btn-ghost" onClick={aggiungiExtra}>
             Aggiungi
           </button>
+          <GoogleContactSearchButton
+            title="Cerca nei Contatti Google"
+            onSelect={(c) => {
+              setExtraNome(c.nome || "");
+              setExtraEmail(c.email?.[0] || "");
+            }}
+          />
+        </div>
+        <div style={{ marginBottom: 8 }}>
+          <button type="button" className="btn btn-ghost" onClick={() => setVerificaEmailAperto(true)}>
+            Verifica email pazienti su Google Contacts
+          </button>
         </div>
         {extraErrore && <div className="error-box" style={{ marginBottom: 8 }}>{extraErrore}</div>}
         {extraRecipients.length > 0 && (
@@ -669,6 +685,17 @@ export default function ComunicazioniPage() {
           </div>
         )}
       </main>
+
+      {verificaEmailAperto && (
+        <VerificaContattiModal
+          fields={["email"]}
+          onClose={() => setVerificaEmailAperto(false)}
+          onDone={() => {
+            setVerificaEmailAperto(false);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }

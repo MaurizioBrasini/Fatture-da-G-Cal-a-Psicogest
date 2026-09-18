@@ -25,6 +25,7 @@ import {
   DEFAULT_SETTINGS,
   parseBookingInfo,
   matchBookingToPatient,
+  matchPatientToGoogleContact,
   computePrenotazioniPreview,
   occorrenzeFuture,
   rilevaConflittiChiusura,
@@ -437,6 +438,37 @@ test("matchBookingToPatient torna nessun candidato per un nome che non compare i
   const patients = [{ id: 1, nome: "Chiara", cognome: "Casali", email: "" }];
   const r = matchBookingToPatient("Adriano De Marco", null, patients);
   assert.equal(r.patient, null);
+  assert.equal(r.confidence, null);
+});
+
+test("matchPatientToGoogleContact trova un match forte su nome+cognome combacianti", () => {
+  const contatti = [
+    { nome: "Chiara Casali", email: [], telefoni: [] },
+    { nome: "Chiara Conte", email: [], telefoni: [] },
+  ];
+  const r = matchPatientToGoogleContact({ nome: "Chiara", cognome: "Casali", email: "" }, contatti);
+  assert.equal(r.contact.nome, "Chiara Casali");
+  assert.equal(r.confidence, "forte");
+});
+test("matchPatientToGoogleContact preferisce l'email quando combacia in modo univoco", () => {
+  const contatti = [{ nome: "Nome Diverso Del Tutto", email: ["vecchia@example.com"], telefoni: [] }];
+  const r = matchPatientToGoogleContact({ nome: "Chiara", cognome: "Casali", email: "vecchia@example.com" }, contatti);
+  assert.equal(r.contact.nome, "Nome Diverso Del Tutto");
+  assert.equal(r.confidence, "forte");
+});
+test("matchPatientToGoogleContact non sceglie da solo con più candidati con lo stesso nome (ambiguo)", () => {
+  const contatti = [
+    { nome: "Francesco Neri", email: [], telefoni: [] },
+    { nome: "Francesco Bruni", email: [], telefoni: [] },
+  ];
+  const r = matchPatientToGoogleContact({ nome: "Francesco", cognome: "", email: "" }, contatti);
+  assert.equal(r.contact, null);
+  assert.equal(r.confidence, "ambiguo");
+});
+test("matchPatientToGoogleContact torna nessun candidato se il nome non compare nei contatti", () => {
+  const contatti = [{ nome: "Chiara Casali", email: [], telefoni: [] }];
+  const r = matchPatientToGoogleContact({ nome: "Adriano", cognome: "De Marco", email: "" }, contatti);
+  assert.equal(r.contact, null);
   assert.equal(r.confidence, null);
 });
 

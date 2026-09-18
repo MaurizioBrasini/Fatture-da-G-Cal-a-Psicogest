@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
+import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
+import VerificaContattiModal from "@/components/VerificaContattiModal";
 import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
@@ -388,6 +390,8 @@ export default function PazientiPage() {
   const [chiuEsclusi, setChiuEsclusi] = useState(new Set()); // eventId deselezionati dalla proposta di cancellazione
   const [chiuRisultato, setChiuRisultato] = useState(null);
   const [chiuError, setChiuError] = useState("");
+
+  const [verificaContattiAperto, setVerificaContattiAperto] = useState(false);
 
   function apriChiusure() {
     setChiuStep("form");
@@ -848,6 +852,7 @@ export default function PazientiPage() {
             <button className="btn btn-ghost" onClick={() => apriRinumerazione(null)}>Rinumera tutti (calendario)</button>
             <button className="btn btn-ghost" onClick={apriGeneraOccorrenze}>Genera occorrenze future</button>
             <button className="btn btn-ghost" onClick={apriChiusure}>Chiusure calendario</button>
+            <button className="btn btn-ghost" onClick={() => setVerificaContattiAperto(true)}>Verifica contatti Google</button>
           </div>
         </header>
 
@@ -1103,6 +1108,14 @@ export default function PazientiPage() {
                   <td>
                     <button className="btn-icon" title="Aggiorna numerazione calendario" onClick={() => apriRinumerazione(p.id)}>↻</button>
                     <button className="btn-icon" title="Storico fatture di questo paziente" onClick={() => apriStorico(p)}>§</button>
+                    <GoogleContactSearchButton
+                      title="Cerca nei Contatti Google (telefono/email/indirizzo)"
+                      onSelect={(c) => {
+                        if (c.telefoni?.[0]) updateField(p.id, "telefono", c.telefoni[0]);
+                        if (c.email?.[0]) updateField(p.id, "email", c.email[0]);
+                        if (c.indirizzo) updateField(p.id, "indirizzo", c.indirizzo);
+                      }}
+                    />
                     <button className="btn-icon" onClick={() => removePatient(p.id, p.nome_calendario || p.fatturare_a)}>×</button>
                   </td>
                 </tr>
@@ -1432,6 +1445,17 @@ export default function PazientiPage() {
             </>
           )}
         </Modal>
+      )}
+
+      {verificaContattiAperto && (
+        <VerificaContattiModal
+          fields={["telefono", "email", "indirizzo"]}
+          onClose={() => setVerificaContattiAperto(false)}
+          onDone={() => {
+            setVerificaContattiAperto(false);
+            load();
+          }}
+        />
       )}
 
       {nuovoSlotModal && (
