@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Gestione pazienti/fatture",
+  title: "Gestione pazienti",
   description: "Conteggio sedute e generazione file Psicogest",
 };
 
