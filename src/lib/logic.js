@@ -635,10 +635,19 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     fatturaONORARIO: onorario,
     fatturaENPAP: enpap,
     fatturaBOLLO: bollo,
-    fatturaBOLLOACARICOPAZ: bolloDovuto ? "si" : "no",
+    // "no" = bollo assolto sulla copia conservata dal professionista, come
+    // nelle fatture 140/141 (corrette, precedenti all'app). Con "si"
+    // Psicogest applica invece l'ENPAP sul bollo pieno (2,00€) anziché
+    // scorporato (1,96€), sballando il totale di 4 centesimi rispetto alla
+    // tariffa tonda attesa (es. 502,04 invece di 502,00) — verificato
+    // confrontando byte-per-byte i totali delle fatture 140/141 con 145/146.
+    fatturaBOLLOACARICOPAZ: "no",
     fatturaTOTALE: totale,
     fatturaTOTALEDAPAGARE: totale,
-    fatturaNOTE: `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
+    fatturaNOTE:
+      dal === al
+        ? `n. ${count} sedute (${prestazione}) - il ${dal}`
+        : `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
     // fatturaDATAPAGAMENTO va compilata solo quando il paziente ha
     // effettivamente pagato; per ora resta omessa (non stringa vuota, che
     // manderebbe in errore il parser data di Psicogest) e andrà valorizzata
