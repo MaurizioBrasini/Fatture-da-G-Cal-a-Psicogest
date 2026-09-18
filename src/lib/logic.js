@@ -613,6 +613,11 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
   // testo della prestazione, come già fatto su Psicogest.
   const prestazione =
     patient.regime_tariffario === "agevolata" ? `${prestazioneBase} - tariffa agevolata` : prestazioneBase;
+  // L'import Psicogest non ha campi Quantità/Prezzo unitario separati (solo
+  // un onorario forfettario per fattura): Psicogest mette sempre Quantità=1
+  // sulla riga della fattura, quindi il numero di sedute non ci comparirebbe
+  // da nessuna parte se non lo mettiamo qui, nella Descrizione stessa.
+  const prestazioneRiga = `${count} sedute di ${prestazione}`;
   const date = computed.usati.map((e) => e.data).sort();
   const dal = date[0] || computed.ultimaData || dataFattura;
   const al = date[date.length - 1] || computed.ultimaData || dataFattura;
@@ -630,7 +635,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     fatturaANNO: new Date(dataFattura).getFullYear(),
     fatturaDATA: toDateObj(dataFattura),
     fatturaMODOPAGAMENTO: patient.modalita_pagamento || "Bonifico",
-    fatturaPRESTAZIONE: prestazione,
+    fatturaPRESTAZIONE: prestazioneRiga,
     "fatturaIMPONIBILE SANITARIO": onorario,
     fatturaONORARIO: onorario,
     fatturaENPAP: enpap,
