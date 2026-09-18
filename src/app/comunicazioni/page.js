@@ -33,6 +33,17 @@ export default function ComunicazioniPage() {
   const [invioErrore, setInvioErrore] = useState("");
   const [invioRisultato, setInvioRisultato] = useState(null);
 
+  // --- Invia una prova a te stesso ---
+  const [provaStato, setProvaStato] = useState(null); // null | 'invio' | 'fatto' | 'errore'
+  const [provaErrore, setProvaErrore] = useState("");
+  const [provaEmail, setProvaEmail] = useState("");
+
+  // --- Destinatari extra: persone non in anagrafica pazienti ---
+  const [extraNome, setExtraNome] = useState("");
+  const [extraEmail, setExtraEmail] = useState("");
+  const [extraErrore, setExtraErrore] = useState("");
+  const [extraRecipients, setExtraRecipients] = useState([]); // [{id, nome, email}]
+
   // --- Riprenotazioni da confermare (disdette senza email già mandata) ---
   const [ripStato, setRipStato] = useState(null); // null | 'loading' | 'preview' | 'invio' | 'fatto' | 'errore'
   const [ripCandidati, setRipCandidati] = useState(null);
@@ -184,6 +195,50 @@ export default function ComunicazioniPage() {
     setDeselezionati((prev) => ({ ...prev, [id]: false }));
   }
 
+  async function inviaProva() {
+    setProvaErrore("");
+    if (!oggetto.trim() || !corpoTesto.trim()) {
+      setProvaErrore("Scrivi prima oggetto e testo.");
+      setProvaStato("errore");
+      return;
+    }
+    setProvaStato("invio");
+    try {
+      const res = await fetch("/api/email/test-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oggetto, corpoTesto }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setProvaErrore(data.error || "Errore durante l'invio di prova.");
+        setProvaStato("errore");
+        return;
+      }
+      setProvaEmail(data.email);
+      setProvaStato("fatto");
+    } catch (e) {
+      setProvaErrore(e.message);
+      setProvaStato("errore");
+    }
+  }
+
+  function aggiungiExtra() {
+    setExtraErrore("");
+    const email = extraEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setExtraErrore("Email non valida.");
+      return;
+    }
+    setExtraRecipients((prev) => [...prev, { id: `${Date.now()}-${Math.random()}`, nome: extraNome.trim(), email }]);
+    setExtraNome("");
+    setExtraEmail("");
+  }
+
+  function rimuoviExtra(id) {
+    setExtraRecipients((prev) => prev.filter((e) => e.id !== id));
+  }
+
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
   const statiInclusi = new Set([...(includiAttivi ? ["attivo"] : []), ...(includiSospesi ? ["sospeso"] : [])]);
@@ -202,16 +257,18 @@ export default function ComunicazioniPage() {
   const selezionati = conEmail.filter((p) => !deselezionati[p.id]);
   const patientsNonInElenco = patients.filter((p) => !candidati.some((c) => c.id === p.id));
 
+  const totaleDestinatari = selezionati.length + extraRecipients.length;
+
   async function invia() {
     if (!oggetto.trim() || !corpoTesto.trim()) {
       setInvioErrore("Oggetto e testo sono obbligatori.");
       setInvioStato("errore");
       return;
     }
-    if (!selezionati.length) return;
+    if (!totaleDestinatari) return;
     if (
       !window.confirm(
-        `Confermi l'invio a ${selezionati.length} pazient${selezionati.length === 1 ? "e" : "i"}? L'operazione non si può annullare.`
+        `Confermi l'invio a ${totaleDestinatari} destinatar${totaleDestinatari === 1 ? "io" : "i"}? L'operazione non si può annullare.`
       )
     )
       return;
@@ -226,10 +283,19 @@ export default function ComunicazioniPage() {
           corpoTesto: personalizzaTesto(corpoTesto, valori),
         };
       });
+      const extra = extraRecipients.map((e) => {
+        const valori = { nome: e.nome, data: "" };
+        return {
+          email: e.email,
+          nome: e.nome,
+          oggetto: personalizzaTesto(oggetto, valori),
+          corpoTesto: personalizzaTesto(corpoTesto, valori),
+        };
+      });
       const res = await fetch("/api/email/broadcast-send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ destinatari }),
+        body: JSON.stringify({ destinatari, extra }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -239,6 +305,7 @@ export default function ComunicazioniPage() {
       }
       setInvioRisultato(data);
       setInvioStato("fatto");
+      setExtraRecipients([]);
       await load();
     } catch (e) {
       setInvioErrore(e.message);
@@ -390,6 +457,14 @@ export default function ComunicazioniPage() {
           </label>
         </div>
 
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+          <button type="button" className="btn btn-ghost" onClick={inviaProva} disabled={provaStato === "invio"}>
+            {provaStato === "invio" ? "Invio in corso…" : "Invia una prova a te stesso"}
+          </button>
+          {provaStato === "fatto" && <span className="muted small">Inviata a {provaEmail}.</span>}
+          {provaStato === "errore" && <span className="error-box">{provaErrore}</span>}
+        </div>
+
         <h2 className="sub-heading">Destinatari</h2>
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -439,8 +514,31 @@ export default function ComunicazioniPage() {
           <span className="muted small">Lo aggiunge all&apos;elenco sotto a prescindere dagli altri filtri.</span>
         </div>
 
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <span className="muted small">Destinatario che non è un paziente:</span>
+          <input value={extraNome} onChange={(e) => setExtraNome(e.target.value)} placeholder="Nome (facoltativo)" style={{ width: 160 }} />
+          <input value={extraEmail} onChange={(e) => setExtraEmail(e.target.value)} placeholder="email@esempio.it" style={{ width: 220 }} />
+          <button type="button" className="btn btn-ghost" onClick={aggiungiExtra}>
+            Aggiungi
+          </button>
+        </div>
+        {extraErrore && <div className="error-box" style={{ marginBottom: 8 }}>{extraErrore}</div>}
+        {extraRecipients.length > 0 && (
+          <ul style={{ marginTop: 0, marginBottom: 12 }}>
+            {extraRecipients.map((e) => (
+              <li key={e.id} className="muted small">
+                {e.nome ? `${e.nome} — ` : ""}
+                {e.email}{" "}
+                <button type="button" className="btn btn-ghost" style={{ padding: "0 6px" }} onClick={() => rimuoviExtra(e.id)}>
+                  rimuovi
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <p className="muted small">
-          {selezionati.length} destinatari selezionati{senzaEmail > 0 && ` (${senzaEmail} esclusi perché senza email registrata)`}.
+          {totaleDestinatari} destinatari selezionati{senzaEmail > 0 && ` (${senzaEmail} pazienti esclusi perché senza email registrata)`}.
           Togli la spunta a chi non deve ricevere questo invio.
         </p>
 
@@ -499,8 +597,8 @@ export default function ComunicazioniPage() {
           </p>
         )}
 
-        <button className="btn btn-primary" onClick={invia} disabled={!selezionati.length || invioStato === "invio"}>
-          {invioStato === "invio" ? "Invio in corso…" : `Invia a ${selezionati.length} pazienti`}
+        <button className="btn btn-primary" onClick={invia} disabled={!totaleDestinatari || invioStato === "invio"}>
+          {invioStato === "invio" ? "Invio in corso…" : `Invia a ${totaleDestinatari} destinatari`}
         </button>
 
         <h2 className="sub-heading" style={{ marginTop: 32 }}>Storico</h2>

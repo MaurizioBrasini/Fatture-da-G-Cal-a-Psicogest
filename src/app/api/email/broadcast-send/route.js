@@ -25,20 +25,29 @@ export async function POST(request) {
   const destinatari = (Array.isArray(body.destinatari) ? body.destinatari : []).filter(
     (d) => d && d.patientId && String(d.oggetto || "").trim() && String(d.corpoTesto || "").trim()
   );
-  if (!destinatari.length) return NextResponse.json({ error: "Nessun destinatario con oggetto e testo validi." }, { status: 400 });
+  // Destinatari extra: persone non presenti in anagrafica pazienti (es.
+  // un contatto esterno), inviate direttamente all'email fornita —
+  // nessun controllo/patch su `patients`.
+  const extra = (Array.isArray(body.extra) ? body.extra : []).filter(
+    (d) => d && String(d.email || "").trim() && String(d.oggetto || "").trim() && String(d.corpoTesto || "").trim()
+  );
+  if (!destinatari.length && !extra.length) {
+    return NextResponse.json({ error: "Nessun destinatario con oggetto e testo validi." }, { status: 400 });
+  }
 
   const patientIds = destinatari.map((d) => d.patientId);
-  const { data: pazienti, error: patientsError } = await supabase
-    .from("patients")
-    .select("id,nome_calendario,fatturare_a,email")
-    .in("id", patientIds);
+  const { data: pazienti, error: patientsError } = patientIds.length
+    ? await supabase.from("patients").select("id,nome_calendario,fatturare_a,email").in("id", patientIds)
+    : { data: [], error: null };
   if (patientsError) return NextResponse.json({ error: patientsError.message }, { status: 500 });
   const patientsById = Object.fromEntries((pazienti || []).map((p) => [p.id, p]));
 
   const { data: settings } = await supabase.from("settings").select("*").maybeSingle();
 
   const conEmail = destinatari.filter((d) => patientsById[d.patientId]?.email);
-  if (!conEmail.length) return NextResponse.json({ error: "Nessuno dei destinatari selezionati ha un'email registrata." }, { status: 400 });
+  if (!conEmail.length && !extra.length) {
+    return NextResponse.json({ error: "Nessuno dei destinatari selezionati ha un'email registrata." }, { status: 400 });
+  }
 
   const batchId = randomUUID();
   const risultati = [];
@@ -64,6 +73,29 @@ export async function POST(request) {
       errore,
     });
     risultati.push({ patientId: p.id, nome: p.nome_calendario || p.fatturare_a, email: p.email, stato, errore });
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  for (const d of extra) {
+    let stato = "ok";
+    let errore = null;
+    try {
+      await sendEmail({ settings, to: d.email, subject: d.oggetto, html: buildBroadcastHtml(d.corpoTesto, settings) });
+    } catch (e) {
+      stato = "errore";
+      errore = e.message;
+    }
+    await supabase.from("email_log").insert({
+      user_id: user.id,
+      batch_id: batchId,
+      patient_id: null,
+      email: d.email,
+      oggetto: d.oggetto,
+      tipo: "broadcast",
+      stato,
+      errore,
+    });
+    risultati.push({ patientId: null, nome: d.nome || d.email, email: d.email, stato, errore });
     await new Promise((r) => setTimeout(r, 150));
   }
 
