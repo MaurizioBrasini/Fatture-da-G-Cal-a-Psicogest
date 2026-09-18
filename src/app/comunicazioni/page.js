@@ -175,6 +175,27 @@ export default function ComunicazioniPage() {
     setNomeNuovoModello("");
   }
 
+  async function salvaModificheModello() {
+    setTemplateErrore("");
+    const t = templates.find((t) => String(t.id) === String(templateSelezionato));
+    if (!t) return;
+    if (!oggetto.trim() || !corpoTesto.trim()) {
+      setTemplateErrore("Oggetto e testo non possono essere vuoti.");
+      return;
+    }
+    const { data, error } = await supabase
+      .from("message_templates")
+      .update({ oggetto, corpo_testo: corpoTesto, updated_at: new Date().toISOString() })
+      .eq("id", t.id)
+      .select()
+      .single();
+    if (error) {
+      setTemplateErrore(error.message);
+      return;
+    }
+    setTemplates((prev) => prev.map((x) => (x.id === t.id ? data : x)));
+  }
+
   async function eliminaModelloSelezionato() {
     const t = templates.find((t) => String(t.id) === String(templateSelezionato));
     if (!t) return;
@@ -419,9 +440,14 @@ export default function ComunicazioniPage() {
             </select>
           </label>
           {templateSelezionato && (
-            <button type="button" className="btn btn-ghost" onClick={eliminaModelloSelezionato}>
-              Elimina modello
-            </button>
+            <>
+              <button type="button" className="btn btn-primary" onClick={salvaModificheModello}>
+                Salva modifiche
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={eliminaModelloSelezionato}>
+                Elimina modello
+              </button>
+            </>
           )}
           <span className="muted small">|</span>
           <input
