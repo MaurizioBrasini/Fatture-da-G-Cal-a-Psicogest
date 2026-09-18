@@ -27,7 +27,7 @@ export default function Sidebar({ readyCount }) {
       <div className="brand">
         <div className="brand-mark">§</div>
         <div>
-          <div className="brand-title">Fatturazione studio</div>
+          <div className="brand-title">Gestione pazienti</div>
           <div className="brand-sub">conteggio sedute → Psicogest</div>
         </div>
       </div>

@@ -27,7 +27,7 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "ui-sans-serif, system-ui" }}>
       <div style={{ textAlign: "center" }}>
-        <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 500 }}>Fatturazione studio</h1>
+        <h1 style={{ fontFamily: "Georgia, serif", fontWeight: 500 }}>Gestione pazienti</h1>
         <p style={{ color: "#55645D", marginBottom: 20 }}>Accedi con l&apos;account Google collegato al calendario dello studio.</p>
         <button
           onClick={signIn}
