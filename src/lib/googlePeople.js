@@ -20,6 +20,16 @@ async function getAccessToken(refreshToken) {
   return data.access_token;
 }
 
+// Cache in memoria per processo (best-effort: sopravvive solo finché la
+// funzione serverless resta "calda" tra un'invocazione e l'altra, niente di
+// più) — riduce le chiamate ripetute all'API People quando arrivano più
+// richieste ravvicinate (ricerca + verifica bulk, o più ricerche di
+// fila). Senza questo, ogni singola ricerca riscaricava l'intera rubrica,
+// ed è bastato sforare la quota di Google in un test reale ("quota
+// exceeded" durante una sessione di prove ravvicinate).
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const cache = new Map(); // refreshToken -> { contatti, scaduta }
+
 // Scarica TUTTI i contatti (paginando) invece di usare l'endpoint dedicato
 // people:searchContacts — quello ha un indice di ricerca "warmed up" in
 // modo asincrono lato Google e può restituire risultati vuoti/incompleti
@@ -27,6 +37,9 @@ async function getAccessToken(refreshToken) {
 // contatto. Con un numero di contatti personali comunque limitato, è più
 // affidabile scaricare la lista una volta per richiesta e filtrare qui.
 export async function fetchAllGoogleContacts(refreshToken) {
+  const cached = cache.get(refreshToken);
+  if (cached && cached.scaduta > Date.now()) return cached.contatti;
+
   const accessToken = await getAccessToken(refreshToken);
 
   let contatti = [];
@@ -57,5 +70,6 @@ export async function fetchAllGoogleContacts(refreshToken) {
     pageToken = data.nextPageToken;
   } while (pageToken);
 
+  cache.set(refreshToken, { contatti, scaduta: Date.now() + CACHE_TTL_MS });
   return contatti;
 }

@@ -1,25 +1,43 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+const DEBOUNCE_MS = 400;
 
 // Bottone "🔍" che, cliccato, apre un piccolo campo di ricerca inline sui
 // Contatti Google (via /api/contacts/search) e restituisce il contatto
 // scelto tramite onSelect — non scrive nulla da solo, è il chiamante a
 // decidere cosa fare col contatto (precompilare campi, aggiungere un
 // destinatario, ecc.).
+//
+// La chiamata è "debounced": parte solo DEBOUNCE_MS dopo l'ultimo tasto
+// premuto, non ad ogni carattere — senza questo, digitare un nome di 6
+// lettere faceva partire 6 richieste in rapida successione, sufficienti a
+// sforare la quota dell'API People di Google (bug reale, visto in
+// produzione: "errore lettura dei contatti google fallita... quota
+// exceeded").
 export default function GoogleContactSearchButton({ onSelect, title = "Cerca nei Contatti Google" }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [risultati, setRisultati] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errore, setErrore] = useState(null);
+  const debounceRef = useRef(null);
 
-  async function cerca(query) {
+  useEffect(() => () => clearTimeout(debounceRef.current), []);
+
+  function cambiaQuery(query) {
     setQ(query);
+    clearTimeout(debounceRef.current);
     if (!query.trim()) {
       setRisultati([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
+    debounceRef.current = setTimeout(() => eseguiRicerca(query), DEBOUNCE_MS);
+  }
+
+  async function eseguiRicerca(query) {
     setErrore(null);
     try {
       const res = await fetch("/api/contacts/search", {
@@ -59,7 +77,7 @@ export default function GoogleContactSearchButton({ onSelect, title = "Cerca nei
         style={{ width: 160 }}
         placeholder="Cerca contatto…"
         value={q}
-        onChange={(e) => cerca(e.target.value)}
+        onChange={(e) => cambiaQuery(e.target.value)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
       {(loading || errore || risultati.length > 0 || q.trim()) && (
