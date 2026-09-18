@@ -15,8 +15,19 @@ export default function ComunicazioniPage() {
   const [includiAttivi, setIncludiAttivi] = useState(true);
   const [includiSospesi, setIncludiSospesi] = useState(false);
   const [includiSalto, setIncludiSalto] = useState(false);
+  const [includiFisso, setIncludiFisso] = useState(false);
+  const [includiOccasionali, setIncludiOccasionali] = useState(false);
   const [salto, setSalto] = useState({}); // { patientId: {tipo, gapGiorni, intervalAtteso} } — chi ha disdetto di recente con un buco
+  const [fissiIds, setFissiIds] = useState(new Set()); // id pazienti con uno slot fisso attivo
   const [deselezionati, setDeselezionati] = useState({}); // { patientId: true } = tolto a mano dall'invio
+  const [selezionatiManuali, setSelezionatiManuali] = useState({}); // { patientId: true } = aggiunto a mano, a prescindere dai filtri
+  const [pazienteDaAggiungere, setPazienteDaAggiungere] = useState("");
+
+  // --- Archivio messaggi pronti ---
+  const [templates, setTemplates] = useState([]);
+  const [templateSelezionato, setTemplateSelezionato] = useState("");
+  const [nomeNuovoModello, setNomeNuovoModello] = useState("");
+  const [templateErrore, setTemplateErrore] = useState("");
 
   const [invioStato, setInvioStato] = useState(null); // null | 'invio' | 'fatto' | 'errore'
   const [invioErrore, setInvioErrore] = useState("");
@@ -82,7 +93,7 @@ export default function ComunicazioniPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: l }, { data: slots }, { data: cancellazioni }, syncRes] = await Promise.all([
+    const [{ data: p }, { data: l }, { data: slots }, { data: cancellazioni }, { data: mod }, syncRes] = await Promise.all([
       supabase.from("patients").select("id,nome,nome_calendario,fatturare_a,email,stato").order("nome_calendario"),
       supabase
         .from("email_log")
@@ -91,6 +102,7 @@ export default function ComunicazioniPage() {
         .limit(300),
       supabase.from("patient_slots").select("patient_id,active,interval_days").eq("active", true),
       supabase.from("cancellations").select("patient_id,cancelled_at"),
+      supabase.from("message_templates").select("*").order("nome"),
       // Orizzonte ampio anche all'indietro: computePazientiConSalto deve
       // vedere l'ultimo appuntamento passato per calcolare il gap, non solo
       // i futuri usati per [data].
@@ -110,6 +122,8 @@ export default function ComunicazioniPage() {
     }));
     setPatients(conProssimaData);
     setSalto(Object.fromEntries(computePazientiConSalto(p || [], slots || [], eventi, cancellazioni || []).map((s) => [s.patientId, s])));
+    setFissiIds(new Set((slots || []).map((s) => s.patient_id)));
+    setTemplates(mod || []);
     setLog(l || []);
     setLoading(false);
   }, [supabase]);
@@ -118,13 +132,75 @@ export default function ComunicazioniPage() {
     load();
   }, [load]);
 
+  function caricaModello(id) {
+    setTemplateSelezionato(id);
+    if (!id) return;
+    const t = templates.find((t) => String(t.id) === String(id));
+    if (!t) return;
+    setOggetto(t.oggetto);
+    setCorpoTesto(t.corpo_testo);
+  }
+
+  async function salvaModello() {
+    setTemplateErrore("");
+    if (!nomeNuovoModello.trim() || !oggetto.trim() || !corpoTesto.trim()) {
+      setTemplateErrore("Serve un nome per il modello, con oggetto e testo già compilati sopra.");
+      return;
+    }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("message_templates")
+      .insert({ user_id: user.id, nome: nomeNuovoModello.trim(), oggetto, corpo_testo: corpoTesto })
+      .select()
+      .single();
+    if (error) {
+      setTemplateErrore(error.message);
+      return;
+    }
+    setTemplates((prev) => [...prev, data].sort((a, b) => a.nome.localeCompare(b.nome)));
+    setTemplateSelezionato(String(data.id));
+    setNomeNuovoModello("");
+  }
+
+  async function eliminaModelloSelezionato() {
+    const t = templates.find((t) => String(t.id) === String(templateSelezionato));
+    if (!t) return;
+    if (!window.confirm(`Eliminare il modello "${t.nome}"?`)) return;
+    const { error } = await supabase.from("message_templates").delete().eq("id", t.id);
+    if (error) {
+      setTemplateErrore(error.message);
+      return;
+    }
+    setTemplates((prev) => prev.filter((x) => x.id !== t.id));
+    setTemplateSelezionato("");
+  }
+
+  function aggiungiPazienteSelezionato(id) {
+    setPazienteDaAggiungere("");
+    if (!id) return;
+    setSelezionatiManuali((prev) => ({ ...prev, [id]: true }));
+    setDeselezionati((prev) => ({ ...prev, [id]: false }));
+  }
+
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
   const statiInclusi = new Set([...(includiAttivi ? ["attivo"] : []), ...(includiSospesi ? ["sospeso"] : [])]);
-  const candidati = patients.filter((p) => statiInclusi.has(p.stato) || (includiSalto && salto[p.id]));
+  // "Spazio fisso"/"Occasionali" restringe solo se è spuntato uno solo dei
+  // due (entrambi o nessuno = nessuna restrizione di tipologia).
+  const tipologiaRestrittiva = includiFisso !== includiOccasionali;
+  const matchTipologia = (p) => !tipologiaRestrittiva || (includiFisso ? fissiIds.has(p.id) : !fissiIds.has(p.id));
+  const daFiltri = patients.filter((p) => (statiInclusi.has(p.stato) || (includiSalto && salto[p.id])) && matchTipologia(p));
+  const idsDaFiltri = new Set(daFiltri.map((p) => p.id));
+  // Selezione nominale: pazienti aggiunti a mano dalla ricerca sotto,
+  // sempre inclusi a prescindere dai filtri di stato/tipologia sopra.
+  const aggiuntiManualmente = patients.filter((p) => selezionatiManuali[p.id] && !idsDaFiltri.has(p.id));
+  const candidati = [...daFiltri, ...aggiuntiManualmente];
   const conEmail = candidati.filter((p) => p.email);
   const senzaEmail = candidati.length - conEmail.length;
   const selezionati = conEmail.filter((p) => !deselezionati[p.id]);
+  const patientsNonInElenco = patients.filter((p) => !candidati.some((c) => c.id === p.id));
 
   async function invia() {
     if (!oggetto.trim() || !corpoTesto.trim()) {
@@ -262,6 +338,37 @@ export default function ComunicazioniPage() {
         )}
 
         <h2 className="sub-heading">Invio a più pazienti</h2>
+
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Modello:
+            <select value={templateSelezionato} onChange={(e) => caricaModello(e.target.value)}>
+              <option value="">— nessuno —</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          {templateSelezionato && (
+            <button type="button" className="btn btn-ghost" onClick={eliminaModelloSelezionato}>
+              Elimina modello
+            </button>
+          )}
+          <span className="muted small">|</span>
+          <input
+            value={nomeNuovoModello}
+            onChange={(e) => setNomeNuovoModello(e.target.value)}
+            placeholder="Nome nuovo modello (es. Chiusura natalizia)"
+            style={{ minWidth: 240 }}
+          />
+          <button type="button" className="btn btn-ghost" onClick={salvaModello}>
+            Salva oggetto/testo come modello
+          </button>
+        </div>
+        {templateErrore && <div className="error-box" style={{ marginBottom: 12 }}>{templateErrore}</div>}
+
         <div className="settings-grid" style={{ marginBottom: 16 }}>
           <label style={{ gridColumn: "1 / -1" }}>
             Oggetto
@@ -302,6 +409,36 @@ export default function ComunicazioniPage() {
           </label>
         </div>
 
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
+          <span className="muted small">Tipologia:</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title="Ha uno slot fisso attivo (settimanale/quindicinale/mensile)">
+            <input type="checkbox" checked={includiFisso} onChange={(e) => setIncludiFisso(e.target.checked)} />
+            Spazio fisso
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }} title="Nessuno slot fisso attivo — su richiesta/occasionali">
+            <input type="checkbox" checked={includiOccasionali} onChange={(e) => setIncludiOccasionali(e.target.checked)} />
+            Occasionali
+          </label>
+          <span className="muted small" style={{ alignSelf: "center" }}>
+            (nessuna delle due = tutti i tipi; una sola spuntata = solo quel tipo)
+          </span>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Aggiungi un paziente specifico:
+            <select value={pazienteDaAggiungere} onChange={(e) => aggiungiPazienteSelezionato(Number(e.target.value) || "")}>
+              <option value="">— scegli —</option>
+              {patientsNonInElenco.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.nome_calendario || p.fatturare_a}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="muted small">Lo aggiunge all&apos;elenco sotto a prescindere dagli altri filtri.</span>
+        </div>
+
         <p className="muted small">
           {selezionati.length} destinatari selezionati{senzaEmail > 0 && ` (${senzaEmail} esclusi perché senza email registrata)`}.
           Togli la spunta a chi non deve ricevere questo invio.
@@ -316,6 +453,7 @@ export default function ComunicazioniPage() {
                   <th style={{ textAlign: "left" }}>Paziente</th>
                   <th style={{ textAlign: "left" }}>Email</th>
                   <th style={{ textAlign: "left" }}>Prossimo appuntamento</th>
+                  <th style={{ textAlign: "left" }}>Tipologia</th>
                   <th style={{ textAlign: "left" }}>Segnale</th>
                 </tr>
               </thead>
@@ -344,6 +482,7 @@ export default function ComunicazioniPage() {
                       <td className={p.prossimaData ? "" : "muted small"}>
                         {p.prossimaData ? formatDataItaliana(p.prossimaData) : "nessuno pianificato"}
                       </td>
+                      <td className="muted small">{fissiIds.has(p.id) ? "Fisso" : "Occasionale"}</td>
                       <td className="muted small">{etichettaSalto}</td>
                     </tr>
                   );
