@@ -21,7 +21,10 @@ export default function LoginPage() {
         // scope: "prompt: consent" sotto forza un nuovo consenso ad ogni
         // login, quindi il refresh_token salvato viene sempre riemesso per
         // gli scope attuali.
-        scopes: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/contacts.readonly",
+        // "contacts.other.readonly" dà accesso in sola lettura a "Altri
+        // contatti" (le persone incontrate via mail ma non salvate in rubrica).
+        scopes:
+          "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly",
         queryParams: {
           access_type: "offline",
           prompt: "consent",

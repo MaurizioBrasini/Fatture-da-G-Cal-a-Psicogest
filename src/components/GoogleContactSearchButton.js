@@ -21,6 +21,7 @@ export default function GoogleContactSearchButton({ onSelect, title = "Cerca nei
   const [risultati, setRisultati] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errore, setErrore] = useState(null);
+  const [avviso, setAvviso] = useState(null);
   const debounceRef = useRef(null);
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
@@ -48,6 +49,7 @@ export default function GoogleContactSearchButton({ onSelect, title = "Cerca nei
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ricerca fallita");
       setRisultati(data.risultati || []);
+      setAvviso(data.avviso || null);
     } catch (e) {
       setErrore(e.message);
     } finally {
@@ -116,10 +118,16 @@ export default function GoogleContactSearchButton({ onSelect, title = "Cerca nei
                 onMouseDown={() => scegli(c)}
               >
                 <strong>{c.nome}</strong>
+                {c.daPosta && <span className="muted"> · dalla posta</span>}
                 {c.telefoni?.[0] && <div className="muted">{c.telefoni[0]}</div>}
                 {c.email?.[0] && <div className="muted">{c.email[0]}</div>}
               </div>
             ))}
+          {!loading && !errore && avviso && (
+            <div className="small" style={{ padding: 8, color: "#8a6d00", borderTop: "1px solid #eee" }}>
+              {avviso}
+            </div>
+          )}
           {!loading && !errore && risultati.length === 0 && q.trim() && (
             <div className="muted small" style={{ padding: 8 }}>
               Nessun contatto trovato

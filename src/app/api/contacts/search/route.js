@@ -30,7 +30,7 @@ export async function POST(request) {
     const contatti = await fetchAllGoogleContacts(tokenRow.refresh_token);
     const qNorm = normalizeName(q);
     const risultati = contatti.filter((c) => normalizeName(c.nome).includes(qNorm)).slice(0, 15);
-    return NextResponse.json({ risultati });
+    return NextResponse.json({ risultati, avviso: contatti.avviso || null });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

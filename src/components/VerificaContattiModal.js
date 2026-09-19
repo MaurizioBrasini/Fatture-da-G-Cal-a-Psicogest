@@ -23,6 +23,7 @@ export default function VerificaContattiModal({ fields, onClose, onDone }) {
   const [righe, setRighe] = useState([]);
   const [ambigui, setAmbigui] = useState([]);
   const [errore, setErrore] = useState(null);
+  const [avviso, setAvviso] = useState(null);
   const [selezionati, setSelezionati] = useState(new Set());
   const [scritti, setScritti] = useState(0);
 
@@ -52,6 +53,7 @@ export default function VerificaContattiModal({ fields, onClose, onDone }) {
 
       setRighe(righeFiltrate);
       setAmbigui(data.ambigui || []);
+      setAvviso(data.avviso || null);
       setSelezionati(iniziali);
       setStep("preview");
     } catch (e) {
@@ -105,6 +107,11 @@ export default function VerificaContattiModal({ fields, onClose, onDone }) {
 
       {step === "preview" && (
         <>
+          {avviso && (
+            <div style={{ marginBottom: 16, padding: 10, border: "1px solid #C9A227", borderRadius: 8, background: "#FFFBEA" }}>
+              <p className="muted small" style={{ margin: 0 }}>{avviso}</p>
+            </div>
+          )}
           {ambigui.length > 0 && (
             <div style={{ marginBottom: 16, padding: 10, border: "1px solid #C77", borderRadius: 8, background: "#FFF5F5" }}>
               <p className="muted small" style={{ margin: 0 }}>
@@ -126,6 +133,7 @@ export default function VerificaContattiModal({ fields, onClose, onDone }) {
               {righe.map((r) => (
                 <div key={r.patientId} style={{ marginBottom: 14 }}>
                   <strong>{r.nome}</strong>
+                  {r.daPosta && <span className="muted small"> (contatto preso dalla posta)</span>}
                   <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 4 }}>
                     {r.proposte.map((p) => {
                       const chiave = `${r.patientId}|${p.campo}`;

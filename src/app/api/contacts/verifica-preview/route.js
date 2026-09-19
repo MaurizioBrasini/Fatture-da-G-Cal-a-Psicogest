@@ -85,11 +85,12 @@ export async function POST() {
         patientId: patient.id,
         nome: patient.nome_calendario || `${patient.nome || ""} ${patient.cognome || ""}`.trim(),
         confidence,
+        daPosta: !!contact.daPosta,
         proposte,
       });
     }
 
-    return NextResponse.json({ righe, ambigui });
+    return NextResponse.json({ righe, ambigui, avviso: contatti.avviso || null });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
