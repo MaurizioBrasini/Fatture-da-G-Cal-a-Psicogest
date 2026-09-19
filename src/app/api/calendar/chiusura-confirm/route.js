@@ -11,6 +11,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent, createChiusuraBlockEvent } from "@/lib/googleCalendar";
+import { titoloChiusura } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -39,6 +40,28 @@ export async function POST(request) {
     );
   }
 
+  // Record della chiusura (finestra + nota): è ciò che permette poi di
+  // modificarla o eliminarla dall'app (vedi schema_addendum14.sql). L'id
+  // dell'evento Google si aggiunge dopo averlo creato.
+  const { data: chiusura, error: chiusuraError } = await supabase
+    .from("calendar_closures")
+    .insert({
+      user_id: user.id,
+      data_inizio: dataInizio,
+      ora_inizio: oraInizio || null,
+      data_fine: dataFine,
+      ora_fine: oraFine || null,
+      note: note || null,
+    })
+    .select("id")
+    .single();
+  if (chiusuraError || !chiusura) {
+    return NextResponse.json(
+      { error: "Errore nel salvare la chiusura: " + (chiusuraError?.message || "record non creato") + " (hai eseguito schema_addendum14.sql?)" },
+      { status: 500 }
+    );
+  }
+
   if (Array.isArray(nuoveChiusure) && nuoveChiusure.length) {
     const { error: insertError } = await supabase.from("slot_closures").insert(
       nuoveChiusure.map((c) => ({
@@ -47,9 +70,12 @@ export async function POST(request) {
         time_of_day: c.time_of_day,
         closure_date: c.closure_date,
         note: c.note || null,
+        closure_id: chiusura.id,
       }))
     );
     if (insertError) {
+      // Niente righe collegate: meglio non lasciare un record di chiusura vuoto.
+      await supabase.from("calendar_closures").delete().eq("id", chiusura.id);
       return NextResponse.json({ error: "Errore nel salvare la chiusura: " + insertError.message }, { status: 500 });
     }
   }
@@ -57,13 +83,14 @@ export async function POST(request) {
   let bloccoCreato = true;
   let bloccoErrore = null;
   try {
-    await createChiusuraBlockEvent(tokenRow.refresh_token, {
+    const evento = await createChiusuraBlockEvent(tokenRow.refresh_token, {
       dataInizio,
       oraInizio: oraInizio || null,
       dataFine,
       oraFine: oraFine || null,
-      titolo: note ? `Indisponibile — ${note}` : "Indisponibile",
+      titolo: titoloChiusura(note),
     });
+    await supabase.from("calendar_closures").update({ google_event_id: evento.id }).eq("id", chiusura.id);
   } catch (e) {
     bloccoCreato = false;
     bloccoErrore = e.message;

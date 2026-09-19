@@ -1225,6 +1225,50 @@ export function computeImpattoChiusura(patientSlots, patients, allEvents, closur
   return { daCancellare, daVerificare, alternanzaCoinvolta };
 }
 
+// Una riga di slot_closures (weekday+ora nominale della fascia + data) cade
+// dentro una finestra di chiusura? Stessa semantica di rilevaConflittiChiusura
+// (ora inizio inclusa, ora fine esclusa, ora assente = nessun limite), ma
+// applicata all'orario nominale della fascia invece che a un evento reale:
+// serve a decidere quali righe di una chiusura già registrata restano valide
+// quando la sua finestra viene modificata.
+export function chiusuraDentroFinestra(riga, { dataInizio, oraInizio, dataFine, oraFine }) {
+  if (riga.closure_date < dataInizio || riga.closure_date > dataFine) return false;
+  const ora = (riga.time_of_day || "").slice(0, 5);
+  if (riga.closure_date === dataInizio && oraInizio && ora < oraInizio.slice(0, 5)) return false;
+  if (riga.closure_date === dataFine && oraFine && ora >= oraFine.slice(0, 5)) return false;
+  return true;
+}
+
+// Modifica di una chiusura già registrata: le righe vecchie ancora dentro la
+// nuova finestra restano ("tenute") anche se l'appuntamento reale che le
+// aveva generate non esiste più — è stato cancellato proprio da quella
+// chiusura, quindi ricalcolare i conflitti solo dal calendario di oggi le
+// perderebbe e libererebbe per errore date ancora chiuse. Le righe fuori
+// dalla nuova finestra vengono "rimosse"; i conflitti reali trovati nella
+// nuova finestra e non già coperti da una riga tenuta sono "aggiunte".
+// Con finestra null (eliminazione) tutte le righe vecchie vengono rimosse.
+export function calcolaRigheChiusuraModificata(righeVecchie, conflittiNuovi, finestra) {
+  const chiave = (r) => `${r.weekday}|${r.time_of_day}|${r.closure_date}`;
+  const tenute = finestra ? righeVecchie.filter((r) => chiusuraDentroFinestra(r, finestra)) : [];
+  const rimosse = finestra ? righeVecchie.filter((r) => !chiusuraDentroFinestra(r, finestra)) : [...righeVecchie];
+  const giaCoperte = new Set(tenute.map(chiave));
+  const aggiunte = finestra ? (conflittiNuovi || []).filter((c) => !giaCoperte.has(chiave(c))) : [];
+  return { tenute, rimosse, aggiunte };
+}
+
+// Titolo dell'evento "occupato" di una chiusura, e il suo inverso: serve a
+// riconoscere sul calendario gli eventi creati dall'app (per recuperare le
+// chiusure registrate prima che esistesse calendar_closures).
+export function titoloChiusura(note) {
+  return note ? `Indisponibile — ${note}` : "Indisponibile";
+}
+
+export function notaDaTitoloChiusura(titolo) {
+  const m = /^Indisponibile(?: — (.+))?$/.exec((titolo || "").trim());
+  if (!m) return undefined; // non è un evento di chiusura creato dall'app
+  return m[1] || null;
+}
+
 // Date attese (occorrenzeFuture) per ogni slot fisso attivo che NON hanno
 // già un evento reale sul calendario. Bug reale 2026-09-11 (Alessandra C.,
 // Flavia e Edoardo, Clara e Christian ricomparsi più volte): prima

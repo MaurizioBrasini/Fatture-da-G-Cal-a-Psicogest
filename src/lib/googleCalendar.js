@@ -1,7 +1,7 @@
 // Usa il refresh token salvato per ottenere un access token fresco da Google,
 // poi legge gli eventi del calendario nel periodo richiesto.
 
-import { addDays } from "./logic.js";
+import { addDays, notaDaTitoloChiusura } from "./logic.js";
 
 async function getAccessToken(refreshToken) {
   const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -260,4 +260,68 @@ export async function createChiusuraBlockEvent(refreshToken, { dataInizio, oraIn
     throw new Error("Creazione dell'evento di chiusura sul calendario fallita: " + text);
   }
   return res.json();
+}
+
+// Elenca gli eventi "occupato" di chiusura creati dall'app (titolo
+// "Indisponibile" oppure "Indisponibile — nota", vedi titoloChiusura) nel
+// periodo richiesto, già riportati alla forma della finestra di chiusura:
+// dataInizio/oraInizio/dataFine/oraFine (ore null = "dall'inizio" / "fino a
+// fine giornata"). Serve a recuperare le chiusure registrate prima che
+// esistesse la tabella calendar_closures. Gli orari di default usati da
+// createChiusuraBlockEvent quando un'ora è vuota (00:00 / 23:59) vengono
+// riportati a null: per il calcolo dei conflitti sono equivalenti a "nessun
+// limite".
+export async function listChiusuraBlockEvents(refreshToken, fromDate, toDate) {
+  const accessToken = await getAccessToken(refreshToken);
+  const timeMin = new Date(fromDate + "T00:00:00").toISOString();
+  const timeMax = new Date(toDate + "T23:59:59").toISOString();
+
+  const risultati = [];
+  let pageToken = undefined;
+  do {
+    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+    url.searchParams.set("timeMin", timeMin);
+    url.searchParams.set("timeMax", timeMax);
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("maxResults", "250");
+    url.searchParams.set("q", "Indisponibile");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("Lettura degli eventi di chiusura fallita: " + text);
+    }
+    const data = await res.json();
+    for (const ev of data.items || []) {
+      if (ev.status === "cancelled") continue;
+      const note = notaDaTitoloChiusura(ev.summary);
+      if (note === undefined) continue; // non è un evento creato dall'app
+
+      if (ev.start?.date) {
+        risultati.push({
+          id: ev.id,
+          note,
+          dataInizio: ev.start.date,
+          oraInizio: null,
+          dataFine: addDays(ev.end.date, -1), // Google: data di fine esclusiva
+          oraFine: null,
+        });
+      } else if (ev.start?.dateTime && ev.end?.dateTime) {
+        const oraInizio = ev.start.dateTime.slice(11, 16);
+        const oraFine = ev.end.dateTime.slice(11, 16);
+        risultati.push({
+          id: ev.id,
+          note,
+          dataInizio: ev.start.dateTime.slice(0, 10),
+          oraInizio: oraInizio === "00:00" ? null : oraInizio,
+          dataFine: ev.end.dateTime.slice(0, 10),
+          oraFine: oraFine === "23:59" ? null : oraFine,
+        });
+      }
+    }
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return risultati;
 }

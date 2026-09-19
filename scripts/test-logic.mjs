@@ -30,6 +30,10 @@ import {
   occorrenzeFuture,
   rilevaConflittiChiusura,
   computeImpattoChiusura,
+  chiusuraDentroFinestra,
+  calcolaRigheChiusuraModificata,
+  titoloChiusura,
+  notaDaTitoloChiusura,
   computeRiprenotazioniPendenti,
   computePazientiConSalto,
   computeOccorrenzeDaGenerare,
@@ -637,6 +641,63 @@ test("computeImpattoChiusura non tocca MAI uno slot la cui fascia non è tra le 
   const { daCancellare } = computeImpattoChiusura(patientSlots, patients, events, closures, nuoveChiusure, 60, "2026-10-01");
   assert.equal(daCancellare.length, 1);
   assert.equal(daCancellare[0].eventId, "ev1"); // solo lo slot davvero coinvolto dalla chiusura, mai "ev2"
+});
+
+// --- modifica/eliminazione di una chiusura già registrata ---
+test("chiusuraDentroFinestra: date intere, ore assenti = nessun limite", () => {
+  const f = { dataInizio: "2026-12-24", oraInizio: null, dataFine: "2027-01-06", oraFine: null };
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2026-12-24", time_of_day: "08:00:00" }, f), true);
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2027-01-06", time_of_day: "20:00:00" }, f), true);
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2026-12-23", time_of_day: "15:00:00" }, f), false);
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2027-01-07", time_of_day: "15:00:00" }, f), false);
+});
+test("chiusuraDentroFinestra: ora inizio inclusa, ora fine esclusa", () => {
+  const f = { dataInizio: "2026-10-05", oraInizio: "14:30", dataFine: "2026-10-05", oraFine: "18:00" };
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2026-10-05", time_of_day: "14:30:00" }, f), true);
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2026-10-05", time_of_day: "14:00:00" }, f), false);
+  assert.equal(chiusuraDentroFinestra({ closure_date: "2026-10-05", time_of_day: "18:00:00" }, f), false);
+});
+test("calcolaRigheChiusuraModificata: accorciando la finestra le righe fuori vengono rimosse e quelle dentro restano anche senza evento reale", () => {
+  const vecchie = [
+    { weekday: 1, time_of_day: "15:00:00", closure_date: "2026-12-28" },
+    { weekday: 1, time_of_day: "15:00:00", closure_date: "2027-01-04" },
+  ];
+  // nuova finestra più corta: il 4/1 esce; il 28/12 non ha più un evento reale (cancellato dalla chiusura stessa) ma deve restare
+  const finestra = { dataInizio: "2026-12-24", oraInizio: null, dataFine: "2026-12-31", oraFine: null };
+  const { tenute, rimosse, aggiunte } = calcolaRigheChiusuraModificata(vecchie, [], finestra);
+  assert.deepEqual(tenute.map((r) => r.closure_date), ["2026-12-28"]);
+  assert.deepEqual(rimosse.map((r) => r.closure_date), ["2027-01-04"]);
+  assert.equal(aggiunte.length, 0);
+});
+test("calcolaRigheChiusuraModificata: allungando la finestra si aggiungono solo i conflitti non già coperti", () => {
+  const vecchie = [{ weekday: 1, time_of_day: "15:00:00", closure_date: "2026-12-28" }];
+  const conflitti = [
+    { weekday: 1, time_of_day: "15:00:00", closure_date: "2026-12-28" }, // già coperto
+    { weekday: 1, time_of_day: "15:00:00", closure_date: "2027-01-11" }, // nuovo
+  ];
+  const finestra = { dataInizio: "2026-12-24", oraInizio: null, dataFine: "2027-01-15", oraFine: null };
+  const { tenute, rimosse, aggiunte } = calcolaRigheChiusuraModificata(vecchie, conflitti, finestra);
+  assert.equal(tenute.length, 1);
+  assert.equal(rimosse.length, 0);
+  assert.deepEqual(aggiunte.map((r) => r.closure_date), ["2027-01-11"]);
+});
+test("calcolaRigheChiusuraModificata: senza finestra (eliminazione) rimuove tutto", () => {
+  const vecchie = [
+    { weekday: 1, time_of_day: "15:00:00", closure_date: "2026-12-28" },
+    { weekday: 3, time_of_day: "18:00:00", closure_date: "2026-12-30" },
+  ];
+  const { tenute, rimosse, aggiunte } = calcolaRigheChiusuraModificata(vecchie, [], null);
+  assert.equal(tenute.length, 0);
+  assert.equal(rimosse.length, 2);
+  assert.equal(aggiunte.length, 0);
+});
+test("titoloChiusura e notaDaTitoloChiusura sono uno l'inverso dell'altro", () => {
+  assert.equal(titoloChiusura("ferie natalizie"), "Indisponibile — ferie natalizie");
+  assert.equal(titoloChiusura(null), "Indisponibile");
+  assert.equal(notaDaTitoloChiusura("Indisponibile — ferie natalizie"), "ferie natalizie");
+  assert.equal(notaDaTitoloChiusura("Indisponibile"), null);
+  assert.equal(notaDaTitoloChiusura("Indisponibile per lavori"), undefined); // non creato dall'app
+  assert.equal(notaDaTitoloChiusura("Mario R."), undefined);
 });
 
 // --- computeRiprenotazioniPendenti ---

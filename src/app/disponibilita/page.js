@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
+import ChiusureCalendarioModal from "@/components/ChiusureCalendarioModal";
 import { computeGrigliaDisponibilita, todayISO, formatDataItaliana } from "@/lib/logic";
 
 // Il venerdì non è più un giorno dedicato ai pazienti (vedi richiesta
@@ -36,6 +37,7 @@ export default function DisponibilitaPage() {
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
+  const [chiusureAperte, setChiusureAperte] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,8 +116,11 @@ export default function DisponibilitaPage() {
           </div>
           <div className="header-actions">
             <span className="muted small">aggiornato al {formatDataItaliana(todayISO())}</span>
+            <button className="btn btn-ghost" onClick={() => setChiusureAperte(true)}>Chiusure calendario</button>
           </div>
         </header>
+
+        {chiusureAperte && <ChiusureCalendarioModal onClose={() => setChiusureAperte(false)} />}
 
         {slotVenerdi.length > 0 && (
           <div className="error-box" style={{ marginBottom: 16 }}>
