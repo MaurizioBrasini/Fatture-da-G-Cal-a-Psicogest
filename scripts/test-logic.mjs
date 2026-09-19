@@ -188,6 +188,18 @@ test("buildInvoiceRow: fatturaDATAPAGAMENTO non è presente come chiave (non pag
   const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-15", 1, 100);
   assert.ok(!("fatturaDATAPAGAMENTO" in row));
 });
+test("buildInvoiceRow: bonifico → l'IBAN dello studio finisce nelle note", () => {
+  const patient = { costo_unitario: 80, tipologia: "individuale", regime_tariffario: "regolare", modalita_pagamento: "Bonifico" };
+  const computed = { count: 1, usati: [{ data: "2026-01-10" }], ultimaData: "2026-01-10" };
+  const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-15", 1, 100);
+  assert.ok(row.fatturaNOTE.includes("IT16D0305801604100572116459"));
+});
+test("buildInvoiceRow: contante → nessun IBAN nelle note", () => {
+  const patient = { costo_unitario: 80, tipologia: "individuale", regime_tariffario: "regolare", modalita_pagamento: "Contante" };
+  const computed = { count: 1, usati: [{ data: "2026-01-10" }], ultimaData: "2026-01-10" };
+  const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-15", 1, 100);
+  assert.ok(!row.fatturaNOTE.includes("IT16"));
+});
 
 // --- buildPsicogestAnagraficaRow: export anagrafica per l'import Psicogest ---
 test("buildPsicogestAnagraficaRow: valorizza nome/cognome/CF e i default fissi", () => {

@@ -589,6 +589,12 @@ export function importoLordoDaOnorario(onorario) {
   return Math.round(onorario * 1.02 * 100) / 100;
 }
 
+// IBAN dello studio, stampato sulle fatture pagate con bonifico. Nelle fatture
+// fatte a mano su Psicogest (es. 141) compare nel blocco "Coordinate
+// bancarie", ma lo schema di import fatture non ha nessuna colonna per
+// questo campo: l'unico posto dove può viaggiare è fatturaNOTE.
+export const IBAN_STUDIO = "IT16D0305801604100572116459";
+
 export function buildInvoiceRow(patient, computed, settings, dataFattura, fatturaID, fatturaNumero) {
   const count = computed.count;
 
@@ -622,6 +628,17 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
   const dal = date[0] || computed.ultimaData || dataFattura;
   const al = date[date.length - 1] || computed.ultimaData || dataFattura;
 
+  const modoPagamento = patient.modalita_pagamento || "Bonifico";
+  const noteSedute =
+    dal === al
+      ? `n. ${count} sedute (${prestazione}) - il ${dal}`
+      : `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`;
+  // L'IBAN serve solo a chi paga con bonifico (le fatture in contanti, come
+  // la 140, non hanno le coordinate bancarie).
+  const note = /bonifico/i.test(modoPagamento)
+    ? `${noteSedute} - Coordinate bancarie: ${IBAN_STUDIO}`
+    : noteSedute;
+
   const row = {
     pazienteID: patient.codice_fiscale || "",
     // fatturaID è un numero progressivo ≥1 richiesto dal validatore di
@@ -634,7 +651,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     fatturaNUMERO: fatturaNumero,
     fatturaANNO: new Date(dataFattura).getFullYear(),
     fatturaDATA: toDateObj(dataFattura),
-    fatturaMODOPAGAMENTO: patient.modalita_pagamento || "Bonifico",
+    fatturaMODOPAGAMENTO: modoPagamento,
     fatturaPRESTAZIONE: prestazioneRiga,
     "fatturaIMPONIBILE SANITARIO": onorario,
     fatturaONORARIO: onorario,
@@ -649,10 +666,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     fatturaBOLLOACARICOPAZ: "no",
     fatturaTOTALE: totale,
     fatturaTOTALEDAPAGARE: totale,
-    fatturaNOTE:
-      dal === al
-        ? `n. ${count} sedute (${prestazione}) - il ${dal}`
-        : `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`,
+    fatturaNOTE: note,
     // fatturaDATAPAGAMENTO va compilata solo quando il paziente ha
     // effettivamente pagato; per ora resta omessa (non stringa vuota, che
     // manderebbe in errore il parser data di Psicogest) e andrà valorizzata
