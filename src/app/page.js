@@ -246,7 +246,7 @@ export default function DashboardPage() {
   }, [patients, events, settings, cancellazioni]);
 
   const groups = useMemo(() => {
-    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [] };
+    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [], concluso: [] };
     patients.forEach((p) => {
       const st = computed[p.id];
       if (st) g[st.stato].push(p);
@@ -884,6 +884,43 @@ export default function DashboardPage() {
             )}
           </div>
         </section>
+
+        {groups.concluso.length > 0 && (
+          <section className="section">
+            <div className="section-head">
+              <h2>Conclusi — sedute fatte e non ancora fatturate ({groups.concluso.length})</h2>
+            </div>
+            <div className="section-body">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Paziente</th>
+                    <th>Sedute accumulate</th>
+                    <th>Ultima seduta</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.concluso.map((p) => {
+                    const c = computed[p.id];
+                    return (
+                      <tr key={p.id}>
+                        <td className="name">{p.nome_calendario || p.fatturare_a}</td>
+                        <td className="mono">{c.count}</td>
+                        <td className="mono">{c.ultimaData}</td>
+                        <td>
+                          <button className="btn btn-small" disabled={disabled || !p.codice_fiscale} onClick={() => forceClose(p.id)}>
+                            Fattura ora
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         <section className="section">
           <div className="section-head">

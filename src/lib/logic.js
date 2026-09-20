@@ -573,6 +573,11 @@ export function computePatientState(patient, events, settings, cancellazioni = [
   let stato = "senza_sedute";
   if (patient.stato === "sospeso") {
     stato = count > 0 ? "sospeso" : "senza_sedute";
+  } else if (patient.stato === "concluso") {
+    // Percorso chiuso (es. dopo il primo incontro): mai "in corso" né "da
+    // valutare" per inattività, ma le sedute già fatte e non ancora
+    // fatturate restano visibili (sezione "Conclusi", con "Fattura ora").
+    stato = count > 0 ? "concluso" : "senza_sedute";
   } else if (count > 0 && count >= soglia) stato = "pronto";
   else if (count > 0 && ultimaData && daysBetween(ultimaData, oggi) >= giorniStale) stato = "da_valutare";
   else if (count > 0) stato = "in_corso";

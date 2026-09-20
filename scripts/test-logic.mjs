@@ -137,6 +137,18 @@ test("computePatientState: paziente sospeso resta 'sospeso' anche sopra soglia",
   assert.equal(st.stato, "sospeso");
 });
 
+test("computePatientState: paziente concluso con sedute non va mai in 'in_corso'/'da_valutare'/'pronto'", () => {
+  const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
+  const poche = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 5 };
+  assert.equal(computePatientState(poche, events, DEFAULT_SETTINGS).stato, "concluso");
+  const molte = { ...poche, ancora_valore: 9 };
+  assert.equal(computePatientState(molte, events, DEFAULT_SETTINGS).stato, "concluso");
+});
+test("computePatientState: paziente concluso senza sedute -> 'senza_sedute'", () => {
+  const patient = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 5 };
+  assert.equal(computePatientState(patient, [], DEFAULT_SETTINGS).stato, "senza_sedute");
+});
+
 // Regressione 2026-09-08: due pazienti che condividono lo stesso nome di
 // battesimo (es. reale "Francesco All./Man./Mer.") non devono mai contare
 // un evento ambiguo (titolo col solo nome, senza l'iniziale del cognome) per

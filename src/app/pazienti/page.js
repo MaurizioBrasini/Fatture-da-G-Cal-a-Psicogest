@@ -438,6 +438,33 @@ export default function PazientiPage() {
     alert(`Fatto: ${data.cancellati} appuntamenti non confermati rimossi, ${data.mantenuti} già confermati mantenuti.${avviso}`);
   }
 
+  // Cambio di stato (Attivo / In sospeso / Concluso). "Concluso" (percorso
+  // terminato, es. una coppia che dopo il primo incontro non prosegue) porta
+  // con sé lo stesso sgancio dallo slot fisso di "Su richiesta": stessa
+  // chiamata di uscita, poi lo stato viene scritto solo se è andata a buon
+  // fine — così un errore non lascia il paziente "concluso" con lo slot
+  // ancora attivo che continuerebbe a generare appuntamenti.
+  async function cambiaStato(patient, nuovoStato) {
+    if (nuovoStato !== "concluso") {
+      await updateField(patient.id, "stato", nuovoStato);
+      return;
+    }
+    const nome = patient.nome_calendario || patient.fatturare_a;
+    const haSlot = !!slotsByPatientId[patient.id];
+    const testo = haSlot
+      ? `Segnare ${nome} come concluso? Lo slot fisso verrà disattivato (frequenza "su richiesta") e gli appuntamenti futuri NON ancora confermati verranno rimossi dal calendario — quelli già confermati col paziente restano.`
+      : `Segnare ${nome} come concluso?`;
+    if (!window.confirm(testo)) return;
+    if (haSlot) {
+      const data = await eseguiUscita(patient);
+      if (!data) return;
+      if (data.cancellazioniFallite?.length) {
+        alert(`Attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova o rimuovile a mano da Google Calendar.`);
+      }
+    }
+    await updateField(patient.id, "stato", "concluso");
+  }
+
   // Cambio di programmazione quando il nuovo assetto è già deciso: incatena
   // Uscita (sgancio immediato dallo schema attuale, sopra) e Rientro (sotto,
   // "Nuovo slot fisso" — stesso meccanismo di un paziente che riparte da
@@ -980,9 +1007,10 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.stato && (
                   <td>
-                    <select value={p.stato} onChange={(e) => updateField(p.id, "stato", e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura">
+                    <select value={p.stato} onChange={(e) => cambiaStato(p, e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura. Concluso: percorso terminato, lo slot passa a 'su richiesta'.">
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
+                      <option value="concluso">Concluso</option>
                     </select>
                   </td>
                   )}
