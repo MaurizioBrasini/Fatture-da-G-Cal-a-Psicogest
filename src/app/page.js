@@ -359,8 +359,14 @@ export default function DashboardPage() {
       totale_sedute: r._count,
       onorario: r._onorario,
       note: r.fatturaNOTE,
+      numero: Number(r.fatturaNUMERO) || null,
     }));
-    await supabase.from("invoice_history").insert(histRows);
+    // Se la colonna "numero" non esiste ancora (schema_addendum16 non
+    // eseguito) riprova senza: la fattura va registrata comunque.
+    const { error: histError } = await supabase.from("invoice_history").insert(histRows);
+    if (histError) {
+      await supabase.from("invoice_history").insert(histRows.map(({ numero, ...r }) => r));
+    }
     await supabase.from("pending_batch").delete().eq("user_id", pendingBatch.user_id);
 
     // Ricorda il numero successivo suggerito per il prossimo batch, in base

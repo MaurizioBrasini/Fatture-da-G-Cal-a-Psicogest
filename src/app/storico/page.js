@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
-import { importoLordoDaOnorario } from "@/lib/logic";
+import RigeneraFattureModal from "@/components/RigeneraFattureModal";
+import { importoLordoDaOnorario, DEFAULT_SETTINGS } from "@/lib/logic";
 
 export default function StoricoPage() {
   const supabase = createClient();
@@ -10,18 +11,25 @@ export default function StoricoPage() {
   const [loading, setLoading] = useState(true);
 
   const [patientsById, setPatientsById] = useState({});
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [selected, setSelected] = useState({});
+  const [rigenera, setRigenera] = useState(false);
+
+  const load = useCallback(async () => {
+    const [{ data }, { data: patients }, { data: s }] = await Promise.all([
+      supabase.from("invoice_history").select("*").order("data", { ascending: false }),
+      supabase.from("patients").select("*"),
+      supabase.from("settings").select("*").maybeSingle(),
+    ]);
+    setHistory(data || []);
+    setPatientsById(Object.fromEntries((patients || []).map((p) => [p.id, p])));
+    if (s) setSettings(s);
+    setLoading(false);
+  }, [supabase]);
 
   useEffect(() => {
-    (async () => {
-      const [{ data }, { data: patients }] = await Promise.all([
-        supabase.from("invoice_history").select("*").order("data", { ascending: false }),
-        supabase.from("patients").select("id, nome, cognome, nome_calendario, fatturare_a"),
-      ]);
-      setHistory(data || []);
-      setPatientsById(Object.fromEntries((patients || []).map((p) => [p.id, p])));
-      setLoading(false);
-    })();
-  }, [supabase]);
+    load();
+  }, [load]);
 
   // Tutto maiuscolo qui volutamente (a differenza di Pazienti/Dashboard, che
   // usano il lettering "solo iniziali"): lo storico fatture segue la
@@ -41,6 +49,29 @@ export default function StoricoPage() {
     return importoLordoDaOnorario(h.onorario);
   }
 
+  const selezionate = history.filter((h) => selected[h.id]);
+
+  // Aggiorna le righe dello storico dopo aver rifatto l'Excel. Se la colonna
+  // "numero" non esiste ancora (schema_addendum16 non eseguito) riprova senza:
+  // il file è già stato scaricato, non deve andare perso per questo.
+  async function aggiornaStorico(aggiornamenti) {
+    let numeroNonSalvato = false;
+    for (const { id, numero, patch } of aggiornamenti) {
+      let { error } = await supabase.from("invoice_history").update({ ...patch, numero }).eq("id", id);
+      if (error) {
+        numeroNonSalvato = true;
+        ({ error } = await supabase.from("invoice_history").update(patch).eq("id", id));
+        if (error) throw error;
+      }
+    }
+    setRigenera(false);
+    setSelected({});
+    await load();
+    if (numeroNonSalvato) {
+      window.alert("Excel scaricato e storico aggiornato, ma il numero di fattura non è stato salvato: esegui schema_addendum16.sql su Supabase.");
+    }
+  }
+
   if (loading) return <div style={{ padding: 40 }}>Caricamento…</div>;
 
   return (
@@ -52,17 +83,33 @@ export default function StoricoPage() {
             <h1>Storico fatture</h1>
             <p className="sub">Registro dei batch confermati come caricati su Psicogest.</p>
           </div>
+          {history.length > 0 && (
+            <button className="btn btn-primary" disabled={!selezionate.length} onClick={() => setRigenera(true)}>
+              Rigenera Excel{selezionate.length ? ` (${selezionate.length})` : ""}
+            </button>
+          )}
         </header>
         {history.length === 0 ? (
           <div className="empty-row">Nessuna fattura confermata finora.</div>
         ) : (
           <table className="tbl">
             <thead>
-              <tr><th>Data</th><th>Paziente</th><th>Codice fiscale</th><th>Sedute</th><th>Importo</th><th>Note</th></tr>
+              <tr>
+                <th style={{ width: 28 }}></th>
+                <th>N.</th><th>Data</th><th>Paziente</th><th>Codice fiscale</th><th>Sedute</th><th>Importo</th><th>Note</th>
+              </tr>
             </thead>
             <tbody>
               {history.map((h) => (
                 <tr key={h.id}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={!!selected[h.id]}
+                      onChange={() => setSelected((s) => ({ ...s, [h.id]: !s[h.id] }))}
+                    />
+                  </td>
+                  <td className="mono">{h.numero || "—"}</td>
                   <td className="mono">{h.data}</td>
                   <td className="name">{nomePaziente(h)}</td>
                   <td className="mono">{h.codice_fiscale}</td>
@@ -75,6 +122,16 @@ export default function StoricoPage() {
           </table>
         )}
       </main>
+      {rigenera && (
+        <RigeneraFattureModal
+          fatture={selezionate}
+          patientsById={patientsById}
+          settings={settings}
+          nomePaziente={nomePaziente}
+          onClose={() => setRigenera(false)}
+          onDone={aggiornaStorico}
+        />
+      )}
     </div>
   );
 }
