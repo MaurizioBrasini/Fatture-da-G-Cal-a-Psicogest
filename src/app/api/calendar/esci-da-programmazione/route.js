@@ -77,9 +77,14 @@ export async function POST(request) {
     const futuriPaziente = events.filter(
       (e) => e.data > oggi && matchPatientForEvent(e.titolo, patients)?.patient.id === patientId
     );
-    const daRimuovere = futuriPaziente.filter(
-      (e) => e.colorId === "6" && fasceDisattivate.has(`${weekdayOf(e.data)}|${e.ora}`)
-    );
+    // eliminaTutti (paziente "concluso"): il percorso è chiuso, quindi anche
+    // gli appuntamenti già confermati vanno tolti — non hanno più senso e
+    // altrimenti resterebbero a calendario come buche.
+    const daRimuovere = body.eliminaTutti
+      ? futuriPaziente
+      : futuriPaziente.filter(
+          (e) => e.colorId === "6" && fasceDisattivate.has(`${weekdayOf(e.data)}|${e.ora}`)
+        );
     const mantenuti = futuriPaziente.length - daRimuovere.length;
 
     let cancellati = 0;

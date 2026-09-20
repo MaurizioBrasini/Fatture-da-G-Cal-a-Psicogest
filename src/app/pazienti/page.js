@@ -402,12 +402,12 @@ export default function PazientiPage() {
   // dati della risposta (null se annullato o fallito) così sia "Su
   // richiesta" (uscita e basta) sia "Cambia programmazione" (uscita seguita
   // subito da un nuovo slot) possono riusare la stessa identica chiamata.
-  async function eseguiUscita(patient) {
+  async function eseguiUscita(patient, eliminaTutti = false) {
     try {
       const res = await fetch("/api/calendar/esci-da-programmazione", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId: patient.id }),
+        body: JSON.stringify({ patientId: patient.id, eliminaTutti }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -450,17 +450,12 @@ export default function PazientiPage() {
       return;
     }
     const nome = patient.nome_calendario || patient.fatturare_a;
-    const haSlot = !!slotsByPatientId[patient.id];
-    const testo = haSlot
-      ? `Segnare ${nome} come concluso? Lo slot fisso verrà disattivato (frequenza "su richiesta") e gli appuntamenti futuri NON ancora confermati verranno rimossi dal calendario — quelli già confermati col paziente restano.`
-      : `Segnare ${nome} come concluso?`;
-    if (!window.confirm(testo)) return;
-    if (haSlot) {
-      const data = await eseguiUscita(patient);
-      if (!data) return;
-      if (data.cancellazioniFallite?.length) {
-        alert(`Attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, riprova o rimuovile a mano da Google Calendar.`);
-      }
+    if (!window.confirm(`Segnare ${nome} come concluso? Lo slot fisso verrà disattivato (frequenza "su richiesta") e TUTTI gli appuntamenti futuri, anche quelli già confermati, verranno eliminati dal calendario.`)) return;
+    // Anche senza slot: può esserci un appuntamento futuro prenotato dal link.
+    const data = await eseguiUscita(patient, true);
+    if (!data) return;
+    if (data.cancellazioniFallite?.length) {
+      alert(`Attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, rimuovile a mano da Google Calendar.`);
     }
     await updateField(patient.id, "stato", "concluso");
   }
@@ -1007,7 +1002,7 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.stato && (
                   <td>
-                    <select value={p.stato} onChange={(e) => cambiaStato(p, e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura. Concluso: percorso terminato, lo slot passa a 'su richiesta'.">
+                    <select value={p.stato} onChange={(e) => cambiaStato(p, e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura. Concluso: percorso terminato, slot a 'su richiesta' e tutti gli appuntamenti futuri eliminati.">
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
                       <option value="concluso">Concluso</option>
