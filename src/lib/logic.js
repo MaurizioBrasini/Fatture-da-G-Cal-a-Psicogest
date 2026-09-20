@@ -576,9 +576,11 @@ export function computePatientState(patient, events, settings, cancellazioni = [
     stato = count > 0 ? "sospeso" : "senza_sedute";
   } else if (patient.stato === "concluso") {
     // Percorso chiuso (es. dopo il primo incontro): mai "in corso" né "da
-    // valutare" per inattività, ma le sedute già fatte e non ancora
-    // fatturate restano visibili (sezione "Conclusi", con "Fattura ora").
-    stato = count > 0 ? "concluso" : "senza_sedute";
+    // valutare" per inattività. Se ha raggiunto la soglia è "pronto" come
+    // chiunque altro (entra nell'elenco normale delle fatture da generare);
+    // sotto soglia le sedute fatte e non ancora fatturate restano visibili
+    // nella sezione "Conclusi", con "Fattura ora".
+    stato = count > 0 && count >= soglia ? "pronto" : count > 0 ? "concluso" : "senza_sedute";
   } else if (count > 0 && count >= soglia) stato = "pronto";
   else if (count > 0 && ultimaData && daysBetween(ultimaData, oggi) >= giorniStale) stato = "da_valutare";
   else if (count > 0) stato = "in_corso";
@@ -646,7 +648,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     : noteSedute;
 
   const row = {
-    pazienteID: patient.codice_fiscale || "",
+    pazienteID: (patient.codice_fiscale || "").trim(),
     // fatturaID è un numero progressivo ≥1 richiesto dal validatore di
     // Psicogest (riferimento interno al file di import, non il numero di
     // fattura definitivo). fatturaNUMERO invece è il vero numero di

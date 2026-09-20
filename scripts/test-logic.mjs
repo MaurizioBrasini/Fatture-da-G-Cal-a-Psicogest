@@ -137,12 +137,15 @@ test("computePatientState: paziente sospeso resta 'sospeso' anche sopra soglia",
   assert.equal(st.stato, "sospeso");
 });
 
-test("computePatientState: paziente concluso con sedute non va mai in 'in_corso'/'da_valutare'/'pronto'", () => {
+test("computePatientState: paziente concluso sotto soglia -> 'concluso', mai 'in_corso'/'da_valutare'", () => {
   const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
   const poche = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 5 };
   assert.equal(computePatientState(poche, events, DEFAULT_SETTINGS).stato, "concluso");
-  const molte = { ...poche, ancora_valore: 9 };
-  assert.equal(computePatientState(molte, events, DEFAULT_SETTINGS).stato, "concluso");
+});
+test("computePatientState: paziente concluso che ha raggiunto la soglia -> 'pronto' (caso reale Paola e Antonello, soglia 1)", () => {
+  const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
+  const patient = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 1 };
+  assert.equal(computePatientState(patient, events, DEFAULT_SETTINGS).stato, "pronto");
 });
 test("computePazientiConSalto: un paziente concluso non compare mai tra quelli da ricontattare", () => {
   const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
