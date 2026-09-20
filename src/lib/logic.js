@@ -1114,27 +1114,108 @@ export function computePrenotazioniPreview(events, patients) {
 // limite per persona: solo massimo giornaliero totale, buffer e finestra).
 // Due appuntamenti dello stesso paziente devono distare almeno 14 giorni.
 export const GIORNI_MIN_TRA_PRENOTAZIONI = 14;
+// Quanto indietro leggere il calendario per la regola: per i pazienti con slot
+// fisso serve almeno la cadenza più lunga (mensile, 28 giorni).
+export const GIORNI_LOOKBACK_PRENOTAZIONI = 28;
+// Pazienti con slot fisso: un recupero deve distare almeno questi giorni da
+// ogni altro appuntamento in agenda (richiesta di Maurizio: "5, forse 7", scelto 6).
+// Per cadenze corte si scende a metà cadenza (settimanale: 3).
+export const GIORNI_MIN_DA_APPUNTAMENTO = 6;
 
 // Individua le prenotazioni online (righe di computePrenotazioniPreview con
 // paziente abbinato) che violano la regola: restituisce {eventId: [{data,
-// ora, tipo}]} con gli appuntamenti con cui confliggono. Si applica SOLO ai
-// pazienti senza slot fisso attivo ("su richiesta"/fuori schema): uno a
-// cadenza settimanale ha per costruzione 2 appuntamenti ogni 14 giorni, e
-// una sua prenotazione dal link serve a sostituirne uno disdetto.
+// ora, tipo}]} con gli appuntamenti con cui confliggono. Per i pazienti senza
+// slot fisso attivo ("su richiesta"/fuori schema) vale la regola dei 14
+// giorni; per quelli con slot fisso vale la loro cadenza (vedi sotto).
 // Il confronto è con (a) gli appuntamenti già presenti a calendario abbinati
 // al paziente per titolo — passati inclusi, "una seduta 5 giorni fa" conta —
 // senza quelli con nota "disdett*", e (b) le prenotazioni precedenti dello
 // stesso paziente NON in conflitto: in ordine cronologico la prima resta, le
 // successive vicine no. Non scrive nulla.
+//
+// Pazienti CON slot fisso attivo (regola di Maurizio, 2026-09-20): vale la
+// loro cadenza (interval_days), non i 14 giorni. Chi disdice può recuperare,
+// ma non aumentare la frequenza senza il suo consenso. Ogni seduta prevista
+// dallo slot (occorrenzeFuture, chiusure comprese) è "occupata" dall'appuntamento
+// reale più vicino a meno di interval_days; una prenotazione online è legittima
+// solo se trova una seduta prevista ancora libera (disdetta o mai fissata) entro
+// interval_days-1 giorni, prima o dopo. Se sono tutte occupate è un'aggiunta:
+// conflitto. Gli appuntamenti veri occupano per primi (sono fatti), poi le
+// prenotazioni in ordine cronologico. Serve che gli slot abbiano interval_days
+// e anchor_date; senza, il paziente resta escluso come prima. Opzioni:
+// closures (righe slot_closures) per le date spostate dalle chiusure.
+function conflittiSlotFisso(slot, righePaz, esistentiPaz, closures) {
+  const reach = slot.interval_days;
+  const tutte = [...esistentiPaz.map((e) => e.data), ...righePaz.map((r) => r.data)].sort();
+  const inizio = addDays(tutte[0], -reach);
+  const fine = addDays(tutte[tutte.length - 1], reach);
+  const previste = occorrenzeFuture(slot, closures, Math.abs(daysBetween(inizio, fine)), inizio).map((data) => ({ data, da: null }));
+
+  // Occupa la seduta libera più vicina (a pari distanza la prima) entro reach-1 giorni.
+  const occupa = (data, chi) => {
+    let migliore = null;
+    let dMigliore = Infinity;
+    for (const p of previste) {
+      const d = Math.abs(daysBetween(p.data, data));
+      if (d >= reach) continue;
+      if (!p.da && d < dMigliore) {
+        migliore = p;
+        dMigliore = d;
+      }
+    }
+    if (migliore) migliore.da = chi;
+    return !!migliore;
+  };
+
+  for (const e of [...esistentiPaz].sort((a, b) => (a.data + a.ora).localeCompare(b.data + b.ora))) {
+    occupa(e.data, { data: e.data, ora: e.ora, tipo: "appuntamento", cadenza: reach });
+  }
+  const esito = {};
+  const tenute = [];
+  const distanzaMin = Math.min(GIORNI_MIN_DA_APPUNTAMENTO, Math.floor(reach / 2));
+  const ordinate = [...righePaz].sort((a, b) => (a.data + (a.ora || "")).localeCompare(b.data + (b.ora || "")));
+  for (const r of ordinate) {
+    // Un recupero troppo a ridosso di un altro appuntamento in agenda è inutile
+    // (e lascia il rischio che il paziente disdica quello, aprendo un altro buco).
+    const stretti = [...esistentiPaz.map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento" })), ...tenute]
+      .filter((x) => Math.abs(daysBetween(x.data, r.data)) < distanzaMin)
+      .map((x) => ({ ...x, cadenza: reach, troppoVicina: distanzaMin }));
+    if (stretti.length) {
+      esito[r.eventId] = stretti;
+      continue;
+    }
+    if (occupa(r.data, { data: r.data, ora: r.ora, tipo: "prenotazione", cadenza: reach })) {
+      tenute.push({ data: r.data, ora: r.ora, tipo: "prenotazione" });
+      continue;
+    }
+    // Nessuna seduta libera: si segnalano gli appuntamenti che occupano quelle vicine.
+    const vicini = previste.filter((p) => p.da && Math.abs(daysBetween(p.data, r.data)) < reach).map((p) => p.da);
+    if (vicini.length) esito[r.eventId] = vicini;
+  }
+  return esito;
+}
+
 export function computeConflittiPrenotazioni(righe, events, patients, slots, opzioni = {}) {
   const minGiorni = opzioni.minGiorni ?? GIORNI_MIN_TRA_PRENOTAZIONI;
-  const conSlot = new Set((slots || []).filter((s) => s.active).map((s) => s.patient_id));
+  const slotAttivi = (slots || []).filter((s) => s.active);
+  const conSlot = new Set(slotAttivi.map((s) => s.patient_id));
   const esistenti = (events || []).filter(
     (e) => e.ora && !BOOKING_TITLE_REGEX.test(e.titolo || "") && !DISDETTA_REGEX.test(e.descrizione || "")
   );
   const tenute = {};
   const conflitti = {};
   const ordinate = [...(righe || [])].sort((a, b) => (a.data + (a.ora || "")).localeCompare(b.data + (b.ora || "")));
+
+  // Pazienti con slot fisso: regola della cadenza (vedi conflittiSlotFisso).
+  const idFissi = [...new Set(ordinate.filter((r) => r.patientId && conSlot.has(r.patientId)).map((r) => r.patientId))];
+  for (const id of idFissi) {
+    const slot = slotAttivi.find((s) => s.patient_id === id && s.interval_days && s.anchor_date);
+    if (!slot) continue;
+    const righePaz = ordinate.filter((r) => r.patientId === id);
+    const esistentiPaz = esistenti.filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === id);
+    Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, esistentiPaz, opzioni.closures));
+  }
+
   for (const r of ordinate) {
     if (!r.patientId || conSlot.has(r.patientId)) continue;
     const vicini = [];

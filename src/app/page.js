@@ -1333,8 +1333,23 @@ export default function DashboardPage() {
                                 <tr>
                                   <td colSpan={3}>
                                     <div className="error-box" style={{ marginBottom: 8 }}>
-                                      <strong>Troppo vicina a un altro appuntamento</strong> — un solo appuntamento ogni due
-                                      settimane. Già presente:{" "}
+                                      {r.conflitto[0]?.troppoVicina ? (
+                                        <>
+                                          <strong>Troppo a ridosso di un altro appuntamento</strong> — meno di{" "}
+                                          {r.conflitto[0].troppoVicina} giorni: rischio di lasciare un buco se il paziente disdice
+                                          quello in agenda. Già presente:
+                                        </>
+                                      ) : r.conflitto[0]?.cadenza ? (
+                                        <>
+                                          <strong>Frequenza già coperta</strong> — nessuna seduta disdetta da recuperare
+                                          (cadenza ogni {r.conflitto[0].cadenza} giorni): sarebbe una seduta in più. Già presente:
+                                        </>
+                                      ) : (
+                                        <>
+                                          <strong>Troppo vicina a un altro appuntamento</strong> — un solo appuntamento ogni due
+                                          settimane. Già presente:
+                                        </>
+                                      )}{" "}
                                       {r.conflitto
                                         .map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` ${c.ora}` : ""}${c.tipo === "prenotazione" ? " (altra prenotazione)" : ""}`)
                                         .join(", ")}
@@ -1348,7 +1363,7 @@ export default function DashboardPage() {
                                         Cancella la prenotazione e avvisa il paziente via email
                                       </label>
                                       <span className="muted small">
-                                        Deselezionando, la prenotazione viene riconnessa normalmente.
+                                        Deselezionando (concedi l'eccezione), la prenotazione viene riconnessa normalmente.
                                       </span>
                                     </div>
                                   </td>
@@ -1373,7 +1388,7 @@ export default function DashboardPage() {
                             return (
                               <li key={r.eventId}>
                                 {r.bookerNome} ({r.data}) → {p ? `${p.nome || ""} ${p.cognome || ""}`.trim() : `paziente #${r.patientId}`}
-                                {r.conflitto && " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)"}
+                                {r.conflitto && (r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
                               </li>
                             );
                           })}

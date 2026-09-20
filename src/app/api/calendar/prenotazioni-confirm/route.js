@@ -33,7 +33,7 @@ import {
   computePrenotazioniPreview,
   computeConflittiPrenotazioni,
   formatDataItaliana,
-  GIORNI_MIN_TRA_PRENOTAZIONI,
+  GIORNI_LOOKBACK_PRENOTAZIONI,
   DEFAULT_SETTINGS,
   todayISO,
   addDays,
@@ -59,14 +59,16 @@ export async function POST(request) {
     { data: settingsRow },
     { data: slots, error: slotsError },
     { data: tokenRow, error: tokenError },
+    { data: closures, error: closuresError },
   ] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("settings").select("*").maybeSingle(),
-    supabase.from("patient_slots").select("patient_id, active"),
+    supabase.from("patient_slots").select("*"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
+    supabase.from("slot_closures").select("*"),
   ]);
-  if (patientsError || slotsError) {
-    return NextResponse.json({ error: (patientsError || slotsError).message }, { status: 500 });
+  if (patientsError || slotsError || closuresError) {
+    return NextResponse.json({ error: (patientsError || slotsError || closuresError).message }, { status: 500 });
   }
 
   if (tokenError || !tokenRow) {
@@ -87,7 +89,7 @@ export async function POST(request) {
       // toccare qualunque evento.
       eventiLarghi = await fetchGoogleCalendarEvents(
         tokenRow.refresh_token,
-        addDays(oggi, -(GIORNI_MIN_TRA_PRENOTAZIONI - 1)),
+        addDays(oggi, -GIORNI_LOOKBACK_PRENOTAZIONI),
         addDays(oggi, 180)
       );
     } catch (e) {
@@ -95,7 +97,7 @@ export async function POST(request) {
     }
     const { pronte, inAttesa } = computePrenotazioniPreview(eventiLarghi.filter((e) => e.data >= oggi), patients || []);
     const righe = [...pronte, ...inAttesa];
-    const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || []);
+    const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || [], { closures: closures || [] });
 
     for (const rf of rifiuti) {
       const riga = righe.find((r) => r.eventId === rf.eventId);
@@ -132,6 +134,7 @@ export async function POST(request) {
               oraPrenotazione: riga.ora,
               conflittiTesto: conflitto.map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` alle ${c.ora}` : ""}`).join(", "),
               linkPrenotazioni: settingsRow?.link_prenotazioni_online,
+              frequenzaFissa: !!conflitto[0]?.cadenza,
             }),
           });
         } catch (e) {

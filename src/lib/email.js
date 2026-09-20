@@ -59,7 +59,18 @@ export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni })
 // appuntamento a meno di due settimane (regola "un solo appuntamento ogni due
 // settimane"). `conflitti` = [{data "YYYY-MM-DD", ora}] già formattati come
 // testo dal chiamante; `dataPrenotazione`/`oraPrenotazione` idem.
-export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni }) {
+export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa }) {
+  // Paziente con frequenza concordata: nessun rimando al link, per aumentare
+  // le sedute deve parlarne con il dottore.
+  if (frequenzaFissa) {
+    return testoInHtml(
+      `Gentile ${nomePaziente},\n\n` +
+        `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+        `perché la frequenza degli incontri concordata è già coperta dagli appuntamenti già fissati (${conflittiTesto}).\n\n` +
+        `Se desidera aggiungere o anticipare un incontro, la prego di contattarmi direttamente.\n\n` +
+        `Cordiali saluti,\nDr. Maurizio Brasini`
+    );
+  }
   return testoInHtml(
     `Gentile ${nomePaziente},\n\n` +
       `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +

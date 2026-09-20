@@ -13,7 +13,7 @@ import {
   computePrenotazioniPreview,
   computeConflittiPrenotazioni,
   BOOKING_COLOR_ID,
-  GIORNI_MIN_TRA_PRENOTAZIONI,
+  GIORNI_LOOKBACK_PRENOTAZIONI,
   todayISO,
   addDays,
 } from "@/lib/logic";
@@ -33,15 +33,17 @@ export async function POST(request) {
     { data: patients, error: patientsError },
     { data: slots, error: slotsError },
     { data: tokenRow, error: tokenError },
+    { data: closures, error: closuresError },
   ] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
-    supabase.from("patient_slots").select("patient_id, active"),
+    supabase.from("patient_slots").select("*"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
+    supabase.from("slot_closures").select("*"),
   ]);
   // Una lista slot letta come vuota per un errore farebbe trattare tutti come
   // "senza slot" e proporre di cancellare prenotazioni di pazienti fissi.
-  if (patientsError || slotsError) {
-    return NextResponse.json({ error: (patientsError || slotsError).message }, { status: 500 });
+  if (patientsError || slotsError || closuresError) {
+    return NextResponse.json({ error: (patientsError || slotsError || closuresError).message }, { status: 500 });
   }
 
   if (tokenError || !tokenRow) {
@@ -55,19 +57,19 @@ export async function POST(request) {
   const dataMassima = addDays(dataMinima, giorniAvanti);
 
   try {
-    // Si legge anche a ritroso di (14-1) giorni: un appuntamento appena
-    // passato conta per la regola "uno ogni due settimane". Le prenotazioni
-    // da riconciliare restano solo quelle da oggi in avanti.
+    // Si legge anche a ritroso: un appuntamento appena passato conta per la
+    // regola della cadenza. Le prenotazioni da riconciliare restano solo
+    // quelle da oggi in avanti.
     const eventiLarghi = await fetchGoogleCalendarEvents(
       tokenRow.refresh_token,
-      addDays(dataMinima, -(GIORNI_MIN_TRA_PRENOTAZIONI - 1)),
+      addDays(dataMinima, -GIORNI_LOOKBACK_PRENOTAZIONI),
       dataMassima
     );
     const events = eventiLarghi.filter((e) => e.data >= dataMinima);
     const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(events, patients || []);
     const tutte = [...pronte, ...inAttesa, ...ambigue, ...nuove];
 
-    const conflitti = computeConflittiPrenotazioni([...pronte, ...inAttesa], eventiLarghi, patients || [], slots || []);
+    const conflitti = computeConflittiPrenotazioni([...pronte, ...inAttesa], eventiLarghi, patients || [], slots || [], { closures: closures || [] });
     for (const r of [...pronte, ...inAttesa]) {
       if (conflitti[r.eventId]) r.conflitto = conflitti[r.eventId];
     }

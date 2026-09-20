@@ -789,6 +789,40 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.deepEqual(c, {}); // f: slot fisso; g: l'unico evento di Mario e' disdetto, quello di Luca non e' suo
   });
 
+  // Luca: quindicinale, lunedì 5/10, 19/10, 2/11...
+  const slotQuindicinale = [{ patient_id: 2, active: true, weekday: 1, time_of_day: "10:00", interval_days: 14, anchor_date: "2026-10-05" }];
+  const evL = (data, extra = {}) => ev(data, "Luca Bianchi", extra);
+
+  test("computeConflittiPrenotazioni: slot fisso, seduta disdetta -> una prenotazione a recupero e' ok, la seconda no", () => {
+    const events = [evL("2026-10-05"), evL("2026-10-19", { descrizione: "disdetto" }), evL("2026-11-02")];
+    const c = computeConflittiPrenotazioni([riga("r1", "2026-10-21", 2), riga("r2", "2026-10-23", 2)], events, patients, slotQuindicinale);
+    assert.equal(c.r1, undefined);
+    assert.deepEqual(Object.keys(c), ["r2"]);
+    assert.equal(c.r2[0].cadenza, 14);
+  });
+
+  test("computeConflittiPrenotazioni: slot fisso, nessuna disdetta -> la prenotazione e' una seduta in piu' (conflitto)", () => {
+    const events = [evL("2026-10-05"), evL("2026-10-19"), evL("2026-11-02")];
+    const c = computeConflittiPrenotazioni([riga("x", "2026-10-21", 2), riga("y", "2026-10-12", 2)], events, patients, slotQuindicinale);
+    assert.deepEqual(Object.keys(c).sort(), ["x", "y"]);
+  });
+
+  test("computeConflittiPrenotazioni: slot fisso, il recupero puo' anche anticipare la seduta disdetta", () => {
+    const events = [evL("2026-10-05"), evL("2026-10-19", { descrizione: "disdetto" }), evL("2026-11-02")];
+    const c = computeConflittiPrenotazioni([riga("p", "2026-10-13", 2)], events, patients, slotQuindicinale);
+    assert.deepEqual(c, {});
+  });
+
+  test("computeConflittiPrenotazioni: slot fisso, un recupero troppo a ridosso dell'appuntamento in agenda e' inutile (buco)", () => {
+    const slotDom = [{ patient_id: 2, active: true, weekday: 0, time_of_day: "10:00", interval_days: 14, anchor_date: "2026-09-20" }];
+    const events = [evL("2026-09-20"), evL("2026-10-04", { descrizione: "disdetto" }), evL("2026-10-18"), evL("2026-11-01")];
+    const conf = (data) => computeConflittiPrenotazioni([riga("v", data, 2)], events, patients, slotDom).v;
+    assert.equal(conf("2026-10-16")[0].troppoVicina, 6); // 2 giorni dal 18/10: no
+    assert.ok(conf("2026-10-13")); // 5 giorni: no
+    assert.equal(conf("2026-10-12"), undefined); // 6 giorni: ok
+    assert.equal(conf("2026-10-08"), undefined); // 10 giorni: ok
+  });
+
   test("computeConflittiPrenotazioni: una prenotazione gia' rinominata (titolo del paziente) conta come appuntamento esistente, non come prenotazione da riconciliare", () => {
     const events = [ev("2026-10-14", "Prenotazioni online dr. Brasini"), ev("2026-10-20", "Mario Rossi")];
     // la prima e' una prenotazione grezza (non conta come esistente), la seconda e' un appuntamento vero a 6 gg
