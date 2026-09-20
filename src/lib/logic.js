@@ -1347,3 +1347,94 @@ export function accumulaContante(dovutoAttuale, quotaContanteSeduta, sedute) {
 export function saldaContante(dovutoAttuale, importoPagato) {
   return Math.max(0, Math.round(((dovutoAttuale || 0) - (importoPagato || 0)) * 100) / 100);
 }
+
+// ---------------------------------------------------------------------
+// Statistiche disdette (richiesta di Maurizio 2026-09-20): chi occupa uno
+// slot fisso ma disdice spesso non ha diritto alla frequenza fissa. La
+// percentuale è "appuntamenti disdetti / appuntamenti fissati" dal giorno in
+// cui le disdette hanno iniziato ad essere registrate (prima non esiste
+// alcuna traccia: gli eventi non addebitati venivano eliminati e le note
+// riscritte dalla numerazione, quindi il passato non è recuperabile — e
+// contare gli appuntamenti di quel periodo senza le relative disdette
+// gonfierebbe il denominatore e abbasserebbe la % in modo falso).
+// ---------------------------------------------------------------------
+
+export const SOGLIA_DISDETTE_DEFAULT = 0.2;
+export const MIN_APPUNTAMENTI_DISDETTE = 5;
+export const GIORNI_TENDENZA_DISDETTE = 60;
+
+// "Appuntamenti fissati" di un paziente = date DISTINTE, dall'inizio della
+// rilevazione a oggi, in cui esiste un evento reale abbinato a lui OPPURE una
+// disdetta registrata. L'unione evita il doppio conteggio delle buche
+// addebitate (l'evento resta a calendario E c'è la riga in cancellations),
+// e conta anche le disdette non addebitate il cui evento è stato eliminato.
+// Solo pazienti con uno slot fisso attivo (gli "a schema libero" non hanno
+// un impegno di frequenza da rispettare). Le date future sono escluse da
+// numeratore e denominatore: gli appuntamenti non ancora arrivati non
+// possono essere né rispettati né disdetti in modo confrontabile.
+export function computeStatisticheDisdette(patients, slots, events, cancellazioni, opzioni = {}) {
+  const oggi = opzioni.oggi || todayISO();
+  const soglia = opzioni.soglia ?? SOGLIA_DISDETTE_DEFAULT;
+  const minAppuntamenti = opzioni.minAppuntamenti ?? MIN_APPUNTAMENTI_DISDETTE;
+  const giorniRecenti = opzioni.giorniRecenti ?? GIORNI_TENDENZA_DISDETTE;
+
+  const inizio = (cancellazioni || []).map((c) => c.original_date).sort()[0] || null;
+  if (!inizio) return { inizio: null, oggi, soglia, minAppuntamenti, righe: [], mensile: [] };
+  const dataRecente = addDays(oggi, -giorniRecenti);
+
+  const pazientiConSlot = new Set((slots || []).filter((s) => s.active).map((s) => s.patient_id));
+  const perPaziente = {};
+  for (const p of patients || []) {
+    if (pazientiConSlot.has(p.id)) perPaziente[p.id] = { patient: p, appuntamenti: new Set(), disdette: new Set() };
+  }
+
+  for (const e of events || []) {
+    if (e.data < inizio || e.data > oggi || !e.ora) continue;
+    const id = matchPatientForEvent(e.titolo, patients)?.patient.id;
+    if (perPaziente[id]) perPaziente[id].appuntamenti.add(e.data);
+  }
+  for (const c of cancellazioni || []) {
+    if (c.original_date < inizio || c.original_date > oggi || !perPaziente[c.patient_id]) continue;
+    perPaziente[c.patient_id].appuntamenti.add(c.original_date);
+    perPaziente[c.patient_id].disdette.add(c.original_date);
+  }
+
+  const mensile = {};
+  const righe = Object.values(perPaziente)
+    .filter((x) => x.appuntamenti.size > 0)
+    .map(({ patient, appuntamenti, disdette }) => {
+      const tot = appuntamenti.size;
+      const disd = disdette.size;
+      const recenti = [...appuntamenti].filter((d) => d >= dataRecente);
+      const disdRecenti = recenti.filter((d) => disdette.has(d)).length;
+      for (const d of appuntamenti) {
+        const m = (mensile[d.slice(0, 7)] ??= { mese: d.slice(0, 7), appuntamenti: 0, disdette: 0 });
+        m.appuntamenti++;
+        if (disdette.has(d)) m.disdette++;
+      }
+      const percentuale = disd / tot;
+      const datiInsufficienti = tot < minAppuntamenti;
+      return {
+        patientId: patient.id,
+        nome: patient.nome_calendario || patient.fatturare_a,
+        appuntamenti: tot,
+        disdette: disd,
+        percentuale,
+        appuntamentiRecenti: recenti.length,
+        disdetteRecenti: disdRecenti,
+        percentualeRecente: recenti.length ? disdRecenti / recenti.length : null,
+        datiInsufficienti,
+        segnalato: !datiInsufficienti && percentuale > soglia,
+      };
+    })
+    .sort((a, b) => Number(b.segnalato) - Number(a.segnalato) || b.percentuale - a.percentuale || (a.nome || "").localeCompare(b.nome || ""));
+
+  return {
+    inizio,
+    oggi,
+    soglia,
+    minAppuntamenti,
+    righe,
+    mensile: Object.values(mensile).sort((a, b) => (a.mese < b.mese ? -1 : 1)),
+  };
+}

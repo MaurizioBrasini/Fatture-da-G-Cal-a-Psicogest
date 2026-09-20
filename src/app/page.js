@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
@@ -65,6 +66,30 @@ export default function DashboardPage() {
   const [fromHour, setFromHour] = useState("");
   const [toHour, setToHour] = useState("");
   const [cancellazioni, setCancellazioni] = useState([]);
+
+  // --- Avviso "disdette sopra soglia" (pagina Disdette) ---
+  // Caricato in background, dopo il resto: legge il calendario dal server e
+  // non deve rallentare né bloccare la Dashboard; un errore lo nasconde e basta.
+  const [disdetteSegnalati, setDisdetteSegnalati] = useState([]);
+  useEffect(() => {
+    let annullato = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/disdette/statistiche", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (res.ok && !annullato) setDisdetteSegnalati((data.righe || []).filter((r) => r.segnalato));
+      } catch {
+        /* avviso facoltativo: nessun messaggio d'errore in Dashboard */
+      }
+    })();
+    return () => {
+      annullato = true;
+    };
+  }, []);
 
   // --- Routine di fine giornata (checklist persistita per oggi) ---
   const [routine, setRoutine] = useState(() => leggiRoutine(todayISO()));
@@ -609,6 +634,14 @@ export default function DashboardPage() {
     <div className="app-root">
       <Sidebar readyCount={groups.pronto.length} />
       <main className="main">
+        {disdetteSegnalati.length > 0 && (
+          <div className="error-box">
+            <strong>
+              {disdetteSegnalati.length} {disdetteSegnalati.length === 1 ? "paziente" : "pazienti"} con slot fisso oltre la soglia di disdette:
+            </strong>{" "}
+            {disdetteSegnalati.map((r) => r.nome).join(", ")}. <Link href="/disdette">Vedi il dettaglio →</Link>
+          </div>
+        )}
         <div className="section" style={{ padding: "14px 18px", marginBottom: 18 }}>
           <h2 style={{ fontFamily: "Georgia, serif", fontSize: 15.5, fontWeight: 500, margin: "0 0 12px" }}>
             Routine di fine giornata

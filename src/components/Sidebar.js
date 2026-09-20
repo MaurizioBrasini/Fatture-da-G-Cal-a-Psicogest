@@ -7,6 +7,7 @@ const ITEMS = [
   { href: "/", label: "Da fatturare" },
   { href: "/pazienti", label: "Pazienti" },
   { href: "/disponibilita", label: "Disponibilità" },
+  { href: "/disdette", label: "Disdette" },
   { href: "/comunicazioni", label: "Comunicazioni" },
   { href: "/storico", label: "Storico fatture" },
   { href: "/impostazioni", label: "Impostazioni" },

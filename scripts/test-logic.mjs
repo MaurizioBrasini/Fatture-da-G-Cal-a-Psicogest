@@ -41,6 +41,7 @@ import {
   formatDataItaliana,
   personalizzaTesto,
   computeGrigliaDisponibilita,
+  computeStatisticheDisdette,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -753,6 +754,74 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
   const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
   assert.equal(r.length, 0);
 });
+
+// --- computeStatisticheDisdette ---
+{
+  const patients = [
+    { id: 1, nome_calendario: "Mario Rossi" },
+    { id: 2, nome_calendario: "Luca Bianchi" },
+  ];
+  const slots = [{ patient_id: 1, active: true }, { patient_id: 2, active: false }];
+  const ev = (data, titolo = "Mario Rossi") => ({ data, ora: "10:00", titolo });
+  const OGGI = "2026-10-20";
+
+  test("computeStatisticheDisdette: senza disdette registrate non c'è inizio rilevazione", () => {
+    const r = computeStatisticheDisdette(patients, slots, [ev("2026-10-01")], [], { oggi: OGGI });
+    assert.equal(r.inizio, null);
+    assert.equal(r.righe.length, 0);
+  });
+
+  test("computeStatisticheDisdette: una buca addebitata (evento + disdetta stessa data) non si conta due volte", () => {
+    const events = ["2026-10-06", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16"].map((d) => ev(d));
+    const canc = [
+      { patient_id: 1, original_date: "2026-10-06", billing_status: "not_charged" }, // evento eliminato: assente da events
+      { patient_id: 1, original_date: "2026-10-13", billing_status: "charged" }, // evento ancora presente
+    ];
+    // events contiene anche 10-06 solo per verificare che l'unione non lo raddoppi
+    const r = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI });
+    const riga = r.righe.find((x) => x.patientId === 1);
+    assert.equal(riga.appuntamenti, 5);
+    assert.equal(riga.disdette, 2);
+    assert.equal(riga.percentuale, 0.4);
+    assert.equal(riga.segnalato, true);
+  });
+
+  test("computeStatisticheDisdette: sotto il minimo di appuntamenti non segnala mai (1 disdetta su 3)", () => {
+    const canc = [{ patient_id: 1, original_date: "2026-10-06", billing_status: "not_charged" }];
+    const events = [ev("2026-10-13"), ev("2026-10-20")];
+    const riga = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI }).righe[0];
+    assert.equal(riga.appuntamenti, 3);
+    assert.equal(riga.datiInsufficienti, true);
+    assert.equal(riga.segnalato, false);
+  });
+
+  test("computeStatisticheDisdette: esclusi slot non attivi, date future e eventi precedenti all'inizio rilevazione", () => {
+    const canc = [
+      { patient_id: 1, original_date: "2026-10-06", billing_status: "not_charged" },
+      { patient_id: 2, original_date: "2026-10-06", billing_status: "not_charged" }, // slot non attivo
+      { patient_id: 1, original_date: "2026-11-03", billing_status: "not_charged" }, // futura
+    ];
+    const events = [ev("2026-09-01"), ev("2026-10-13"), ev("2026-11-10"), ev("2026-10-13", "Luca Bianchi")];
+    const r = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI });
+    assert.equal(r.righe.length, 1);
+    assert.equal(r.righe[0].patientId, 1);
+    assert.equal(r.righe[0].appuntamenti, 2); // 10-06 (disdetta) + 10-13
+    assert.equal(r.righe[0].disdette, 1);
+  });
+
+  test("computeStatisticheDisdette: tendenza recente e andamento mensile", () => {
+    const events = ["2026-09-09", "2026-09-16", "2026-09-23", "2026-10-06", "2026-10-13", "2026-10-15"].map((d) => ev(d));
+    const canc = [
+      { patient_id: 1, original_date: "2026-09-09", billing_status: "not_charged" },
+      { patient_id: 1, original_date: "2026-10-13", billing_status: "not_charged" },
+    ];
+    const r = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI, giorniRecenti: 14 });
+    const riga = r.righe[0];
+    assert.equal(riga.appuntamentiRecenti, 3); // 10-06, 10-13, 10-15
+    assert.equal(riga.disdetteRecenti, 1);
+    assert.deepEqual(r.mensile.map((m) => [m.mese, m.appuntamenti, m.disdette]), [["2026-09", 3, 1], ["2026-10", 3, 1]]);
+  });
+}
 
 // --- computePazientiConSalto ---
 test("computePazientiConSalto segnala un salto solo se c'è ANCHE una disdetta recente (gap doppio da solo non basta)", () => {
