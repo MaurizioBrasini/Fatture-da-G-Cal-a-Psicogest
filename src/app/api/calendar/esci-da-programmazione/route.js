@@ -23,7 +23,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { deleteGoogleCalendarEvent, fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { matchPatientForEvent, todayISO, addDays } from "@/lib/logic";
+import { matchPatientForEvent, calcolaBillingStatus, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -85,12 +85,35 @@ export async function POST(request) {
       : futuriPaziente.filter(
           (e) => e.colorId === "6" && fasceDisattivate.has(`${weekdayOf(e.data)}|${e.ora}`)
         );
-    const mantenuti = futuriPaziente.length - daRimuovere.length;
-
     let cancellati = 0;
+    let disdetteRegistrate = 0;
     const cancellazioniFallite = [];
+    const trattenutiEntro48h = [];
+    const adesso = new Date().toISOString();
     for (const e of daRimuovere) {
       try {
+        if (body.eliminaTutti) {
+          // Chiusura del percorso = disdetta del paziente: stessa regola delle
+          // 48h di "Registra disdette". Entro le 48h sarebbe una buca da
+          // addebitare — l'evento resta a calendario (come fa il flusso
+          // normale) e sarà contato come seduta una volta passato.
+          const billingStatus = calcolaBillingStatus(e.data, e.ora, adesso);
+          if (billingStatus === "charged") {
+            trattenutiEntro48h.push({ data: e.data, ora: e.ora });
+            continue;
+          }
+          const { error: insertError } = await supabase.from("cancellations").insert({
+            user_id: user.id,
+            patient_id: patientId,
+            event_id: e.id,
+            original_date: e.data,
+            cancelled_at: adesso,
+            billing_status: billingStatus,
+          });
+          // 23505 = già registrata (unique patient_id+data): non è un errore.
+          if (insertError && insertError.code !== "23505") throw new Error(insertError.message);
+          disdetteRegistrate++;
+        }
         await deleteGoogleCalendarEvent(tokenRow.refresh_token, e.id);
         cancellati++;
       } catch (err) {
@@ -98,12 +121,15 @@ export async function POST(request) {
       }
       await new Promise((r) => setTimeout(r, 150));
     }
+    const mantenuti = futuriPaziente.length - cancellati;
 
     return NextResponse.json({
       ok: cancellazioniFallite.length === 0,
       slotDisattivato: (slotsDisattivati || []).length > 0,
       cancellati,
       mantenuti,
+      disdetteRegistrate,
+      trattenutiEntro48h,
       cancellazioniFallite,
     });
   } catch (e) {

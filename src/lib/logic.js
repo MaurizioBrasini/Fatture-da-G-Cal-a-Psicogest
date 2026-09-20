@@ -445,6 +445,7 @@ export function computePazientiConSalto(patients, slots, events, cancellazioni, 
   );
   const risultati = [];
   for (const patient of patients || []) {
+    if (patient.stato === "concluso") continue; // percorso chiuso: nessun messaggio di riprenotazione
     const slot = slotAttivoByPatientId[patient.id];
     const matched = (events || []).filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id);
     const passate = matched.filter((e) => e.data <= oggi).map((e) => e.data).sort();

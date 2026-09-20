@@ -144,6 +144,12 @@ test("computePatientState: paziente concluso con sedute non va mai in 'in_corso'
   const molte = { ...poche, ancora_valore: 9 };
   assert.equal(computePatientState(molte, events, DEFAULT_SETTINGS).stato, "concluso");
 });
+test("computePazientiConSalto: un paziente concluso non compare mai tra quelli da ricontattare", () => {
+  const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
+  const base = { id: 1, nome_calendario: "Mario Rossi" };
+  assert.equal(computePazientiConSalto([base], [], events, []).length, 1); // controllo: un attivo senza futuro compare
+  assert.equal(computePazientiConSalto([{ ...base, stato: "concluso" }], [], events, []).length, 0);
+});
 test("computePatientState: paziente concluso senza sedute -> 'senza_sedute'", () => {
   const patient = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 5 };
   assert.equal(computePatientState(patient, [], DEFAULT_SETTINGS).stato, "senza_sedute");

@@ -22,7 +22,7 @@ export async function POST(request) {
   const [{ data: cancellazioni, error: cancError }, { data: patients, error: patientsError }, { data: emailLog, error: logError }] =
     await Promise.all([
       supabase.from("cancellations").select("patient_id, original_date, billing_status, created_at").gte("original_date", dataMinima),
-      supabase.from("patients").select("id, nome_calendario, fatturare_a, email"),
+      supabase.from("patients").select("id, nome_calendario, fatturare_a, email").neq("stato", "concluso"),
       supabase.from("email_log").select("patient_id, created_at").eq("tipo", "riprenotazione").eq("stato", "ok"),
     ]);
   if (cancError) return NextResponse.json({ error: cancError.message }, { status: 500 });

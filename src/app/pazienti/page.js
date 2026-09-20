@@ -454,9 +454,14 @@ export default function PazientiPage() {
     // Anche senza slot: può esserci un appuntamento futuro prenotato dal link.
     const data = await eseguiUscita(patient, true);
     if (!data) return;
+    const avvisi = [];
     if (data.cancellazioniFallite?.length) {
-      alert(`Attenzione: ${data.cancellazioniFallite.length} cancellazioni non riuscite, rimuovile a mano da Google Calendar.`);
+      avvisi.push(`${data.cancellazioniFallite.length} cancellazioni non riuscite: rimuovile a mano da Google Calendar.`);
     }
+    if (data.trattenutiEntro48h?.length) {
+      avvisi.push(`Entro 48h (buca da addebitare) e lasciati a calendario: ${data.trattenutiEntro48h.map((t) => `${t.data} ${t.ora}`).join(", ")}.`);
+    }
+    if (avvisi.length) alert(avvisi.join("\n"));
     await updateField(patient.id, "stato", "concluso");
   }
 
