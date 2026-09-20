@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -16,6 +16,7 @@ import {
   addDays,
   accumulaContante,
   matchPatientForEvent,
+  formatDataItaliana,
   BOOKING_COLOR_ID,
 } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
@@ -137,6 +138,9 @@ export default function DashboardPage() {
   // decide sia il paziente sia se trattarla come nuovo paziente; "" =
   // ancora non decisa, saltata alla conferma (sostituisce la spunta).
   const [prenScelte, setPrenScelte] = useState({});
+  // { eventId: boolean } — per le prenotazioni in conflitto con la regola "un
+  // solo appuntamento ogni due settimane": true (default) = cancella e avvisa.
+  const [prenRifiuti, setPrenRifiuti] = useState({});
   const [prenRisultato, setPrenRisultato] = useState(null);
   const [prenErrore, setPrenErrore] = useState("");
 
@@ -533,6 +537,7 @@ export default function DashboardPage() {
     setPrenStep("loading");
     setPrenErrore("");
     setPrenScelte({});
+    setPrenRifiuti({});
     setPrenRisultato(null);
     try {
       const res = await fetch("/api/calendar/prenotazioni-preview", {
@@ -559,6 +564,7 @@ export default function DashboardPage() {
     setPrenStep(null);
     setPrenData(null);
     setPrenScelte({});
+    setPrenRifiuti({});
     setPrenRisultato(null);
     setPrenErrore("");
   }
@@ -583,12 +589,19 @@ export default function DashboardPage() {
       .map((r) => ({ r, scelta: prenScelte[r.eventId] ?? prenScelteDefault(r) }))
       .filter((x) => x.scelta);
 
-    const abbinamenti = selezionate
+    // Prenotazioni in conflitto con la regola delle due settimane, lasciate
+    // spuntate: NON si riconnettono, si annullano (la route ricontrolla il
+    // conflitto dal vivo prima di cancellare qualunque cosa).
+    const eRifiuto = (x) => x.r.conflitto && (prenRifiuti[x.r.eventId] ?? true);
+    const rifiuti = selezionate.filter(eRifiuto).map((x) => ({ eventId: x.r.eventId }));
+    const daRiconnettere = selezionate.filter((x) => !eRifiuto(x));
+
+    const abbinamenti = daRiconnettere
       .filter((x) => x.scelta !== "__new__")
       .map((x) => ({ eventId: x.r.eventId, patientId: Number(x.scelta), bookerEmail: x.r.bookerEmail }));
-    const nuovi = selezionate.filter((x) => x.scelta === "__new__").map((x) => x.r);
+    const nuovi = daRiconnettere.filter((x) => x.scelta === "__new__").map((x) => x.r);
 
-    if (!abbinamenti.length && !nuovi.length) return;
+    if (!abbinamenti.length && !nuovi.length && !rifiuti.length) return;
     setPrenStep("writing");
     try {
       const { data: userData } = await supabase.auth.getUser();
@@ -604,11 +617,11 @@ export default function DashboardPage() {
       }
 
       let esito = { riconnessi: 0, rinumerati: 0, falliti: 0 };
-      if (abbinamenti.length) {
+      if (abbinamenti.length || rifiuti.length) {
         const res = await fetch("/api/calendar/prenotazioni-confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ abbinamenti }),
+          body: JSON.stringify({ abbinamenti, rifiuti }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Errore durante la riconnessione.");
@@ -1294,7 +1307,8 @@ export default function DashboardPage() {
                           </thead>
                           <tbody>
                             {daGestire.map((r) => (
-                              <tr key={r.eventId}>
+                              <Fragment key={r.eventId}>
+                              <tr>
                                 <td className="mono" style={{ whiteSpace: "nowrap" }}>{r.data}{r.ora ? ` ${r.ora}` : ""}</td>
                                 <td>
                                   {r.bookerNome}
@@ -1315,6 +1329,32 @@ export default function DashboardPage() {
                                   </select>
                                 </td>
                               </tr>
+                              {r.conflitto && (
+                                <tr>
+                                  <td colSpan={3}>
+                                    <div className="error-box" style={{ marginBottom: 8 }}>
+                                      <strong>Troppo vicina a un altro appuntamento</strong> — un solo appuntamento ogni due
+                                      settimane. Già presente:{" "}
+                                      {r.conflitto
+                                        .map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` ${c.ora}` : ""}${c.tipo === "prenotazione" ? " (altra prenotazione)" : ""}`)
+                                        .join(", ")}
+                                      .
+                                      <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                                        <input
+                                          type="checkbox"
+                                          checked={prenRifiuti[r.eventId] ?? true}
+                                          onChange={(e) => setPrenRifiuti((prev) => ({ ...prev, [r.eventId]: e.target.checked }))}
+                                        />
+                                        Cancella la prenotazione e avvisa il paziente via email
+                                      </label>
+                                      <span className="muted small">
+                                        Deselezionando, la prenotazione viene riconnessa normalmente.
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             ))}
                           </tbody>
                         </table>
@@ -1333,6 +1373,7 @@ export default function DashboardPage() {
                             return (
                               <li key={r.eventId}>
                                 {r.bookerNome} ({r.data}) → {p ? `${p.nome || ""} ${p.cognome || ""}`.trim() : `paziente #${r.patientId}`}
+                                {r.conflitto && " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)"}
                               </li>
                             );
                           })}
@@ -1361,8 +1402,20 @@ export default function DashboardPage() {
               <p>
                 {prenRisultato.ok
                   ? `Fatto: ${prenRisultato.riconnessi} riconnessi, ${prenRisultato.rinumerati} pazienti rinumerati, ${prenRisultato.nuovi} nuovi aggiunti a Pazienti.`
-                  : `${prenRisultato.riconnessi} riconnessi, ${prenRisultato.falliti} falliti, ${prenRisultato.nuovi} nuovi aggiunti.`}
+                  : `${prenRisultato.riconnessi} riconnessi, ${prenRisultato.falliti + (prenRisultato.rifiutiFalliti || 0)} falliti, ${prenRisultato.nuovi} nuovi aggiunti.`}
               </p>
+              {(prenRisultato.annullate > 0 || prenRisultato.rifiutiSaltati > 0) && (
+                <p>
+                  {prenRisultato.annullate > 0 &&
+                    `${prenRisultato.annullate} prenotazioni annullate (regola delle due settimane), ${prenRisultato.emailInviate} email inviate.`}
+                  {prenRisultato.emailProblemi > 0 &&
+                    ` Attenzione: ${prenRisultato.emailProblemi} paziente/i NON hanno ricevuto l'email (mancante o errore di invio): avvisali tu.`}
+                  {prenRisultato.rifiutiSaltati > 0 &&
+                    ` ${prenRisultato.rifiutiSaltati} prenotazioni non risultavano più in conflitto e sono state lasciate com'erano.`}
+                  {prenRisultato.logNonSalvato &&
+                    " Il registro delle email non è stato aggiornato: esegui schema_addendum15.sql su Supabase."}
+                </p>
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn btn-primary" onClick={chiudiPrenotazioni}>Chiudi</button>
               </div>

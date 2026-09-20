@@ -44,6 +44,7 @@ import {
   computeStatisticheDisdette,
   tempoInZonaRossa,
   bilancioAlla,
+  computeConflittiPrenotazioni,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -756,6 +757,45 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
   const r = computeRiprenotazioniPendenti(cancellazioni, patients, []);
   assert.equal(r.length, 0);
 });
+
+// --- computeConflittiPrenotazioni (regola: un solo appuntamento ogni 14 giorni) ---
+{
+  const patients = [
+    { id: 1, nome_calendario: "Mario Rossi" }, // su richiesta (nessuno slot attivo)
+    { id: 2, nome_calendario: "Luca Bianchi" }, // slot fisso attivo
+  ];
+  const slots = [{ patient_id: 2, active: true }];
+  const ev = (data, titolo = "Mario Rossi", extra = {}) => ({ data, ora: "10:00", titolo, ...extra });
+  const riga = (eventId, data, patientId = 1) => ({ eventId, data, ora: "10:00", patientId });
+
+  test("computeConflittiPrenotazioni: una prenotazione a meno di 14 giorni da un appuntamento esistente è in conflitto (anche passato)", () => {
+    const events = [ev("2026-10-10")]; // appuntamento già presente
+    // 13 giorni dopo -> conflitto; 14 giorni dopo -> ok; 5 giorni PRIMA -> conflitto
+    const c = computeConflittiPrenotazioni([riga("a", "2026-10-23"), riga("b", "2026-10-24"), riga("c", "2026-10-05")], events, patients, slots);
+    assert.deepEqual(Object.keys(c).sort(), ["a", "c"]);
+    assert.deepEqual(c.a, [{ data: "2026-10-10", ora: "10:00", tipo: "appuntamento" }]);
+  });
+
+  test("computeConflittiPrenotazioni: tre prenotazioni in una settimana -> resta la prima, le altre in conflitto", () => {
+    const c = computeConflittiPrenotazioni([riga("x3", "2026-10-15"), riga("x1", "2026-10-12"), riga("x2", "2026-10-13")], [], patients, slots);
+    assert.deepEqual(Object.keys(c).sort(), ["x2", "x3"]);
+    assert.equal(c.x2[0].tipo, "prenotazione");
+    assert.equal(c.x1, undefined);
+  });
+
+  test("computeConflittiPrenotazioni: pazienti con slot fisso attivo sono esclusi; eventi di altri pazienti e con nota 'disdetto' non contano", () => {
+    const events = [ev("2026-10-10", "Luca Bianchi"), ev("2026-10-09", "Mario Rossi", { descrizione: "disdetto" })];
+    const c = computeConflittiPrenotazioni([riga("f", "2026-10-11", 2), riga("g", "2026-10-11", 1)], events, patients, slots);
+    assert.deepEqual(c, {}); // f: slot fisso; g: l'unico evento di Mario e' disdetto, quello di Luca non e' suo
+  });
+
+  test("computeConflittiPrenotazioni: una prenotazione gia' rinominata (titolo del paziente) conta come appuntamento esistente, non come prenotazione da riconciliare", () => {
+    const events = [ev("2026-10-14", "Prenotazioni online dr. Brasini"), ev("2026-10-20", "Mario Rossi")];
+    // la prima e' una prenotazione grezza (non conta come esistente), la seconda e' un appuntamento vero a 6 gg
+    const c = computeConflittiPrenotazioni([riga("n", "2026-10-14")], events, patients, slots);
+    assert.deepEqual(c.n, [{ data: "2026-10-20", ora: "10:00", tipo: "appuntamento" }]);
+  });
+}
 
 // --- computeStatisticheDisdette ---
 {

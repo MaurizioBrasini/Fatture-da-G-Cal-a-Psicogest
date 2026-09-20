@@ -8,14 +8,36 @@
 // poi rilancia subito la rinumerazione (stessa logica di renumber-confirm)
 // per ogni paziente toccato con successo, così la numerazione resta coerente
 // senza un passaggio manuale separato.
+//
+// Riceve anche `rifiuti` [{eventId}]: prenotazioni che violano la regola "un
+// solo appuntamento ogni due settimane" (vedi computeConflittiPrenotazioni)
+// e che Maurizio ha lasciato spuntate in anteprima. Per sicurezza il
+// conflitto viene RICALCOLATO qui sul calendario di adesso (l'anteprima può
+// essere vecchia) e si cancella solo ciò che è ancora una prenotazione online
+// in conflitto — mai un evento indicato dal client e basta. Poi email al
+// paziente e riga in email_log (tipo 'prenotazione_annullata', vedi
+// schema_addendum15.sql; se la tabella non lo ammette ancora, il log fallisce
+// senza bloccare nulla e viene segnalato). Un rifiuto NON è una disdetta del
+// paziente: nessuna riga in `cancellations`, per non falsare le statistiche.
 
 import { createClient } from "@/lib/supabase/server";
 import {
   fetchGoogleCalendarEvents,
+  deleteGoogleCalendarEvent,
   updateGoogleCalendarEventTitle,
   updateGoogleCalendarEventDescription,
 } from "@/lib/googleCalendar";
-import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
+import { sendEmail, buildEmailPrenotazioneAnnullataHtml } from "@/lib/email";
+import {
+  computeRinumerazione,
+  computePrenotazioniPreview,
+  computeConflittiPrenotazioni,
+  formatDataItaliana,
+  GIORNI_MIN_TRA_PRENOTAZIONI,
+  DEFAULT_SETTINGS,
+  todayISO,
+  addDays,
+} from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -25,16 +47,27 @@ export async function POST(request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
 
-  const { abbinamenti } = await request.json().catch(() => ({}));
-  if (!Array.isArray(abbinamenti) || !abbinamenti.length) {
+  const body = await request.json().catch(() => ({}));
+  const abbinamenti = body.abbinamenti ?? [];
+  const rifiuti = body.rifiuti ?? [];
+  if (!Array.isArray(abbinamenti) || !Array.isArray(rifiuti) || (!abbinamenti.length && !rifiuti.length)) {
     return NextResponse.json({ error: "Nessuna riconnessione da confermare." }, { status: 400 });
   }
 
-  const [{ data: patients }, { data: settingsRow }, { data: tokenRow, error: tokenError }] = await Promise.all([
+  const [
+    { data: patients, error: patientsError },
+    { data: settingsRow },
+    { data: slots, error: slotsError },
+    { data: tokenRow, error: tokenError },
+  ] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("settings").select("*").maybeSingle(),
+    supabase.from("patient_slots").select("patient_id, active"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
   ]);
+  if (patientsError || slotsError) {
+    return NextResponse.json({ error: (patientsError || slotsError).message }, { status: 500 });
+  }
 
   if (tokenError || !tokenRow) {
     return NextResponse.json(
@@ -43,6 +76,84 @@ export async function POST(request) {
     );
   }
   const settings = { ...DEFAULT_SETTINGS, ...(settingsRow || {}) };
+
+  // --- Rifiuti: prenotazioni in conflitto con la regola delle due settimane ---
+  const rifiutate = [];
+  if (rifiuti.length) {
+    const oggi = todayISO();
+    let eventiLarghi;
+    try {
+      // Se la rilettura fallisce non si cancella nulla: si esce prima di
+      // toccare qualunque evento.
+      eventiLarghi = await fetchGoogleCalendarEvents(
+        tokenRow.refresh_token,
+        addDays(oggi, -(GIORNI_MIN_TRA_PRENOTAZIONI - 1)),
+        addDays(oggi, 180)
+      );
+    } catch (e) {
+      return NextResponse.json({ error: "Rilettura del calendario fallita, nessuna prenotazione annullata: " + e.message }, { status: 500 });
+    }
+    const { pronte, inAttesa } = computePrenotazioniPreview(eventiLarghi.filter((e) => e.data >= oggi), patients || []);
+    const righe = [...pronte, ...inAttesa];
+    const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || []);
+
+    for (const rf of rifiuti) {
+      const riga = righe.find((r) => r.eventId === rf.eventId);
+      const conflitto = conflitti[rf.eventId];
+      if (!riga || !conflitto) {
+        rifiutate.push({ eventId: rf.eventId, ok: false, saltata: true, error: "non risulta più una prenotazione in conflitto: lasciata com'è" });
+        continue;
+      }
+      const patient = (patients || []).find((p) => p.id === riga.patientId);
+      const esito = { eventId: rf.eventId, patientId: riga.patientId, data: riga.data, ok: false, emailInviata: null };
+      try {
+        await deleteGoogleCalendarEvent(tokenRow.refresh_token, rf.eventId);
+        esito.ok = true;
+      } catch (e) {
+        esito.error = e.message;
+        rifiutate.push(esito);
+        continue; // evento non cancellato: nessuna email, niente da spiegare al paziente
+      }
+
+      const destinatario = riga.bookerEmail || patient?.email;
+      if (!destinatario) {
+        esito.emailInviata = "senza_email";
+      } else {
+        const oggettoEmail = "Prenotazione annullata";
+        let erroreEmail = null;
+        try {
+          await sendEmail({
+            settings: settingsRow,
+            to: destinatario,
+            subject: oggettoEmail,
+            html: buildEmailPrenotazioneAnnullataHtml({
+              nomePaziente: patient?.nome || (patient?.nome_calendario || "").split(" ")[0] || riga.bookerNome || "",
+              dataPrenotazione: formatDataItaliana(riga.data),
+              oraPrenotazione: riga.ora,
+              conflittiTesto: conflitto.map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` alle ${c.ora}` : ""}`).join(", "),
+              linkPrenotazioni: settingsRow?.link_prenotazioni_online,
+            }),
+          });
+        } catch (e) {
+          erroreEmail = e.message;
+        }
+        esito.emailInviata = erroreEmail ? "errore" : "ok";
+        if (erroreEmail) esito.erroreEmail = erroreEmail;
+        const { error: logError } = await supabase.from("email_log").insert({
+          user_id: user.id,
+          patient_id: riga.patientId,
+          email: destinatario,
+          oggetto: oggettoEmail,
+          tipo: "prenotazione_annullata",
+          stato: erroreEmail ? "errore" : "ok",
+          errore: erroreEmail,
+        });
+        if (logError) esito.logNonSalvato = logError.message;
+      }
+      rifiutate.push(esito);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
 
   const risultati = [];
   for (const a of abbinamenti) {
@@ -89,16 +200,24 @@ export async function POST(request) {
         rinumerati++;
       }
     } catch (e) {
-      return NextResponse.json({ ok: false, risultati, rinumerati, erroreRinumerazione: e.message }, { status: 500 });
+      return NextResponse.json({ ok: false, risultati, dettagliRifiuti: rifiutate, rinumerati, erroreRinumerazione: e.message }, { status: 500 });
     }
   }
 
   const falliti = risultati.filter((r) => !r.ok);
+  const rifiutiFalliti = rifiutate.filter((r) => !r.ok && !r.saltata);
   return NextResponse.json({
-    ok: falliti.length === 0,
+    ok: falliti.length === 0 && rifiutiFalliti.length === 0,
     riconnessi: risultati.length - falliti.length,
     falliti: falliti.length,
     rinumerati,
+    annullate: rifiutate.filter((r) => r.ok).length,
+    emailInviate: rifiutate.filter((r) => r.emailInviata === "ok").length,
+    emailProblemi: rifiutate.filter((r) => r.ok && r.emailInviata !== "ok").length,
+    logNonSalvato: rifiutate.some((r) => r.logNonSalvato),
+    rifiutiSaltati: rifiutate.filter((r) => r.saltata).length,
+    rifiutiFalliti: rifiutiFalliti.length,
     dettagli: risultati,
+    dettagliRifiuti: rifiutate,
   });
 }

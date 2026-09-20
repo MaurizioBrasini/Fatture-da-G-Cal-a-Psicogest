@@ -55,4 +55,19 @@ export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni })
   );
 }
 
+// Prenotazione online annullata perché il paziente ha già un altro
+// appuntamento a meno di due settimane (regola "un solo appuntamento ogni due
+// settimane"). `conflitti` = [{data "YYYY-MM-DD", ora}] già formattati come
+// testo dal chiamante; `dataPrenotazione`/`oraPrenotazione` idem.
+export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni }) {
+  return testoInHtml(
+    `Gentile ${nomePaziente},\n\n` +
+      `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+      `perché risulta già un altro appuntamento a meno di due settimane di distanza (${conflittiTesto}).\n\n` +
+      `È possibile fissare un solo appuntamento ogni due settimane. ` +
+      (linkPrenotazioni ? `Potrà scegliere un nuovo incontro, a distanza di almeno due settimane dall'altro, da questo link:\n\n${linkPrenotazioni}\n\n` : "\n") +
+      `Cordiali saluti,\nDr. Maurizio Brasini`
+  );
+}
+
 export { testoInHtml };

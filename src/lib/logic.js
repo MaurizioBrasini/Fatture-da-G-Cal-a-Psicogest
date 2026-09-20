@@ -1109,6 +1109,50 @@ export function computePrenotazioniPreview(events, patients) {
   };
 }
 
+// Regola di Maurizio (2026-09-20): chi prenota dal link libero non può
+// avere più di un appuntamento ogni due settimane (Google non ha alcun
+// limite per persona: solo massimo giornaliero totale, buffer e finestra).
+// Due appuntamenti dello stesso paziente devono distare almeno 14 giorni.
+export const GIORNI_MIN_TRA_PRENOTAZIONI = 14;
+
+// Individua le prenotazioni online (righe di computePrenotazioniPreview con
+// paziente abbinato) che violano la regola: restituisce {eventId: [{data,
+// ora, tipo}]} con gli appuntamenti con cui confliggono. Si applica SOLO ai
+// pazienti senza slot fisso attivo ("su richiesta"/fuori schema): uno a
+// cadenza settimanale ha per costruzione 2 appuntamenti ogni 14 giorni, e
+// una sua prenotazione dal link serve a sostituirne uno disdetto.
+// Il confronto è con (a) gli appuntamenti già presenti a calendario abbinati
+// al paziente per titolo — passati inclusi, "una seduta 5 giorni fa" conta —
+// senza quelli con nota "disdett*", e (b) le prenotazioni precedenti dello
+// stesso paziente NON in conflitto: in ordine cronologico la prima resta, le
+// successive vicine no. Non scrive nulla.
+export function computeConflittiPrenotazioni(righe, events, patients, slots, opzioni = {}) {
+  const minGiorni = opzioni.minGiorni ?? GIORNI_MIN_TRA_PRENOTAZIONI;
+  const conSlot = new Set((slots || []).filter((s) => s.active).map((s) => s.patient_id));
+  const esistenti = (events || []).filter(
+    (e) => e.ora && !BOOKING_TITLE_REGEX.test(e.titolo || "") && !DISDETTA_REGEX.test(e.descrizione || "")
+  );
+  const tenute = {};
+  const conflitti = {};
+  const ordinate = [...(righe || [])].sort((a, b) => (a.data + (a.ora || "")).localeCompare(b.data + (b.ora || "")));
+  for (const r of ordinate) {
+    if (!r.patientId || conSlot.has(r.patientId)) continue;
+    const vicini = [];
+    for (const e of esistenti) {
+      if (Math.abs(daysBetween(e.data, r.data)) >= minGiorni) continue;
+      if (matchPatientForEvent(e.titolo, patients)?.patient.id === r.patientId) {
+        vicini.push({ data: e.data, ora: e.ora, tipo: "appuntamento" });
+      }
+    }
+    for (const k of tenute[r.patientId] || []) {
+      if (Math.abs(daysBetween(k.data, r.data)) < minGiorni) vicini.push({ data: k.data, ora: k.ora, tipo: "prenotazione" });
+    }
+    if (vicini.length) conflitti[r.eventId] = vicini;
+    else (tenute[r.patientId] ||= []).push(r);
+  }
+  return conflitti;
+}
+
 // ---------------------------------------------------------------------
 // Chiusure/indisponibilità (ferie, mezze giornate, weekend lunghi): quando
 // Maurizio stesso non è disponibile, le occorrenze future degli slot fissi
