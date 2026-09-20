@@ -1414,11 +1414,22 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
       }
       const percentuale = disd / tot;
       const datiInsufficienti = tot < minAppuntamenti;
+      // Andamento cumulativo, un punto per appuntamento: serve a sapere DA
+      // QUANDO un paziente è sopra soglia (vedi inZonaRossaDa).
+      let cumTot = 0;
+      let cumDisd = 0;
+      const andamento = [...appuntamenti].sort().map((d) => {
+        cumTot++;
+        if (disdette.has(d)) cumDisd++;
+        return { data: d, appuntamenti: cumTot, disdette: cumDisd };
+      });
       return {
         patientId: patient.id,
         nome: patient.nome_calendario || patient.fatturare_a,
         appuntamenti: tot,
         disdette: disd,
+        andamento,
+        zonaRossa: inZonaRossaDa(andamento, soglia, minAppuntamenti),
         percentuale,
         appuntamentiRecenti: recenti.length,
         disdetteRecenti: disdRecenti,
@@ -1437,4 +1448,26 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
     righe,
     mensile: Object.values(mensile).sort((a, b) => (a.mese < b.mese ? -1 : 1)),
   };
+}
+
+// Da quando un paziente è CONTINUATIVAMENTE sopra soglia, guardando la
+// percentuale cumulativa dopo ogni appuntamento (con almeno
+// `minAppuntamenti` appuntamenti alle spalle). Restituisce null se oggi non
+// è sopra soglia; altrimenti la data dell'appuntamento in cui è entrato
+// nella "zona rossa" e quanti appuntamenti sono passati da allora
+// (compreso quello). Se rientra sotto soglia e poi risale, conta l'ultima
+// risalita. Non decide nulla: serve a Maurizio per valutare da solo se
+// tenere o liberare lo slot ("se restano in zona rossa per un tot...").
+export function inZonaRossaDa(andamento, soglia, minAppuntamenti) {
+  let inizioRun = -1;
+  (andamento || []).forEach((p, i) => {
+    const rosso = p.appuntamenti >= minAppuntamenti && p.disdette / p.appuntamenti > soglia;
+    if (rosso) {
+      if (inizioRun < 0) inizioRun = i;
+    } else {
+      inizioRun = -1;
+    }
+  });
+  if (inizioRun < 0) return null;
+  return { da: andamento[inizioRun].data, appuntamenti: andamento.length - inizioRun };
 }

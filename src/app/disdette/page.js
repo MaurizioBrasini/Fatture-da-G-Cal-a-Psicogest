@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
-import { formatDataItaliana, SOGLIA_DISDETTE_DEFAULT, GIORNI_TENDENZA_DISDETTE } from "@/lib/logic";
+import { formatDataItaliana, inZonaRossaDa, daysBetween, SOGLIA_DISDETTE_DEFAULT, GIORNI_TENDENZA_DISDETTE } from "@/lib/logic";
 
 const pct = (x) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 
@@ -36,7 +36,12 @@ export default function DisdettePage() {
   }, []);
 
   const soglia = (Number(sogliaPct) || 0) / 100;
-  const righe = (dati?.righe || []).map((r) => ({ ...r, segnalato: !r.datiInsufficienti && r.percentuale > soglia }));
+  const righe = (dati?.righe || []).map((r) => ({
+    ...r,
+    segnalato: !r.datiInsufficienti && r.percentuale > soglia,
+    // ricalcolata con la soglia impostata qui, non con quella di default
+    zonaRossa: inZonaRossaDa(r.andamento, soglia, dati.minAppuntamenti),
+  }));
   const segnalati = righe.filter((r) => r.segnalato);
   righe.sort((a, b) => Number(b.segnalato) - Number(a.segnalato) || b.percentuale - a.percentuale);
 
@@ -91,8 +96,8 @@ export default function DisdettePage() {
                   {segnalati.length} {segnalati.length === 1 ? "paziente supera" : "pazienti superano"} il {sogliaPct}% di
                   disdette:
                 </strong>{" "}
-                {segnalati.map((r) => `${r.nome} (${pct(r.percentuale)})`).join(", ")}. Per liberare lo slot: Pazienti →
-                colonna Frequenza → &quot;Su richiesta&quot;.
+                {segnalati.map((r) => `${r.nome} (${pct(r.percentuale)}, ${r.disdette} su ${r.appuntamenti})`).join(", ")}.
+                Per liberare lo slot: Pazienti → colonna Frequenza → &quot;Su richiesta&quot;.
               </div>
             ) : (
               <div className="empty-row" style={{ marginBottom: 16 }}>
@@ -110,6 +115,7 @@ export default function DisdettePage() {
                   <th>Disdette</th>
                   <th>% totale</th>
                   <th>Ultimi {GIORNI_TENDENZA_DISDETTE} gg</th>
+                  <th>In zona rossa da</th>
                   <th></th>
                 </tr>
               </thead>
@@ -119,10 +125,17 @@ export default function DisdettePage() {
                     <td className="name" style={r.segnalato ? { color: "var(--danger)" } : undefined}>{r.nome}</td>
                     <td className="mono">{r.appuntamenti}</td>
                     <td className="mono">{r.disdette}</td>
-                    <td className="mono">{pct(r.percentuale)}</td>
+                    <td className="mono">
+                      {pct(r.percentuale)} <span className="muted">({r.disdette} su {r.appuntamenti})</span>
+                    </td>
                     <td className="mono">
                       {r.appuntamentiRecenti
-                        ? `${r.disdetteRecenti}/${r.appuntamentiRecenti} (${pct(r.percentualeRecente)})`
+                        ? `${pct(r.percentualeRecente)} (${r.disdetteRecenti} su ${r.appuntamentiRecenti})`
+                        : "—"}
+                    </td>
+                    <td className="mono">
+                      {r.zonaRossa
+                        ? `${formatDataItaliana(r.zonaRossa.da)} — ${daysBetween(r.zonaRossa.da, dati.oggi)} gg, ${r.zonaRossa.appuntamenti} ${r.zonaRossa.appuntamenti === 1 ? "appuntamento" : "appuntamenti"}`
                         : "—"}
                     </td>
                     <td>

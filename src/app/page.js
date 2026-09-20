@@ -639,7 +639,7 @@ export default function DashboardPage() {
             <strong>
               {disdetteSegnalati.length} {disdetteSegnalati.length === 1 ? "paziente" : "pazienti"} con slot fisso oltre la soglia di disdette:
             </strong>{" "}
-            {disdetteSegnalati.map((r) => r.nome).join(", ")}. <Link href="/disdette">Vedi il dettaglio →</Link>
+            {disdetteSegnalati.map((r) => `${r.nome} (${r.disdette} su ${r.appuntamenti})`).join(", ")}. <Link href="/disdette">Vedi il dettaglio →</Link>
           </div>
         )}
         <div className="section" style={{ padding: "14px 18px", marginBottom: 18 }}>

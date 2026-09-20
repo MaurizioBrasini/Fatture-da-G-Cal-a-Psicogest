@@ -42,6 +42,7 @@ import {
   personalizzaTesto,
   computeGrigliaDisponibilita,
   computeStatisticheDisdette,
+  inZonaRossaDa,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -807,6 +808,20 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.equal(r.righe[0].patientId, 1);
     assert.equal(r.righe[0].appuntamenti, 2); // 10-06 (disdetta) + 10-13
     assert.equal(r.righe[0].disdette, 1);
+  });
+
+  test("inZonaRossaDa: data di ingresso nella zona rossa, ricalcolata se esce e rientra; null se oggi è sotto soglia", () => {
+    // cumulativo: dopo 5 appuntamenti 2 disdette (40%) -> rosso dal 5°
+    const pt = (data, a, d) => ({ data, appuntamenti: a, disdette: d });
+    const rosso = [pt("10-01", 1, 0), pt("10-08", 2, 0), pt("10-15", 3, 0), pt("10-22", 4, 1), pt("10-29", 5, 2), pt("11-05", 6, 2)];
+    assert.deepEqual(inZonaRossaDa(rosso, 0.2, 5), { da: "10-29", appuntamenti: 2 });
+    // sotto il minimo di 5 appuntamenti non è mai rosso, anche se 1/4 = 25%
+    assert.equal(inZonaRossaDa(rosso.slice(0, 4), 0.2, 5), null);
+    // rientra sotto soglia e poi risale: conta l'ultima risalita
+    const rientra = [pt("a", 5, 2), pt("b", 6, 2), pt("c", 10, 2), pt("d", 11, 3), pt("e", 12, 4)];
+    assert.deepEqual(inZonaRossaDa(rientra, 0.2, 5), { da: "d", appuntamenti: 2 });
+    // oggi sotto soglia -> null
+    assert.equal(inZonaRossaDa([pt("a", 5, 2), pt("b", 10, 2)], 0.2, 5), null);
   });
 
   test("computeStatisticheDisdette: tendenza recente e andamento mensile", () => {
