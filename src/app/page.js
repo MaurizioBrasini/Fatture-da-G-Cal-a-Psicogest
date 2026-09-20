@@ -246,7 +246,7 @@ export default function DashboardPage() {
   }, [patients, events, settings, cancellazioni]);
 
   const groups = useMemo(() => {
-    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [], concluso: [] };
+    const g = { pronto: [], da_valutare: [], in_corso: [], senza_sedute: [], sospeso: [] };
     patients.forEach((p) => {
       const st = computed[p.id];
       if (st) g[st.stato].push(p);
@@ -773,6 +773,11 @@ export default function DashboardPage() {
                           <td>
                             <div className="name">{p.nome_calendario || p.fatturare_a}</div>
                             {!p.codice_fiscale && <div className="tag tag-danger">manca CF</div>}
+                            {p.stato === "concluso" && (
+                              <div className="tag" title="Percorso concluso: fatturato a fine rapporto anche sotto soglia">
+                                concluso{c.count < c.soglia ? " — sotto soglia" : ""}
+                              </div>
+                            )}
                           </td>
                           <td className="mono">{p.tipologia}</td>
                           <td className="mono">{c.count} / {c.soglia}</td>
@@ -790,9 +795,21 @@ export default function DashboardPage() {
                       disabled ||
                       chosenIds.filter((id) => groups.pronto.find((p) => p.id === id)?.codice_fiscale).length === 0
                     }
-                    onClick={() =>
-                      generateBatch(chosenIds.filter((id) => groups.pronto.find((p) => p.id === id)?.codice_fiscale))
-                    }
+                    onClick={() => {
+                      const ids = chosenIds.filter((id) => groups.pronto.find((p) => p.id === id)?.codice_fiscale);
+                      // Conclusi sotto soglia: si fattura comunque a fine
+                      // rapporto, ma solo dopo una conferma esplicita.
+                      const sottoSoglia = ids
+                        .map((id) => groups.pronto.find((p) => p.id === id))
+                        .filter((p) => p.stato === "concluso" && computed[p.id].count < computed[p.id].soglia);
+                      if (sottoSoglia.length) {
+                        const elenco = sottoSoglia
+                          .map((p) => `${p.nome_calendario || p.fatturare_a} (${computed[p.id].count} su ${computed[p.id].soglia})`)
+                          .join(", ");
+                        if (!window.confirm(`Rapporto concluso, sedute sotto soglia: ${elenco}. Fatturare comunque?`)) return;
+                      }
+                      generateBatch(ids);
+                    }}
                   >
                     Genera file Excel per i selezionati
                   </button>
@@ -884,43 +901,6 @@ export default function DashboardPage() {
             )}
           </div>
         </section>
-
-        {groups.concluso.length > 0 && (
-          <section className="section">
-            <div className="section-head">
-              <h2>Conclusi — sedute fatte e non ancora fatturate ({groups.concluso.length})</h2>
-            </div>
-            <div className="section-body">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Paziente</th>
-                    <th>Sedute accumulate</th>
-                    <th>Ultima seduta</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {groups.concluso.map((p) => {
-                    const c = computed[p.id];
-                    return (
-                      <tr key={p.id}>
-                        <td className="name">{p.nome_calendario || p.fatturare_a}</td>
-                        <td className="mono">{c.count}</td>
-                        <td className="mono">{c.ultimaData}</td>
-                        <td>
-                          <button className="btn btn-small" disabled={disabled || !p.codice_fiscale} onClick={() => forceClose(p.id)}>
-                            Fattura ora
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
 
         <section className="section">
           <div className="section-head">
