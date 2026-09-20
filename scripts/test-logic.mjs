@@ -42,7 +42,8 @@ import {
   personalizzaTesto,
   computeGrigliaDisponibilita,
   computeStatisticheDisdette,
-  inZonaRossaDa,
+  tempoInZonaRossa,
+  bilancioAlla,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -810,18 +811,59 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.equal(r.righe[0].disdette, 1);
   });
 
-  test("inZonaRossaDa: data di ingresso nella zona rossa, ricalcolata se esce e rientra; null se oggi è sotto soglia", () => {
-    // cumulativo: dopo 5 appuntamenti 2 disdette (40%) -> rosso dal 5°
+  test("tempoInZonaRossa: somma i giorni di tutti i periodi (entrate e uscite), il periodo aperto arriva a oggi", () => {
     const pt = (data, a, d) => ({ data, appuntamenti: a, disdette: d });
-    const rosso = [pt("10-01", 1, 0), pt("10-08", 2, 0), pt("10-15", 3, 0), pt("10-22", 4, 1), pt("10-29", 5, 2), pt("11-05", 6, 2)];
-    assert.deepEqual(inZonaRossaDa(rosso, 0.2, 5), { da: "10-29", appuntamenti: 2 });
-    // sotto il minimo di 5 appuntamenti non è mai rosso, anche se 1/4 = 25%
-    assert.equal(inZonaRossaDa(rosso.slice(0, 4), 0.2, 5), null);
-    // rientra sotto soglia e poi risale: conta l'ultima risalita
-    const rientra = [pt("a", 5, 2), pt("b", 6, 2), pt("c", 10, 2), pt("d", 11, 3), pt("e", 12, 4)];
-    assert.deepEqual(inZonaRossaDa(rientra, 0.2, 5), { da: "d", appuntamenti: 2 });
-    // oggi sotto soglia -> null
-    assert.equal(inZonaRossaDa([pt("a", 5, 2), pt("b", 10, 2)], 0.2, 5), null);
+    // Sopra soglia (>20%) dal 29/10 (2/5=40%); esce il 12/11 (2/10=20%, non oltre);
+    // rientra il 26/11 (3/11=27%) e ci resta fino a oggi (30/11).
+    const andamento = [
+      pt("2026-10-01", 1, 0), pt("2026-10-15", 3, 0), pt("2026-10-22", 4, 1),
+      pt("2026-10-29", 5, 2), pt("2026-11-05", 6, 2), pt("2026-11-12", 10, 2),
+      pt("2026-11-26", 11, 3),
+    ];
+    const t = tempoInZonaRossa(andamento, 0.2, 5, "2026-11-30");
+    assert.deepEqual(t.periodi, [{ da: "2026-10-29", a: "2026-11-12" }, { da: "2026-11-26", a: null }]);
+    assert.equal(t.giorniTotali, 14 + 4); // 29/10->12/11 = 14 gg, 26/11->30/11 = 4 gg
+    assert.equal(t.inCorso, true);
+    assert.equal(t.primoIngresso, "2026-10-29");
+  });
+  test("bilancioAlla: 'negli ultimi N giorni' come differenza di cumulati, estremo iniziale incluso", () => {
+    // 8 appuntamenti settimanali dal 2026-01-05, disdette al 2° e al 6° (cumulato, un punto per appuntamento)
+    const date = ["2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26", "2026-02-02", "2026-02-09", "2026-02-16", "2026-02-23"];
+    const disdetteIdx = new Set([1, 5]);
+    let dis = 0;
+    const andamento = date.map((data, i) => {
+      if (disdetteIdx.has(i)) dis++;
+      return { data, appuntamenti: i + 1, disdette: dis };
+    });
+    // tutto il periodo
+    assert.deepEqual(bilancioAlla(andamento, "2026-02-23", null), { appuntamenti: 8, disdette: 2 });
+    assert.deepEqual(bilancioAlla(andamento, "2026-02-23", 182), { appuntamenti: 8, disdette: 2 });
+    // ultimi 21 gg: la finestra parte il 2026-02-02 (estremo incluso) -> 4 appuntamenti, 1 disdetta (la 6ª)
+    assert.deepEqual(bilancioAlla(andamento, "2026-02-23", 21), { appuntamenti: 4, disdette: 1 });
+    // data di fine precedente all'ultimo punto: i punti successivi non contano
+    assert.deepEqual(bilancioAlla(andamento, "2026-01-26", null), { appuntamenti: 4, disdette: 1 });
+    // nessun dato
+    assert.deepEqual(bilancioAlla([], "2026-07-01", 182), { appuntamenti: 0, disdette: 0 });
+  });
+  test("tempoInZonaRossa: con un periodo, una vecchia disdetta che esce dalla finestra chiude la zona rossa anche senza nuovi appuntamenti", () => {
+    const pt = (data, a, d) => ({ data, appuntamenti: a, disdette: d });
+    // 5 appuntamenti a settimana da 09-01, 2 disdette (40%) al 5°; poi nessun nuovo appuntamento
+    const andamento = [pt("2026-09-01", 1, 0), pt("2026-09-08", 2, 1), pt("2026-09-15", 3, 1), pt("2026-09-22", 4, 2), pt("2026-09-29", 5, 2)];
+    // finestra di 30 gg: al 09-29 e' rosso (2/5). Al 12-01 la finestra parte dal 11-01: nessun appuntamento -> non rosso
+    const t = tempoInZonaRossa(andamento, 0.2, 5, "2026-12-01", 30);
+    assert.equal(t.inCorso, false);
+    assert.equal(t.periodi[0].da, "2026-09-29");
+    assert.equal(t.periodi[0].a, "2026-12-01");
+  });
+  test("tempoInZonaRossa: uscito e mai rientrato conserva lo storico (inCorso false); mai rosso o sotto il minimo -> null", () => {
+    const pt = (data, a, d) => ({ data, appuntamenti: a, disdette: d });
+    const uscito = [pt("2026-10-29", 5, 2), pt("2026-11-12", 10, 2)];
+    const t = tempoInZonaRossa(uscito, 0.2, 5, "2026-12-01");
+    assert.equal(t.inCorso, false);
+    assert.equal(t.giorniTotali, 14);
+    // 1/4 = 25% ma sotto il minimo di 5 appuntamenti: non è mai rosso
+    assert.equal(tempoInZonaRossa([pt("2026-10-22", 4, 1)], 0.2, 5, "2026-12-01"), null);
+    assert.equal(tempoInZonaRossa([pt("2026-10-29", 5, 0)], 0.2, 5, "2026-12-01"), null);
   });
 
   test("computeStatisticheDisdette: tendenza recente e andamento mensile", () => {
@@ -830,11 +872,14 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
       { patient_id: 1, original_date: "2026-09-09", billing_status: "not_charged" },
       { patient_id: 1, original_date: "2026-10-13", billing_status: "not_charged" },
     ];
-    const r = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI, giorniRecenti: 14 });
+    const r = computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI, giorniPeriodo: 14 });
     const riga = r.righe[0];
-    assert.equal(riga.appuntamentiRecenti, 3); // 10-06, 10-13, 10-15
-    assert.equal(riga.disdetteRecenti, 1);
+    assert.equal(riga.appuntamenti, 3); // nel periodo: 10-06, 10-13, 10-15
+    assert.equal(riga.disdette, 1);
+    // il mensile resta sempre sull'intera rilevazione, indipendente dal periodo
     assert.deepEqual(r.mensile.map((m) => [m.mese, m.appuntamenti, m.disdette]), [["2026-09", 3, 1], ["2026-10", 3, 1]]);
+    // periodo null = dall'inizio: tutti e 6 gli appuntamenti
+    assert.equal(computeStatisticheDisdette(patients, slots, events, canc, { oggi: OGGI, giorniPeriodo: null }).righe[0].appuntamenti, 6);
   });
 }
 

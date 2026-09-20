@@ -1,7 +1,23 @@
 "use client";
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
-import { formatDataItaliana, inZonaRossaDa, daysBetween, SOGLIA_DISDETTE_DEFAULT, GIORNI_TENDENZA_DISDETTE } from "@/lib/logic";
+import {
+  formatDataItaliana,
+  tempoInZonaRossa,
+  bilancioAlla,
+  addDays,
+  daysBetween,
+  SOGLIA_DISDETTE_DEFAULT,
+  GIORNI_PERIODO_DISDETTE,
+} from "@/lib/logic";
+
+// Periodi del bilancio (giorni); null = dall'inizio della rilevazione.
+const PERIODI = [
+  { giorni: 91, label: "ultimi 3 mesi" },
+  { giorni: 182, label: "ultimi 6 mesi" },
+  { giorni: 365, label: "ultimi 12 mesi" },
+  { giorni: null, label: "dall'inizio della rilevazione" },
+];
 
 const pct = (x) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 
@@ -15,6 +31,7 @@ export default function DisdettePage() {
   // Soglia modificabile solo per esplorare: il calcolo dei flag è locale,
   // non serve rileggere il calendario per cambiarla.
   const [sogliaPct, setSogliaPct] = useState(Math.round(SOGLIA_DISDETTE_DEFAULT * 100));
+  const [periodo, setPeriodo] = useState(GIORNI_PERIODO_DISDETTE);
 
   useEffect(() => {
     (async () => {
@@ -36,14 +53,29 @@ export default function DisdettePage() {
   }, []);
 
   const soglia = (Number(sogliaPct) || 0) / 100;
-  const righe = (dati?.righe || []).map((r) => ({
-    ...r,
-    segnalato: !r.datiInsufficienti && r.percentuale > soglia,
-    // ricalcolata con la soglia impostata qui, non con quella di default
-    zonaRossa: inZonaRossaDa(r.andamento, soglia, dati.minAppuntamenti),
-  }));
+  const periodoLabel = PERIODI.find((p) => p.giorni === periodo)?.label || "";
+  // Bilancio, segnalazione e zona rossa ricalcolati qui con soglia e periodo
+  // scelti nella pagina (i dati grezzi per paziente arrivano già cumulativi).
+  const righe = (dati?.righe || []).map((r) => {
+    const b = bilancioAlla(r.andamento, dati.oggi, periodo);
+    const percentuale = b.appuntamenti ? b.disdette / b.appuntamenti : 0;
+    const datiInsufficienti = b.appuntamenti < dati.minAppuntamenti;
+    return {
+      ...r,
+      appuntamenti: b.appuntamenti,
+      disdette: b.disdette,
+      percentuale,
+      datiInsufficienti,
+      segnalato: !datiInsufficienti && percentuale > soglia,
+      zonaRossa: tempoInZonaRossa(r.andamento, soglia, dati.minAppuntamenti, dati.oggi, periodo),
+    };
+  });
   const segnalati = righe.filter((r) => r.segnalato);
   righe.sort((a, b) => Number(b.segnalato) - Number(a.segnalato) || b.percentuale - a.percentuale);
+  // Se la finestra scelta parte prima dell'inizio della rilevazione, il
+  // bilancio copre meno tempo di quello richiesto: va detto, non taciuto.
+  const inizioFinestra = dati?.inizio ? (periodo == null ? dati.inizio : addDays(dati.oggi, -periodo)) : null;
+  const giorniCoperti = dati?.inizio && dati.inizio > inizioFinestra ? daysBetween(dati.inizio, dati.oggi) : null;
 
   return (
     <div className="app-root">
@@ -53,11 +85,19 @@ export default function DisdettePage() {
           <div>
             <h1>Disdette</h1>
             <p className="sub">
-              Chi occupa uno slot fisso e disdice spesso: percentuale di appuntamenti disdetti sul totale di quelli
-              fissati, con andamento recente e mensile.
+              Bilancio delle disdette di chi occupa uno slot fisso: sul periodo scelto, quante volte su quelle fissate
+              ha dato buca.
             </p>
           </div>
           <div className="header-actions">
+            <label className="small muted" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              Periodo
+              <select value={periodo === null ? "tutto" : periodo} onChange={(e) => setPeriodo(e.target.value === "tutto" ? null : Number(e.target.value))}>
+                {PERIODI.map((p) => (
+                  <option key={p.label} value={p.giorni === null ? "tutto" : p.giorni}>{p.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="small muted" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               Segnala oltre
               <input
@@ -89,12 +129,25 @@ export default function DisdettePage() {
               è affidabile solo con almeno {dati.minAppuntamenti} appuntamenti fissati; sotto quella quota il paziente
               non viene mai segnalato (una sola disdetta su 3 incontri sarebbe rumore, non un&apos;abitudine).
             </p>
+            {giorniCoperti !== null && (
+              <div className="error-box">
+                Il periodo scelto ({periodoLabel}) è più lungo dei dati disponibili: il bilancio copre solo{" "}
+                <strong>{giorniCoperti} giorni</strong> (dal {formatDataItaliana(dati.inizio)}). Diventerà completo man
+                mano che la rilevazione prosegue.
+              </div>
+            )}
+            <p className="sub" style={{ marginBottom: 16 }}>
+              <strong>Tempo in zona rossa:</strong> somma di tutti i periodi in cui il bilancio ({periodoLabel}) del
+              paziente è stato sopra soglia, anche se è uscito e rientrato. Per ciascun paziente il conteggio parte dal
+              primo momento in cui raggiunge il minimo di {dati.minAppuntamenti} appuntamenti nel periodo (prima non può
+              essere in zona rossa) e comunque non prima del {formatDataItaliana(dati.inizio)}.
+            </p>
 
             {segnalati.length > 0 ? (
               <div className="error-box">
                 <strong>
                   {segnalati.length} {segnalati.length === 1 ? "paziente supera" : "pazienti superano"} il {sogliaPct}% di
-                  disdette:
+                  disdette ({periodoLabel}):
                 </strong>{" "}
                 {segnalati.map((r) => `${r.nome} (${pct(r.percentuale)}, ${r.disdette} su ${r.appuntamenti})`).join(", ")}.
                 Per liberare lo slot: Pazienti → colonna Frequenza → &quot;Su richiesta&quot;.
@@ -113,9 +166,8 @@ export default function DisdettePage() {
                   <th>Paziente</th>
                   <th>Appuntamenti</th>
                   <th>Disdette</th>
-                  <th>% totale</th>
-                  <th>Ultimi {GIORNI_TENDENZA_DISDETTE} gg</th>
-                  <th>In zona rossa da</th>
+                  <th>Bilancio ({periodoLabel})</th>
+                  <th>Tempo in zona rossa</th>
                   <th></th>
                 </tr>
               </thead>
@@ -129,14 +181,18 @@ export default function DisdettePage() {
                       {pct(r.percentuale)} <span className="muted">({r.disdette} su {r.appuntamenti})</span>
                     </td>
                     <td className="mono">
-                      {r.appuntamentiRecenti
-                        ? `${pct(r.percentualeRecente)} (${r.disdetteRecenti} su ${r.appuntamentiRecenti})`
-                        : "—"}
-                    </td>
-                    <td className="mono">
-                      {r.zonaRossa
-                        ? `${formatDataItaliana(r.zonaRossa.da)} — ${daysBetween(r.zonaRossa.da, dati.oggi)} gg, ${r.zonaRossa.appuntamenti} ${r.zonaRossa.appuntamenti === 1 ? "appuntamento" : "appuntamenti"}`
-                        : "—"}
+                      {r.zonaRossa ? (
+                        <>
+                          {r.zonaRossa.giorniTotali} gg totali
+                          {r.zonaRossa.periodi.length > 1 ? ` in ${r.zonaRossa.periodi.length} periodi` : ""}
+                          <div className="muted small">
+                            dal {formatDataItaliana(r.zonaRossa.primoIngresso)} ·{" "}
+                            {r.zonaRossa.inCorso ? "ora in zona rossa" : "ora fuori"}
+                          </div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td>
                       {r.segnalato && <span className="tag tag-danger">oltre soglia</span>}

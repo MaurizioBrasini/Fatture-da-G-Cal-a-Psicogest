@@ -1361,7 +1361,9 @@ export function saldaContante(dovutoAttuale, importoPagato) {
 
 export const SOGLIA_DISDETTE_DEFAULT = 0.2;
 export const MIN_APPUNTAMENTI_DISDETTE = 5;
-export const GIORNI_TENDENZA_DISDETTE = 60;
+// Periodo del bilancio: "negli ultimi 6 mesi ha dato buca il 25% delle volte"
+// (richiesta di Maurizio). null = dall'inizio della rilevazione.
+export const GIORNI_PERIODO_DISDETTE = 182;
 
 // "Appuntamenti fissati" di un paziente = date DISTINTE, dall'inizio della
 // rilevazione a oggi, in cui esiste un evento reale abbinato a lui OPPURE una
@@ -1376,11 +1378,11 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
   const oggi = opzioni.oggi || todayISO();
   const soglia = opzioni.soglia ?? SOGLIA_DISDETTE_DEFAULT;
   const minAppuntamenti = opzioni.minAppuntamenti ?? MIN_APPUNTAMENTI_DISDETTE;
-  const giorniRecenti = opzioni.giorniRecenti ?? GIORNI_TENDENZA_DISDETTE;
+  // undefined -> default 6 mesi; null esplicito -> dall'inizio della rilevazione
+  const giorniPeriodo = opzioni.giorniPeriodo === undefined ? GIORNI_PERIODO_DISDETTE : opzioni.giorniPeriodo;
 
   const inizio = (cancellazioni || []).map((c) => c.original_date).sort()[0] || null;
-  if (!inizio) return { inizio: null, oggi, soglia, minAppuntamenti, righe: [], mensile: [] };
-  const dataRecente = addDays(oggi, -giorniRecenti);
+  if (!inizio) return { inizio: null, oggi, soglia, minAppuntamenti, giorniPeriodo, righe: [], mensile: [] };
 
   const pazientiConSlot = new Set((slots || []).filter((s) => s.active).map((s) => s.patient_id));
   const perPaziente = {};
@@ -1403,19 +1405,14 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
   const righe = Object.values(perPaziente)
     .filter((x) => x.appuntamenti.size > 0)
     .map(({ patient, appuntamenti, disdette }) => {
-      const tot = appuntamenti.size;
-      const disd = disdette.size;
-      const recenti = [...appuntamenti].filter((d) => d >= dataRecente);
-      const disdRecenti = recenti.filter((d) => disdette.has(d)).length;
       for (const d of appuntamenti) {
         const m = (mensile[d.slice(0, 7)] ??= { mese: d.slice(0, 7), appuntamenti: 0, disdette: 0 });
         m.appuntamenti++;
         if (disdette.has(d)) m.disdette++;
       }
-      const percentuale = disd / tot;
-      const datiInsufficienti = tot < minAppuntamenti;
-      // Andamento cumulativo, un punto per appuntamento: serve a sapere DA
-      // QUANDO un paziente è sopra soglia (vedi inZonaRossaDa).
+      // Andamento cumulativo, un punto per appuntamento: da qui si ricava il
+      // bilancio su qualunque periodo (bilancioAlla) e il tempo trascorso
+      // sopra soglia (tempoInZonaRossa).
       let cumTot = 0;
       let cumDisd = 0;
       const andamento = [...appuntamenti].sort().map((d) => {
@@ -1423,17 +1420,17 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
         if (disdette.has(d)) cumDisd++;
         return { data: d, appuntamenti: cumTot, disdette: cumDisd };
       });
+      const { appuntamenti: tot, disdette: disd } = bilancioAlla(andamento, oggi, giorniPeriodo);
+      const percentuale = tot ? disd / tot : 0;
+      const datiInsufficienti = tot < minAppuntamenti;
       return {
         patientId: patient.id,
         nome: patient.nome_calendario || patient.fatturare_a,
         appuntamenti: tot,
         disdette: disd,
         andamento,
-        zonaRossa: inZonaRossaDa(andamento, soglia, minAppuntamenti),
+        zonaRossa: tempoInZonaRossa(andamento, soglia, minAppuntamenti, oggi, giorniPeriodo),
         percentuale,
-        appuntamentiRecenti: recenti.length,
-        disdetteRecenti: disdRecenti,
-        percentualeRecente: recenti.length ? disdRecenti / recenti.length : null,
         datiInsufficienti,
         segnalato: !datiInsufficienti && percentuale > soglia,
       };
@@ -1445,29 +1442,56 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
     oggi,
     soglia,
     minAppuntamenti,
+    giorniPeriodo,
     righe,
     mensile: Object.values(mensile).sort((a, b) => (a.mese < b.mese ? -1 : 1)),
   };
 }
 
-// Da quando un paziente è CONTINUATIVAMENTE sopra soglia, guardando la
-// percentuale cumulativa dopo ogni appuntamento (con almeno
-// `minAppuntamenti` appuntamenti alle spalle). Restituisce null se oggi non
-// è sopra soglia; altrimenti la data dell'appuntamento in cui è entrato
-// nella "zona rossa" e quanti appuntamenti sono passati da allora
-// (compreso quello). Se rientra sotto soglia e poi risale, conta l'ultima
-// risalita. Non decide nulla: serve a Maurizio per valutare da solo se
-// tenere o liberare lo slot ("se restano in zona rossa per un tot...").
-export function inZonaRossaDa(andamento, soglia, minAppuntamenti) {
-  let inizioRun = -1;
-  (andamento || []).forEach((p, i) => {
-    const rosso = p.appuntamenti >= minAppuntamenti && p.disdette / p.appuntamenti > soglia;
-    if (rosso) {
-      if (inizioRun < 0) inizioRun = i;
-    } else {
-      inizioRun = -1;
+// Bilancio di un paziente alla data `dataFine`: appuntamenti e disdette
+// negli ultimi `giorniPeriodo` giorni (null = dall'inizio della rilevazione).
+// `andamento` è cumulativo e cronologico (un punto per appuntamento), quindi
+// il bilancio del periodo è la differenza tra il cumulato alla fine e quello
+// subito prima dell'inizio della finestra (estremo iniziale incluso).
+export function bilancioAlla(andamento, dataFine, giorniPeriodo) {
+  const inizioFinestra = giorniPeriodo == null ? null : addDays(dataFine, -giorniPeriodo);
+  let prima = { appuntamenti: 0, disdette: 0 };
+  let fine = { appuntamenti: 0, disdette: 0 };
+  for (const p of andamento || []) {
+    if (p.data > dataFine) break;
+    fine = p;
+    if (inizioFinestra !== null && p.data < inizioFinestra) prima = p;
+  }
+  return { appuntamenti: fine.appuntamenti - prima.appuntamenti, disdette: fine.disdette - prima.disdette };
+}
+
+// Tempo trascorso in "zona rossa" (percentuale del periodo sopra soglia, con
+// almeno `minAppuntamenti` appuntamenti nel periodo), SOMMANDO tutti i
+// periodi: un paziente può entrare, uscire e rientrare, e ciò che interessa
+// a Maurizio è quanto tempo in totale ci è stato ("se restano in zona rossa
+// per un tot..."), non solo la permanenza attuale. Lo stato viene valutato a
+// ogni appuntamento e alla data `oggi` (una disdetta vecchia può uscire dalla
+// finestra anche senza nuovi appuntamenti) e vale fino alla valutazione
+// successiva; un periodo ancora aperto arriva fino a `oggi`. Il conteggio di
+// un paziente parte dal primo momento in cui raggiunge il minimo (prima non
+// può essere rosso) — `primoIngresso`. Restituisce null se non è mai stato in
+// zona rossa. Non decide nulla: informa soltanto.
+export function tempoInZonaRossa(andamento, soglia, minAppuntamenti, oggi, giorniPeriodo = null) {
+  const periodi = [];
+  let inizio = null;
+  const date = (andamento || []).map((p) => p.data);
+  if (!date.length || date[date.length - 1] < oggi) date.push(oggi);
+  for (const data of date) {
+    const b = bilancioAlla(andamento, data, giorniPeriodo);
+    const rosso = b.appuntamenti >= minAppuntamenti && b.disdette / b.appuntamenti > soglia;
+    if (rosso && inizio === null) inizio = data;
+    if (!rosso && inizio !== null) {
+      periodi.push({ da: inizio, a: data });
+      inizio = null;
     }
-  });
-  if (inizioRun < 0) return null;
-  return { da: andamento[inizioRun].data, appuntamenti: andamento.length - inizioRun };
+  }
+  if (inizio !== null) periodi.push({ da: inizio, a: null });
+  if (!periodi.length) return null;
+  const giorniTotali = periodi.reduce((somma, per) => somma + daysBetween(per.da, per.a || oggi), 0);
+  return { giorniTotali, periodi, inCorso: periodi[periodi.length - 1].a === null, primoIngresso: periodi[0].da };
 }
