@@ -131,6 +131,12 @@ export default function PazientiPage() {
   }
 
   const [slotsByPatientId, setSlotsByPatientId] = useState({});
+  // Copia dei pazienti come letti dal database: "Salva tutte le modifiche"
+  // scrive SOLO i campi cambiati rispetto a questa copia. Prima riscriveva
+  // ogni paziente per intero dallo stato della pagina, quindi una pagina
+  // rimasta aperta con dati vecchi sovrascriveva silenziosamente le modifiche
+  // fatte nel frattempo altrove (2026-09-21: quote contanti, costi, ancore).
+  const snapshotPazienti = useRef([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,6 +146,7 @@ export default function PazientiPage() {
       supabase.from("patient_slots").select("*").eq("active", true),
     ]);
     setPatients(data || []);
+    snapshotPazienti.current = JSON.parse(JSON.stringify(data || []));
     if (s) setSettings(s);
     setSlotsByPatientId(Object.fromEntries((slots || []).map((sl) => [sl.patient_id, sl])));
     setLoading(false);
@@ -573,10 +580,18 @@ export default function PazientiPage() {
 
   async function saveAll() {
     setSaveStatus("Salvataggio…");
+    const base = new Map(snapshotPazienti.current.map((p) => [p.id, p]));
     for (const p of patients) {
       const { id, ...fields } = p;
-      await supabase.from("patients").update(fields).eq("id", id);
+      const prima = base.get(id);
+      if (!prima) continue; // paziente aggiunto in questa sessione: i suoi campi si salvano già uno per uno
+      const cambiati = Object.fromEntries(
+        Object.entries(fields).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(prima[k]))
+      );
+      if (!Object.keys(cambiati).length) continue;
+      await supabase.from("patients").update(cambiati).eq("id", id);
     }
+    snapshotPazienti.current = JSON.parse(JSON.stringify(patients));
     setSaveStatus("Tutto salvato ✓");
     setTimeout(() => setSaveStatus(""), 2500);
   }
