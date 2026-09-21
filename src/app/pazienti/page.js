@@ -183,13 +183,15 @@ export default function PazientiPage() {
       // Con debito già registrato l'importo parte dal totale; altrimenti (incasso
       // alla seduta 5, prima della fattura) lo scrivi tu.
       value: patient.contante_dovuto > 0 ? String(patient.contante_dovuto) : "",
+      data: todayISO(), // modificabile: se ti dimentichi di registrare il giorno stesso
     });
   }
 
   async function confermaContanti() {
-    const { patientId, dovuto, value } = contantiModal;
+    const { patientId, dovuto, value, data } = contantiModal;
     const importoPagato = parseFloat(value.replace(",", "."));
     if (!importoPagato || importoPagato <= 0) return;
+    if (!data || data > todayISO()) return; // niente incassi nel futuro
     setContantiModal(null);
     const nuovoSaldo = incassaContante(dovuto, importoPagato);
     await Promise.all([
@@ -198,7 +200,7 @@ export default function PazientiPage() {
         user_id: (await supabase.auth.getUser()).data.user.id,
         patient_id: patientId,
         importo: importoPagato,
-        data: todayISO(),
+        data,
       }),
     ]);
     patchLocal(patientId, { contante_dovuto: nuovoSaldo });
@@ -1368,11 +1370,21 @@ export default function PazientiPage() {
               if (e.key === "Escape") setContantiModal(null);
             }}
           />
+          <label className="muted small" style={{ display: "block", marginTop: 12 }}>
+            Data dell&apos;incasso (la dicitura &quot;contanti saldati&quot; compare sulla seduta di quel giorno)
+            <input
+              type="date"
+              max={todayISO()}
+              style={{ width: "100%", boxSizing: "border-box", marginTop: 4 }}
+              value={contantiModal.data || ""}
+              onChange={(e) => setContantiModal((m) => ({ ...m, data: e.target.value }))}
+            />
+          </label>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
             <button className="btn btn-ghost" onClick={() => setContantiModal(null)}>Annulla</button>
             <button
               className="btn btn-primary"
-              disabled={!contantiModal.value || parseFloat(contantiModal.value.replace(",", ".")) <= 0}
+              disabled={!contantiModal.value || parseFloat(contantiModal.value.replace(",", ".")) <= 0 || !contantiModal.data || contantiModal.data > todayISO()}
               onClick={confermaContanti}
             >
               Conferma incasso
