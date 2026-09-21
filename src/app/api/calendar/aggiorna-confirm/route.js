@@ -25,17 +25,14 @@
 //    di mezzo — la disdetta paziente non lascia traccia da nessuna parte che
 //    il generatore di occorrenze legga.
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const { candidati } = await request.json().catch(() => ({}));
   if (!Array.isArray(candidati) || !candidati.length) {
@@ -48,10 +45,7 @@ export async function POST(request) {
     .eq("user_id", user.id)
     .single();
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   const vogliomoEmail = candidati.some((c) => c.inviaEmail);

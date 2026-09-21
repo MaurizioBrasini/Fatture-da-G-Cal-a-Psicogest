@@ -3,17 +3,14 @@
 // calendario impostato (patientId assente/null). Non scrive nulla su
 // Google: restituisce solo il piano da mostrare per la conferma.
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
 import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   const patientId = body.patientId || null; // assente/null = tutti i pazienti
@@ -40,10 +37,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "Errore nel caricare le impostazioni: " + settingsError.message }, { status: 500 });
   }
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   const settings = { ...DEFAULT_SETTINGS, ...(settingsRow || {}) };

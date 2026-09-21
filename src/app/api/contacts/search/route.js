@@ -1,14 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchAllGoogleContacts } from "@/lib/googlePeople";
 import { normalizeName } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const { q } = await request.json();
   if (!q || !q.trim()) return NextResponse.json({ risultati: [] });
@@ -20,10 +17,7 @@ export async function POST(request) {
     .single();
 
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   try {

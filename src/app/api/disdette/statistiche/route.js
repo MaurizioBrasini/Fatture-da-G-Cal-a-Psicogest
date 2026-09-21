@@ -4,17 +4,14 @@
 // per la sincronizzazione, non è affidabile come denominatore) e delega il
 // calcolo a computeStatisticheDisdette. Non scrive nulla.
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
 import { computeStatisticheDisdette, todayISO } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   const soglia = typeof body.soglia === "number" && body.soglia > 0 && body.soglia < 1 ? body.soglia : undefined;
@@ -35,10 +32,7 @@ export async function POST(request) {
   const dbError = patientsError || slotsError || cancError;
   if (dbError) return NextResponse.json({ error: dbError.message }, { status: 500 });
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   const oggi = todayISO();

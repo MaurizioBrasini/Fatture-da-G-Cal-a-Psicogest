@@ -3,17 +3,14 @@
 // prima di un invio reale. Non tocca patients/email_log: è un invio
 // isolato, non fa parte dello storico "Comunicazioni".
 
-import { createClient } from "@/lib/supabase/server";
+import { utenteAutenticato } from "@/lib/apiAuth";
 import { sendEmail, buildBroadcastHtml } from "@/lib/email";
 import { personalizzaTesto, formatDataItaliana, todayISO } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
   if (!user.email) return NextResponse.json({ error: "Il tuo account non ha un'email associata." }, { status: 400 });
 
   const body = await request.json().catch(() => ({}));

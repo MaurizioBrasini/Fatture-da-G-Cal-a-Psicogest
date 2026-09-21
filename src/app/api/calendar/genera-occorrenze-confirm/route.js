@@ -6,16 +6,13 @@
 // patients.note se presente (cosi' un promemoria/nota non si perde quando
 // l'evento viene creato da zero — mai piu' descrizione vuota di default).
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { createGoogleCalendarEvent } from "@/lib/googleCalendar";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const { eventi, esclusioni } = await request.json().catch(() => ({}));
   if ((!Array.isArray(eventi) || !eventi.length) && (!Array.isArray(esclusioni) || !esclusioni.length)) {
@@ -37,10 +34,7 @@ export async function POST(request) {
     supabase.from("patients").select("id, nome_calendario, note"),
   ]);
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
   const patientsById = Object.fromEntries((patients || []).map((p) => [p.id, p]));
 

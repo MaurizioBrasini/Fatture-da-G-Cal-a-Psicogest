@@ -7,16 +7,13 @@
 // successo che di errore, per lo storico mostrato in "Comunicazioni".
 
 import { randomUUID } from "node:crypto";
-import { createClient } from "@/lib/supabase/server";
+import { utenteAutenticato } from "@/lib/apiAuth";
 import { sendEmail, buildBroadcastHtml } from "@/lib/email";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   // Ogni destinatario porta il proprio oggetto/testo già personalizzato

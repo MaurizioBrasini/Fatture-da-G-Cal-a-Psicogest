@@ -9,17 +9,14 @@
 // confermati o prenotati online: mai toccati in automatico). Non scrive
 // nulla su calendario o database.
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
 import { rilevaConflittiChiusura, computeImpattoChiusura, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   const { dataInizio, oraInizio, dataFine, oraFine, note } = body;
@@ -37,10 +34,7 @@ export async function POST(request) {
     ]);
 
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   const oggi = todayISO();

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchAllGoogleContacts } from "@/lib/googlePeople";
 import { matchPatientToGoogleContact } from "@/lib/logic";
 import { NextResponse } from "next/server";
@@ -42,11 +42,8 @@ function campiDiversi(patient, contact) {
 }
 
 export async function POST() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const { data: tokenRow, error: tokenError } = await supabase
     .from("google_tokens")
@@ -55,10 +52,7 @@ export async function POST() {
     .single();
 
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   const { data: patients, error: patientsError } = await supabase

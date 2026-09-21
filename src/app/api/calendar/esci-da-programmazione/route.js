@@ -21,17 +21,14 @@
 // vecchia cadenza. Corretto restringendo il confronto a weekday+time_of_day
 // dello/degli slot appena disattivati.
 
-import { createClient } from "@/lib/supabase/server";
+import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { deleteGoogleCalendarEvent, fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
 import { matchPatientForEvent, calcolaBillingStatus, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   const patientId = body.patientId;
@@ -44,10 +41,7 @@ export async function POST(request) {
   const patient = (patients || []).find((p) => p.id === patientId);
   if (!patient) return NextResponse.json({ error: "Paziente non trovato." }, { status: 404 });
   if (tokenError || !tokenRow) {
-    return NextResponse.json(
-      { error: "Nessuna autorizzazione Google salvata. Rifai il login da /login." },
-      { status: 400 }
-    );
+    return rispostaSenzaGoogle();
   }
 
   try {

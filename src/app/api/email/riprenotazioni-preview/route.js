@@ -4,16 +4,13 @@
 // computeRiprenotazioniPendenti in logic.js per i dettagli del confronto sui
 // timestamp. Non scrive nulla.
 
-import { createClient } from "@/lib/supabase/server";
+import { utenteAutenticato } from "@/lib/apiAuth";
 import { computeRiprenotazioniPendenti, addDays, todayISO } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const body = await request.json().catch(() => ({}));
   const giorniIndietro = Number(body.giorniIndietro) || 30;

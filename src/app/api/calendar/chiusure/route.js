@@ -11,17 +11,14 @@
 // dopo il primo giro non c'è più nulla da recuperare. Se Google non risponde
 // si mostra comunque l'elenco già in database, segnalando l'errore.
 
-import { createClient } from "@/lib/supabase/server";
+import { utenteAutenticato } from "@/lib/apiAuth";
 import { listChiusuraBlockEvents } from "@/lib/googleCalendar";
 import { chiusuraDentroFinestra, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Non autenticato" }, { status: 401 });
+  const { supabase, user, errore } = await utenteAutenticato();
+  if (errore) return errore;
 
   const oggi = todayISO();
   let recuperoErrore = null;
