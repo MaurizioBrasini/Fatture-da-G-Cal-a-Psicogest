@@ -1181,6 +1181,17 @@ test("computeGrigliaDisponibilita: sottoSlot — settimanale in entrambe le case
   // fascia senza nessuno: due caselle vuote
   assert.deepEqual(r.griglia.find((x) => x.orario === "09:30").giorni[2].sottoSlot.map((s) => s.pazienti.length), [0, 0]);
 });
+test("computeGrigliaDisponibilita: sottoSlot — un mensile da solo occupa la casella ma resta 'parziale'; due mensili nella stessa parità la riempiono", () => {
+  const solo = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-08", nome: "Paolo S.", stato: "attivo" }]);
+  const s = solo.griglia[0].giorni[2].sottoSlot;
+  assert.deepEqual(s.map((x) => x.parziale).sort(), [false, true]);
+  assert.equal(s.find((x) => x.parziale).pazienti[0].nome, "Paolo S.");
+  const due = computeGrigliaDisponibilita([
+    { weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-08", nome: "Paolo S.", stato: "attivo" },
+    { weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-22", nome: "Enrico O.", stato: "attivo" },
+  ]);
+  assert.ok(due.griglia[0].giorni[2].sottoSlot.every((x) => !x.parziale));
+});
 test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fascia senza pazienti", () => {
   const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
   const riga = r.griglia.find((x) => x.orario === "09:30");

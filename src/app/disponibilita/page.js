@@ -13,23 +13,19 @@ const GIORNI = [1, 2, 3, 4];
 const GIORNI_COL = { 1: "Lun", 2: "Mar", 3: "Mer", 4: "Gio" };
 const GIORNI_LABEL = { 1: "Lunedì", 2: "Martedì", 3: "Mercoledì", 4: "Giovedì" };
 
-// Da una cella griglia[orario].giorni[g] ricava una riga per ogni paziente che
-// la occupa (così due pazienti alternati su base quindicinale finiscono su
-// righe separate anziché sulla stessa), più al massimo UNA riga "Disponibile"
-// che riassume la capacità libera residua in "volte al mese": una fascia ha
-// fasiTotali fasi in un ciclo di fasiTotali settimane, quindi ciascuna fase
-// libera ricorre 4/fasiTotali volte in 4 settimane — es. quindicinale
-// (fasiTotali=2) → 2 volte/mese a fase, mensile (fasiTotali=4) → 1 volta/mese
-// a fase, da cui fasiLibere*(4/fasiTotali) volte/mese libere in quella fascia.
-function righeCella(c) {
-  if (!c || c.stato === "libero") return [{ tipo: "libero" }];
-  const occupate = c.pazienti.map((p) => ({ tipo: "occupato", nome: p.nome, stato: p.stato }));
-  const righe = [...occupate];
-  if (c.fasiLibere > 0) {
-    const alMese = Math.round((c.fasiLibere * 4) / c.fasiTotali);
-    righe.push({ tipo: "libero", cadenza: c.cadenza, alMese });
-  }
-  return righe;
+// Ragionando in slot quindicinali (le due caselle di ogni ora): "liberi" =
+// caselle senza nessuno, "parziali" = caselle occupate da un mensile che hanno
+// ancora una settimana libera (ci sta un altro mensile, non un quindicinale).
+function contaSlot(c) {
+  const caselle = c?.sottoSlot || [];
+  return {
+    liberi: caselle.filter((s) => s.pazienti.length === 0).length,
+    parziali: caselle.filter((s) => s.parziale).length,
+  };
+}
+
+function testoSlot(n, singolare, plurale) {
+  return `${n} ${n === 1 ? singolare : plurale}`;
 }
 
 export default function DisponibilitaPage() {
@@ -88,18 +84,17 @@ export default function DisponibilitaPage() {
     (g) => g.weekday === 5
   );
 
+  // Un elemento per orario, con i giorni che hanno almeno uno slot (libero o parziale).
   const disponibili = [];
+  let totaleLiberi = 0;
   r.griglia.forEach((row) => {
+    const giorni = [];
     GIORNI.forEach((g) => {
-      const c = row.giorni[g];
-      const rigaLibera = righeCella(c).find((x) => x.tipo === "libero");
-      if (!rigaLibera) return;
-      const detail =
-        !c || c.stato === "libero"
-          ? "Nessuno slot fisso assegnato su questa fascia."
-          : `Le altre fasi sono occupate da ${c.pazienti.map((p) => p.nome).join(", ")}.`;
-      disponibili.push({ giorno: GIORNI_LABEL[g], orario: row.orario, cadenza: rigaLibera.cadenza, alMese: rigaLibera.alMese, detail });
+      const { liberi, parziali } = contaSlot(row.giorni[g]);
+      totaleLiberi += liberi;
+      if (liberi > 0 || parziali > 0) giorni.push({ giorno: GIORNI_LABEL[g], liberi, parziali });
     });
+    if (giorni.length > 0) disponibili.push({ orario: row.orario, giorni });
   });
 
   return (
@@ -136,8 +131,8 @@ export default function DisponibilitaPage() {
             <div className="l">Slot fissi attivi</div>
           </div>
           <div className="disp-stat accent">
-            <div className="n">{disponibili.length}</div>
-            <div className="l">Fasce con margine per nuovi pazienti</div>
+            <div className="n">{totaleLiberi}</div>
+            <div className="l">Slot quindicinali liberi</div>
           </div>
           <div className="disp-stat">
             <div className="n">{sospesi.size}</div>
@@ -147,7 +142,8 @@ export default function DisponibilitaPage() {
 
         <h2 className="sub-heading">Griglia settimanale, lunedì–giovedì</h2>
         <div className="disp-legend">
-          <span><span className="disp-swatch" style={{ background: "var(--accent-soft)" }} />Verde "Disponibile" = spazio libero</span>
+          <span><span className="disp-swatch" style={{ background: "#CDE4D6" }} />Verde = slot libero</span>
+          <span><span className="disp-swatch" style={{ background: "#EEF5F1", border: "1px solid #CDE4D6" }} />Verde chiaro = mensile con ancora una settimana libera</span>
           <span>Ogni ora è divisa in due caselle (le due settimane del ciclo quindicinale)</span>
           <span><span className="disp-swatch" style={{ background: "var(--danger)" }} />Nome in rosso = sospeso</span>
         </div>
@@ -173,13 +169,16 @@ export default function DisponibilitaPage() {
                         s.pazienti.length === 0 ? (
                           <div key={i} className="disp-sub libero">Disponibile</div>
                         ) : (
-                          <div key={i} className="disp-sub">
-                            {s.pazienti.map((p, j) => (
-                              <span key={j}>
-                                {j > 0 && " / "}
-                                <span className={p.stato === "sospeso" ? "disp-susp" : ""}>{p.nome}</span>
-                              </span>
-                            ))}
+                          <div key={i} className={`disp-sub${s.parziale ? " parziale" : ""}`}>
+                            <span>
+                              {s.pazienti.map((p, j) => (
+                                <span key={j}>
+                                  {j > 0 && " / "}
+                                  <span className={p.stato === "sospeso" ? "disp-susp" : ""}>{p.nome}</span>
+                                </span>
+                              ))}
+                              {s.parziale && " / Disponibile"}
+                            </span>
                           </div>
                         )
                       )}
@@ -191,16 +190,28 @@ export default function DisponibilitaPage() {
           </div>
         </div>
 
-        <h2 className="sub-heading">Posti disponibili per nuovi pazienti ({disponibili.length})</h2>
+        <h2 className="sub-heading">Posti disponibili per nuovi pazienti ({totaleLiberi} slot quindicinali)</h2>
         {disponibili.length === 0 ? (
-          <div className="empty-row">Nessuna fascia con margine al momento.</div>
+          <div className="empty-row">Nessuno slot libero al momento.</div>
         ) : (
           <div style={{ marginBottom: 28 }}>
-            {disponibili.map((a, i) => (
-              <div key={i} className="disp-avail-row">
-                <div className="when">{a.orario}<span className="day">{a.giorno}</span></div>
-                <div className="muted small">{a.detail}</div>
-                <div className="frac-badge">{a.cadenza ? `${a.cadenza} — ${a.alMese} al mese` : "disponibile"}</div>
+            {disponibili.map((a) => (
+              <div key={a.orario} className="disp-avail-row">
+                <div className="when">{a.orario}</div>
+                <div>
+                  {a.giorni.map((d) => (
+                    <div key={d.giorno} className="disp-avail-day">
+                      <span className="d">{d.giorno}</span>
+                      {d.liberi > 0 && <span className="frac-badge">{testoSlot(d.liberi, "slot", "slot")}</span>}
+                      {d.parziali > 0 && (
+                        <span className="frac-badge parziale">
+                          {d.liberi > 0 ? "+ " : ""}
+                          {testoSlot(d.parziali, "slot mensile", "slot mensili")}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>

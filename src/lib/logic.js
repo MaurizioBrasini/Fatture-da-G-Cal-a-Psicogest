@@ -251,7 +251,7 @@ export function computeGrigliaDisponibilita(patientSlots) {
     for (const g of [1, 2, 3, 4, 5]) {
       const righe = gruppi.get(`${g}|${orario}:00`) || [];
       if (righe.length === 0) {
-        riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [] }, { pazienti: [] }] };
+        riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [], parziale: false }, { pazienti: [], parziale: false }] };
         continue;
       }
       const { cicloMax, faseSlots, occupazione } = occupazioneFascia(righe);
@@ -263,15 +263,19 @@ export function computeGrigliaDisponibilita(patientSlots) {
       const sottoSlot = [0, 1].map((s) => {
         const visti = new Set();
         const pazienti = [];
+        let fasiLibereCasella = 0;
         occupazione.forEach((occ, k) => {
           if (cicloMax > 7 && k % 2 !== s) return;
+          if (occ.length === 0) fasiLibereCasella++;
           for (const r of occ) {
             if (visti.has(r)) continue;
             visti.add(r);
             pazienti.push({ nome: r.nome, stato: r.stato });
           }
         });
-        return { pazienti };
+        // parziale: casella occupata da mensili ma con ancora una settimana
+        // libera nel suo ciclo (ci starebbe un altro mensile, non un quindicinale).
+        return { pazienti, parziale: pazienti.length > 0 && fasiLibereCasella > 0 };
       });
       riga.giorni[g] = {
         sottoSlot,
