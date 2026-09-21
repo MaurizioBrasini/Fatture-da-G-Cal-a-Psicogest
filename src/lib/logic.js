@@ -1259,8 +1259,44 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, esistentiPaz, opzioni.closures, ultimoPrevisto));
   }
 
+  // Pazienti "liberi" (senza slot fisso) e persone non ancora abbinate:
+  // (1) fasce riservate ma non ancora popolate, (2) un solo appuntamento
+  // futuro alla volta, (3) almeno minGiorni dagli altri appuntamenti.
+  const oggi = opzioni.oggi || todayISO();
+  // Ultima data a calendario per ogni paziente a slot fisso (disdetti inclusi,
+  // prenotazioni grezze escluse): oltre quella data lo schema NON è ancora popolato.
+  const ultimaDataPerPaziente = {};
+  if (slotAttivi.length) {
+    for (const e of events || []) {
+      if (!e.ora || BOOKING_TITLE_REGEX.test(e.titolo || "")) continue;
+      const id = matchPatientForEvent(e.titolo, patients)?.patient.id;
+      if (id && conSlot.has(id) && (!ultimaDataPerPaziente[id] || e.data > ultimaDataPerPaziente[id])) ultimaDataPerPaziente[id] = e.data;
+    }
+  }
+  const minuti = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+  // Una data/ora è "riservata" se cade su una seduta prevista dallo schema di
+  // un paziente fisso che il calendario non ha ancora popolato (data > ultimo
+  // evento di quel paziente): Google la mostra libera solo perché troppo avanti.
+  const riservataAlloSchema = (r) => {
+    if (!r.ora || r.data < oggi) return false;
+    const giornoSettimana = new Date(`${r.data}T00:00:00Z`).getUTCDay();
+    const orizzonteGiorni = daysBetween(oggi, r.data) + 1;
+    return slotAttivi.some((s) => {
+      if (s.weekday !== giornoSettimana || !s.time_of_day || !s.interval_days || !s.anchor_date) return false;
+      if (Math.abs(minuti(s.time_of_day) - minuti(r.ora)) >= 60) return false;
+      const ultima = ultimaDataPerPaziente[s.patient_id];
+      if (ultima && r.data <= ultima) return false;
+      return occorrenzeFuture(s, opzioni.closures, orizzonteGiorni, oggi).includes(r.data);
+    });
+  };
+
   for (const r of ordinate) {
-    if (!r.patientId || conSlot.has(r.patientId)) continue;
+    if (r.patientId && conSlot.has(r.patientId)) continue;
+    if (riservataAlloSchema(r)) {
+      conflitti[r.eventId] = [{ data: r.data, ora: r.ora, tipo: "riservato", riservato: true }];
+      continue;
+    }
+    if (!r.patientId) continue;
     const vicini = [];
     for (const e of esistenti) {
       if (Math.abs(daysBetween(e.data, r.data)) >= minGiorni) continue;
@@ -1271,7 +1307,19 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     for (const k of tenute[r.patientId] || []) {
       if (Math.abs(daysBetween(k.data, r.data)) < minGiorni) vicini.push({ data: k.data, ora: k.ora, tipo: "prenotazione" });
     }
-    if (vicini.length) conflitti[r.eventId] = vicini;
+    if (vicini.length) {
+      conflitti[r.eventId] = vicini;
+      continue;
+    }
+    // Un solo appuntamento futuro alla volta (anche oltre i 14 giorni): un
+    // altro appuntamento già in agenda dopo oggi, o una prenotazione tenuta prima.
+    const altri = [
+      ...esistenti
+        .filter((e) => e.data > oggi && matchPatientForEvent(e.titolo, patients)?.patient.id === r.patientId)
+        .map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento", unaSola: true })),
+      ...(tenute[r.patientId] || []).map((k) => ({ data: k.data, ora: k.ora, tipo: "prenotazione", unaSola: true })),
+    ];
+    if (altri.length) conflitti[r.eventId] = altri;
     else (tenute[r.patientId] ||= []).push(r);
   }
   return conflitti;

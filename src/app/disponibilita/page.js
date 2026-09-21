@@ -149,7 +149,7 @@ export default function DisponibilitaPage() {
         </div>
         <div className="table-scroll" style={{ marginBottom: 28 }}>
           <div className="disp-grid">
-            <div />
+            <div className="disp-dayhead" />
             {GIORNI.map((g) => (
               <div key={g} className="disp-dayhead">{GIORNI_COL[g]}</div>
             ))}

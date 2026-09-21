@@ -69,8 +69,8 @@ export async function POST(request) {
     const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(events, patients || []);
     const tutte = [...pronte, ...inAttesa, ...ambigue, ...nuove];
 
-    const conflitti = computeConflittiPrenotazioni([...pronte, ...inAttesa], eventiLarghi, patients || [], slots || [], { closures: closures || [] });
-    for (const r of [...pronte, ...inAttesa]) {
+    const conflitti = computeConflittiPrenotazioni(tutte, eventiLarghi, patients || [], slots || [], { closures: closures || [] });
+    for (const r of tutte) {
       if (conflitti[r.eventId]) r.conflitto = conflitti[r.eventId];
     }
 

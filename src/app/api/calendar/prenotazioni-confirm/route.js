@@ -95,8 +95,9 @@ export async function POST(request) {
     } catch (e) {
       return NextResponse.json({ error: "Rilettura del calendario fallita, nessuna prenotazione annullata: " + e.message }, { status: 500 });
     }
-    const { pronte, inAttesa } = computePrenotazioniPreview(eventiLarghi.filter((e) => e.data >= oggi), patients || []);
-    const righe = [...pronte, ...inAttesa];
+    const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(eventiLarghi.filter((e) => e.data >= oggi), patients || []);
+    // anche ambigue/nuove: la regola delle fasce riservate vale per chiunque prenoti
+    const righe = [...pronte, ...inAttesa, ...ambigue, ...nuove];
     const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || [], { closures: closures || [] });
 
     for (const rf of rifiuti) {
@@ -136,6 +137,8 @@ export async function POST(request) {
               linkPrenotazioni: settingsRow?.link_prenotazioni_online,
               frequenzaFissa: !!conflitto[0]?.cadenza,
               oltreOrizzonte: !!conflitto[0]?.oltreOrizzonte,
+              riservato: !!conflitto[0]?.riservato,
+              unaSola: !!conflitto[0]?.unaSola,
             }),
           });
         } catch (e) {

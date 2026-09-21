@@ -159,8 +159,10 @@ input[type=number] { -moz-appearance: textfield; }
 /* Griglia a caselle: bordo spesso tra un'ora e l'altra, sottile tra le due
    caselle (settimane) di uno stesso orario. Tutto bianco tranne "Disponibile". */
 .disp-grid { display: grid; grid-template-columns: 60px repeat(4, minmax(160px, 1fr)); background: var(--surface); min-width: 700px; border-top: 2px solid #7F8F87; border-left: 2px solid #7F8F87; }
-.disp-grid > div { background: var(--surface); border-right: 1px solid #7F8F87; border-bottom: 2px solid #7F8F87; }
-.disp-dayhead, .disp-timehead { background: var(--bg) !important; }
+/* Le celle delle righe stanno dentro un wrapper display:contents, quindi i
+   bordi vanno sulle classi delle celle, non su ".disp-grid > div". */
+.disp-dayhead, .disp-timehead, .disp-cell { background: var(--surface); border-right: 1px solid #7F8F87; border-bottom: 2px solid #7F8F87; }
+.disp-dayhead, .disp-timehead { background: var(--bg); }
 .disp-dayhead { padding: 8px; text-align: center; font-size: 11px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.03em; }
 .disp-timehead { padding: 8px; font-family: "SF Mono", "Menlo", monospace; font-size: 12px; color: var(--ink-soft); display: flex; align-items: center; justify-content: center; }
 .disp-cell { display: flex; flex-direction: column; font-size: 12px; }

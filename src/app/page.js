@@ -1339,7 +1339,17 @@ export default function DashboardPage() {
                                 <tr>
                                   <td colSpan={3}>
                                     <div className="error-box" style={{ marginBottom: 8 }}>
-                                      {r.conflitto[0]?.oltreOrizzonte ? (
+                                      {r.conflitto[0]?.riservato ? (
+                                        <>
+                                          <strong>Fascia riservata a un paziente a schema fisso</strong> — questo giorno e
+                                          orario risultano liberi solo perché il calendario non è ancora popolato fin lì.
+                                        </>
+                                      ) : r.conflitto[0]?.unaSola ? (
+                                        <>
+                                          <strong>Un solo appuntamento alla volta</strong> — il paziente ha già un altro
+                                          appuntamento futuro. Già presente:
+                                        </>
+                                      ) : r.conflitto[0]?.oltreOrizzonte ? (
                                         <>
                                           <strong>Oltre il periodo già programmato</strong> — il calendario di questo paziente
                                           arriva fino al {formatDataItaliana(r.conflitto[0].data)}: si può prenotare solo entro
@@ -1362,10 +1372,10 @@ export default function DashboardPage() {
                                           settimane. Già presente:
                                         </>
                                       )}{" "}
-                                      {r.conflitto
-                                        .map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` ${c.ora}` : ""}${c.tipo === "prenotazione" ? " (altra prenotazione)" : ""}`)
-                                        .join(", ")}
-                                      .
+                                      {!r.conflitto[0]?.riservato &&
+                                        r.conflitto
+                                          .map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` ${c.ora}` : ""}${c.tipo === "prenotazione" ? " (altra prenotazione)" : ""}`)
+                                          .join(", ") + "."}
                                       <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
                                         <input
                                           type="checkbox"
@@ -1400,7 +1410,7 @@ export default function DashboardPage() {
                             return (
                               <li key={r.eventId}>
                                 {r.bookerNome} ({r.data}) → {p ? `${p.nome || ""} ${p.cognome || ""}`.trim() : `paziente #${r.patientId}`}
-                                {r.conflitto && (r.conflitto[0]?.oltreOrizzonte ? " — ⚠ oltre il periodo già programmato" : r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
+                                {r.conflitto && (r.conflitto[0]?.riservato ? " — ⚠ fascia riservata, calendario non ancora popolato" : r.conflitto[0]?.unaSola ? " — ⚠ ha già un altro appuntamento futuro" : r.conflitto[0]?.oltreOrizzonte ? " — ⚠ oltre il periodo già programmato" : r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
                               </li>
                             );
                           })}

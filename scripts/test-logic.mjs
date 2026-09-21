@@ -769,11 +769,25 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
   const riga = (eventId, data, patientId = 1) => ({ eventId, data, ora: "10:00", patientId });
 
   test("computeConflittiPrenotazioni: una prenotazione a meno di 14 giorni da un appuntamento esistente è in conflitto (anche passato)", () => {
-    const events = [ev("2026-10-10")]; // appuntamento già presente
+    const events = [ev("2026-10-10")]; // appuntamento già presente (già passato: oggi = 1/11)
     // 13 giorni dopo -> conflitto; 14 giorni dopo -> ok; 5 giorni PRIMA -> conflitto
-    const c = computeConflittiPrenotazioni([riga("a", "2026-10-23"), riga("b", "2026-10-24"), riga("c", "2026-10-05")], events, patients, slots);
+    const c = computeConflittiPrenotazioni([riga("a", "2026-10-23"), riga("b", "2026-10-24"), riga("c", "2026-10-05")], events, patients, slots, { oggi: "2026-11-01" });
     assert.deepEqual(Object.keys(c).sort(), ["a", "c"]);
     assert.deepEqual(c.a, [{ data: "2026-10-10", ora: "10:00", tipo: "appuntamento" }]);
+  });
+
+  test("computeConflittiPrenotazioni: paziente libero, un solo appuntamento futuro alla volta (anche oltre i 14 giorni)", () => {
+    // ha già un appuntamento futuro il 10/10: una prenotazione il 24/10 (14 gg dopo) è comunque la seconda
+    const c = computeConflittiPrenotazioni([riga("a", "2026-10-24")], [ev("2026-10-10")], patients, slots, { oggi: "2026-10-01" });
+    assert.equal(c.a[0].unaSola, true);
+    assert.equal(c.a[0].data, "2026-10-10");
+    // due prenotazioni lontane fra loro: resta la prima
+    const d = computeConflittiPrenotazioni([riga("p1", "2026-10-10"), riga("p2", "2026-11-10")], [], patients, slots, { oggi: "2026-10-01" });
+    assert.deepEqual(Object.keys(d), ["p2"]);
+    assert.equal(d.p2[0].tipo, "prenotazione");
+    assert.equal(d.p2[0].unaSola, true);
+    // dopo l'appuntamento (passato) la prenotazione torna possibile
+    assert.deepEqual(computeConflittiPrenotazioni([riga("q", "2026-10-24")], [ev("2026-10-10")], patients, slots, { oggi: "2026-10-15" }), {});
   });
 
   test("computeConflittiPrenotazioni: tre prenotazioni in una settimana -> resta la prima, le altre in conflitto", () => {
@@ -835,6 +849,26 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
 
   test("computeConflittiPrenotazioni: slot fisso, l'orizzonte non si applica ai pazienti senza slot ne' con calendario vuoto", () => {
     assert.deepEqual(computeConflittiPrenotazioni([riga("m", "2027-03-01", 1)], [], patients, slotQuindicinale), {});
+  });
+
+  test("computeConflittiPrenotazioni: fasce riservate — un giorno/orario dello schema fisso non ancora popolato non e' prenotabile da chi e' libero", () => {
+    // Luca: quindicinale lunedì 10:00 (5/10, 19/10, 2/11, 16/11...), calendario popolato fino al 2/11.
+    const events = [evL("2026-10-05"), evL("2026-10-19"), evL("2026-11-02")];
+    const oggi = "2026-10-01";
+    const conf = (data, ora = "10:00", pid = 1) => computeConflittiPrenotazioni([{ eventId: "z", data, ora, patientId: pid }], events, patients, slotQuindicinale, { oggi }).z;
+    assert.equal(conf("2026-11-16")[0].riservato, true); // lunedì di Luca oltre il 2/11: non ancora popolato
+    assert.equal(conf("2026-11-16", "10:30")[0].riservato, true); // orario sovrapposto (<60 min)
+    assert.equal(conf("2026-11-09"), undefined); // lunedì della settimana "libera" del ciclo quindicinale: davvero libero
+    assert.equal(conf("2026-11-17"), undefined); // altro giorno della settimana
+    assert.equal(conf("2026-11-16", "15:00"), undefined); // altro orario
+    assert.equal(conf("2026-10-19"), undefined); // gia' popolato (evento di Luca a calendario)
+    // vale anche per chi non e' ancora abbinato a un paziente
+    assert.equal(conf("2026-11-16", "10:00", null)[0].riservato, true);
+  });
+
+  test("computeConflittiPrenotazioni: fasce riservate — uno slot senza alcun evento a calendario e' riservato per tutte le date future dello schema", () => {
+    const c = computeConflittiPrenotazioni([{ eventId: "z", data: "2026-10-19", ora: "10:00", patientId: 1 }], [], patients, slotQuindicinale, { oggi: "2026-10-01" });
+    assert.equal(c.z[0].riservato, true);
   });
 
   test("computeConflittiPrenotazioni: una prenotazione gia' rinominata (titolo del paziente) conta come appuntamento esistente, non come prenotazione da riconciliare", () => {

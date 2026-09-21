@@ -59,7 +59,28 @@ export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni })
 // appuntamento a meno di due settimane (regola "un solo appuntamento ogni due
 // settimane"). `conflitti` = [{data "YYYY-MM-DD", ora}] già formattati come
 // testo dal chiamante; `dataPrenotazione`/`oraPrenotazione` idem.
-export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa, oltreOrizzonte }) {
+export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa, oltreOrizzonte, riservato, unaSola }) {
+  // Giorno/orario non ancora aperto: il calendario è popolato solo fino a una certa data.
+  if (riservato) {
+    return testoInHtml(
+      `Gentile ${nomePaziente},\n\n` +
+        `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+        `perché quel giorno e orario non sono ancora disponibili per le prenotazioni.\n\n` +
+        (linkPrenotazioni ? `Potrà scegliere un altro incontro, in una data più vicina, da questo link:\n\n${linkPrenotazioni}\n\n` : "\n") +
+        `Cordiali saluti,\nDr. Maurizio Brasini`
+    );
+  }
+  // Un solo appuntamento futuro alla volta.
+  if (unaSola) {
+    return testoInHtml(
+      `Gentile ${nomePaziente},\n\n` +
+        `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+        `perché risulta già un altro appuntamento fissato (${conflittiTesto}).\n\n` +
+        `È possibile avere un solo appuntamento alla volta. ` +
+        (linkPrenotazioni ? `Dopo quell'incontro potrà prenotare il successivo da questo link:\n\n${linkPrenotazioni}\n\n` : "\n") +
+        `Cordiali saluti,\nDr. Maurizio Brasini`
+    );
+  }
   // Paziente a schema fisso che prenota oltre l'ultimo appuntamento già in
   // calendario: sarà lui/lei a fissare più avanti, quando il calendario si estende.
   if (oltreOrizzonte) {
