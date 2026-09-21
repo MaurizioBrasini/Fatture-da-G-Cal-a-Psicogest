@@ -170,13 +170,44 @@ export default function PazientiPage() {
   async function apriStorico(patient) {
     setStoricoLoading(true);
     const nome = patient.nome_calendario || patient.fatturare_a;
-    setStoricoPaziente({ nome, fatture: [], contanti: [] });
+    setStoricoPaziente({ patientId: patient.id, nome, fatture: [], contanti: [] });
     const [{ data: fatture }, { data: contanti }] = await Promise.all([
       supabase.from("invoice_history").select("*").eq("patient_id", patient.id).order("data", { ascending: false }),
       supabase.from("contante_pagamenti").select("*").eq("patient_id", patient.id).order("data", { ascending: false }),
     ]);
-    setStoricoPaziente({ nome, fatture: fatture || [], contanti: contanti || [] });
+    setStoricoPaziente({ patientId: patient.id, nome, fatture: fatture || [], contanti: contanti || [] });
     setStoricoLoading(false);
+  }
+
+  // Annulla un incasso registrato per errore: lo toglie dallo storico e
+  // rimette l'importo nel saldo (il debito torna com'era prima dell'incasso).
+  async function annullaIncasso(h) {
+    if (!window.confirm(`Annullare l'incasso di € ${h.importo} del ${h.data}? Il saldo dovuto tornerà ad aumentare di € ${h.importo}.`)) return;
+    const patientId = storicoPaziente.patientId;
+    const p = patients.find((pp) => pp.id === patientId);
+    const { error } = await supabase.from("contante_pagamenti").delete().eq("id", h.id);
+    if (error) {
+      window.alert("Annullamento non riuscito: " + error.message);
+      return;
+    }
+    const nuovoSaldo = Math.round(((p?.contante_dovuto || 0) + Number(h.importo)) * 100) / 100;
+    await supabase.from("patients").update({ contante_dovuto: nuovoSaldo }).eq("id", patientId);
+    patchLocal(patientId, { contante_dovuto: nuovoSaldo });
+    setStoricoPaziente((s) => ({ ...s, contanti: s.contanti.filter((x) => x.id !== h.id) }));
+    rinumeraPazienteSilenzioso(patientId).catch((e) => console.error("Rinumerazione automatica fallita:", e));
+  }
+
+  // Correzione manuale del saldo (es. errore in un accumulo o un incasso già
+  // fatturato): imposta direttamente il valore, senza registrare un incasso.
+  async function correggiSaldo() {
+    const { patientId, nuovoSaldo } = contantiModal;
+    const valore = parseFloat(String(nuovoSaldo).replace(",", "."));
+    if (Number.isNaN(valore)) return;
+    setContantiModal(null);
+    const arrotondato = Math.round(valore * 100) / 100;
+    await supabase.from("patients").update({ contante_dovuto: arrotondato }).eq("id", patientId);
+    patchLocal(patientId, { contante_dovuto: arrotondato });
+    rinumeraPazienteSilenzioso(patientId).catch((e) => console.error("Rinumerazione automatica fallita:", e));
   }
 
   // --- Incasso contanti (quota non fatturata, es. 10€/seduta a parte) ---
@@ -191,6 +222,8 @@ export default function PazientiPage() {
       // alla seduta 5, prima della fattura) lo scrivi tu.
       value: patient.contante_dovuto > 0 ? String(patient.contante_dovuto) : "",
       data: todayISO(), // modificabile: se ti dimentichi di registrare il giorno stesso
+      correggi: false,
+      nuovoSaldo: String(patient.contante_dovuto || 0),
     });
   }
 
@@ -1335,13 +1368,16 @@ export default function PazientiPage() {
               ) : (
                 <table className="tbl">
                   <thead>
-                    <tr><th>Data</th><th>Importo</th></tr>
+                    <tr><th>Data</th><th>Importo</th><th></th></tr>
                   </thead>
                   <tbody>
                     {storicoPaziente.contanti.map((h) => (
                       <tr key={h.id}>
                         <td className="mono">{h.data}</td>
                         <td className="mono">€ {h.importo}</td>
+                        <td>
+                          <button className="btn-small" title="Annulla questo incasso (il saldo torna com'era)" onClick={() => annullaIncasso(h)}>Annulla</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1395,6 +1431,34 @@ export default function PazientiPage() {
               onChange={(e) => setContantiModal((m) => ({ ...m, data: e.target.value }))}
             />
           </label>
+          <div style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+            {!contantiModal.correggi ? (
+              <button
+                className="btn-small"
+                title="Per correggere un errore: imposta il saldo direttamente, senza registrare un incasso"
+                onClick={() => setContantiModal((m) => ({ ...m, correggi: true }))}
+              >
+                Correggi il saldo a mano
+              </button>
+            ) : (
+              <>
+                <label className="muted small" style={{ display: "block" }}>
+                  Nuovo saldo dovuto in € (0 = niente da incassare; nessun incasso viene registrato)
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="num"
+                    style={{ width: "100%", boxSizing: "border-box", marginTop: 4 }}
+                    value={contantiModal.nuovoSaldo}
+                    onChange={(e) => setContantiModal((m) => ({ ...m, nuovoSaldo: e.target.value }))}
+                  />
+                </label>
+                <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={correggiSaldo} disabled={contantiModal.nuovoSaldo === ""}>
+                  Imposta questo saldo
+                </button>
+              </>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
             <button className="btn btn-ghost" onClick={() => setContantiModal(null)}>Annulla</button>
             <button
