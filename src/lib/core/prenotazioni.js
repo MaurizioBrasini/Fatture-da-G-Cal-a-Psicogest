@@ -252,49 +252,41 @@ function conflittiSlotFisso(slot, righePaz, esistentiPaz, closures, ultimoPrevis
 
 export function computeConflittiPrenotazioni(righe, events, patients, slots, opzioni = {}) {
   const minGiorni = opzioni.minGiorni ?? GIORNI_MIN_TRA_PRENOTAZIONI;
+  const oggi = opzioni.oggi || todayISO();
   const slotAttivi = (slots || []).filter((s) => s.active);
   const conSlot = new Set(slotAttivi.map((s) => s.patient_id));
-  const esistenti = (events || []).filter(
-    (e) => e.ora && !BOOKING_TITLE_REGEX.test(e.titolo || "") && !DISDETTA_REGEX.test(e.descrizione || "")
-  );
-  const tenute = {};
-  const conflitti = {};
   const ordinate = [...(righe || [])].sort((a, b) => (a.data + (a.ora || "")).localeCompare(b.data + (b.ora || "")));
 
-  // Pazienti con slot fisso: regola della cadenza (vedi conflittiSlotFisso).
+  // Eventi del calendario per paziente: l'abbinamento titolo→paziente si fa UNA
+  // volta per evento (le prenotazioni grezze del link non contano). `tutti`
+  // include le sedute disdette (sono ancora nello schema), `attivi` no.
+  const tutti = new Map();
+  for (const e of events || []) {
+    if (!e.ora || BOOKING_TITLE_REGEX.test(e.titolo || "")) continue;
+    const id = matchPatientForEvent(e.titolo, patients)?.patient.id;
+    if (id) (tutti.get(id) || tutti.set(id, []).get(id)).push(e);
+  }
+  const attivi = (id) => (tutti.get(id) || []).filter((e) => !DISDETTA_REGEX.test(e.descrizione || ""));
+  const ultimoEvento = (id) => [...(tutti.get(id) || [])].sort((a, b) => (a.data + a.ora).localeCompare(b.data + b.ora)).pop();
+
+  const conflitti = {};
+
+  // --- Pazienti con slot fisso: regola della cadenza (vedi conflittiSlotFisso).
   const idFissi = [...new Set(ordinate.filter((r) => r.patientId && conSlot.has(r.patientId)).map((r) => r.patientId))];
   for (const id of idFissi) {
     const slot = slotAttivi.find((s) => s.patient_id === id && s.interval_days && s.anchor_date);
     if (!slot) continue;
-    const righePaz = ordinate.filter((r) => r.patientId === id);
-    const esistentiPaz = esistenti.filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === id);
-    // Orizzonte: ultimo evento del paziente a calendario, disdetti inclusi.
-    const eventiPaz = (events || []).filter(
-      (e) => e.ora && !BOOKING_TITLE_REGEX.test(e.titolo || "") && matchPatientForEvent(e.titolo, patients)?.patient.id === id
-    );
-    const ultimo = eventiPaz.sort((a, b) => (a.data + a.ora).localeCompare(b.data + b.ora)).pop();
+    const ultimo = ultimoEvento(id);
     const ultimoPrevisto = ultimo ? { data: ultimo.data, ora: ultimo.ora } : null;
-    Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, esistentiPaz, opzioni.closures, ultimoPrevisto));
+    const righePaz = ordinate.filter((r) => r.patientId === id);
+    Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, attivi(id), opzioni.closures, ultimoPrevisto));
   }
 
-  // Pazienti "liberi" (senza slot fisso) e persone non ancora abbinate:
-  // (1) fasce riservate ma non ancora popolate, (2) un solo appuntamento
-  // futuro alla volta, (3) almeno minGiorni dagli altri appuntamenti.
-  const oggi = opzioni.oggi || todayISO();
-  // Ultima data a calendario per ogni paziente a slot fisso (disdetti inclusi,
-  // prenotazioni grezze escluse): oltre quella data lo schema NON è ancora popolato.
-  const ultimaDataPerPaziente = {};
-  if (slotAttivi.length) {
-    for (const e of events || []) {
-      if (!e.ora || BOOKING_TITLE_REGEX.test(e.titolo || "")) continue;
-      const id = matchPatientForEvent(e.titolo, patients)?.patient.id;
-      if (id && conSlot.has(id) && (!ultimaDataPerPaziente[id] || e.data > ultimaDataPerPaziente[id])) ultimaDataPerPaziente[id] = e.data;
-    }
-  }
-  const minuti = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+  // --- Pazienti "liberi" (senza slot fisso) e persone non ancora abbinate.
   // Una data/ora è "riservata" se cade su una seduta prevista dallo schema di
   // un paziente fisso che il calendario non ha ancora popolato (data > ultimo
   // evento di quel paziente): Google la mostra libera solo perché troppo avanti.
+  const minuti = (hhmm) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
   const riservataAlloSchema = (r) => {
     if (!r.ora || r.data < oggi) return false;
     const giornoSettimana = new Date(`${r.data}T00:00:00Z`).getUTCDay();
@@ -302,12 +294,15 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     return slotAttivi.some((s) => {
       if (s.weekday !== giornoSettimana || !s.time_of_day || !s.interval_days || !s.anchor_date) return false;
       if (Math.abs(minuti(s.time_of_day) - minuti(r.ora)) >= 60) return false;
-      const ultima = ultimaDataPerPaziente[s.patient_id];
+      const ultima = ultimoEvento(s.patient_id)?.data;
       if (ultima && r.data <= ultima) return false;
       return occorrenzeFuture(s, opzioni.closures, orizzonteGiorni, oggi).includes(r.data);
     });
   };
 
+  // Regole, in ordine: (1) fascia riservata non ancora popolata, (2) almeno
+  // minGiorni dagli altri appuntamenti, (3) un solo appuntamento futuro alla volta.
+  const tenute = {}; // prenotazioni già accettate, per paziente
   for (const r of ordinate) {
     if (r.patientId && conSlot.has(r.patientId)) continue;
     if (riservataAlloSchema(r)) {
@@ -315,27 +310,26 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
       continue;
     }
     if (!r.patientId) continue;
-    const vicini = [];
-    for (const e of esistenti) {
-      if (Math.abs(daysBetween(e.data, r.data)) >= minGiorni) continue;
-      if (matchPatientForEvent(e.titolo, patients)?.patient.id === r.patientId) {
-        vicini.push({ data: e.data, ora: e.ora, tipo: "appuntamento" });
-      }
-    }
-    for (const k of tenute[r.patientId] || []) {
-      if (Math.abs(daysBetween(k.data, r.data)) < minGiorni) vicini.push({ data: k.data, ora: k.ora, tipo: "prenotazione" });
-    }
+
+    const esistenti = attivi(r.patientId);
+    const precedenti = tenute[r.patientId] || [];
+    const vicini = [
+      ...esistenti
+        .filter((e) => Math.abs(daysBetween(e.data, r.data)) < minGiorni)
+        .map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento" })),
+      ...precedenti
+        .filter((k) => Math.abs(daysBetween(k.data, r.data)) < minGiorni)
+        .map((k) => ({ data: k.data, ora: k.ora, tipo: "prenotazione" })),
+    ];
     if (vicini.length) {
       conflitti[r.eventId] = vicini;
       continue;
     }
-    // Un solo appuntamento futuro alla volta (anche oltre i 14 giorni): un
-    // altro appuntamento già in agenda dopo oggi, o una prenotazione tenuta prima.
     const altri = [
       ...esistenti
-        .filter((e) => e.data > oggi && matchPatientForEvent(e.titolo, patients)?.patient.id === r.patientId)
+        .filter((e) => e.data > oggi)
         .map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento", unaSola: true })),
-      ...(tenute[r.patientId] || []).map((k) => ({ data: k.data, ora: k.ora, tipo: "prenotazione", unaSola: true })),
+      ...precedenti.map((k) => ({ data: k.data, ora: k.ora, tipo: "prenotazione", unaSola: true })),
     ];
     if (altri.length) conflitti[r.eventId] = altri;
     else (tenute[r.patientId] ||= []).push(r);
