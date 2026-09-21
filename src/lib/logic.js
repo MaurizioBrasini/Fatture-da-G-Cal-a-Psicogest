@@ -992,7 +992,10 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
     let saldatiOggi = 0;
     while (iPag < pagamenti.length && pagamenti[iPag].data <= ev.data) {
       const p = pagamenti[iPag++];
-      deve = Math.max(0, arrotonda(deve - (p.importo || 0)));
+      // Senza tetto a zero: un incasso in anticipo (prima che il debito sia
+      // maturato) è un credito che il prossimo accumulo compensa; formatCodice
+      // scrive il "deve" solo se il saldo è positivo.
+      deve = arrotonda(deve - (p.importo || 0));
       if (p.data === ev.data) saldatiOggi += p.importo || 0;
     }
     if (fatturare && quota > 0) deve = arrotonda(deve + quota * contatore);
@@ -1586,6 +1589,13 @@ export function computeOccorrenzeDaGenerare(slots, patients, events, closures, s
 // "sedute" sessioni per un paziente con una quota_contante_seduta fissa.
 export function accumulaContante(dovutoAttuale, quotaContanteSeduta, sedute) {
   return Math.round(((dovutoAttuale || 0) + (quotaContanteSeduta || 0) * sedute) * 100) / 100;
+}
+
+// Registra un incasso: può portare il saldo sotto zero (credito). Succede
+// quando il paziente paga alla seduta 5, prima che la fattura sia confermata e
+// il debito sia entrato nel saldo: alla conferma l'accumulo lo compensa.
+export function incassaContante(saldoAttuale, importoPagato) {
+  return Math.round(((saldoAttuale || 0) - (importoPagato || 0)) * 100) / 100;
 }
 
 // Sottrae un incasso (anche parziale) dal saldo dovuto, senza mai andare

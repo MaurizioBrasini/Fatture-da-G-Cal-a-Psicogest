@@ -18,6 +18,7 @@ import {
   stripCodiceEsistente,
   accumulaContante,
   saldaContante,
+  incassaContante,
   buildNuovaDescrizione,
   eventiDiPazienteOrdinati,
   computeRinumerazione,
@@ -479,6 +480,30 @@ test("formatCodice: contanti saldati nel giorno dell'incasso, poi il deve residu
     assert.equal(piano[1].codice, "A2 (deve 100€)");
     assert.equal(piano[2].codice, "A3 (contanti saldati 60€) (deve 40€)");
     assert.equal(piano[3].codice, "A4 (deve 40€)");
+  });
+
+  test("incassaContante: un incasso oltre il saldo diventa credito (anticipo), non viene perso", () => {
+    assert.equal(incassaContante(0, 100), -100);
+    assert.equal(incassaContante(40, 100), -60);
+    assert.equal(incassaContante(100, 40), 60);
+  });
+
+  test("computeRinumerazione: incasso alla seduta 5 PRIMA della fattura (credito -100) -> 'saldati' e nessun deve dopo", () => {
+    // il 2/2 e' la seduta 5: il paziente paga i 100€ quel giorno, la fattura non e' ancora confermata (saldo = -100)
+    const piano = computeRinumerazione({ ...patient, contante_dovuto: -100 }, eventi, DEFAULT_SETTINGS, undefined, {
+      pagamentiContante: [{ data: "2026-02-02", importo: 100 }],
+    });
+    assert.equal(piano[3].codice, "A4");
+    assert.equal(piano[4].codice, "A5 fatturare (contanti saldati 100€)");
+    assert.equal(piano[5].codice, "A1");
+  });
+
+  test("computeRinumerazione: incasso qualche giorno dopo la seduta 5 -> il deve resta su 5 e sparisce dalla successiva", () => {
+    const piano = computeRinumerazione({ ...patient, contante_dovuto: -100 }, eventi, DEFAULT_SETTINGS, undefined, {
+      pagamentiContante: [{ data: "2026-02-05", importo: 100 }],
+    });
+    assert.equal(piano[4].codice, "A5 fatturare (deve 100€)");
+    assert.equal(piano[5].codice, "A1");
   });
 
   test("computeRinumerazione: un incasso precedente all'ancora non altera le note", () => {

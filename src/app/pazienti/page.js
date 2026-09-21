@@ -7,7 +7,7 @@ import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
 import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
 import VerificaContattiModal from "@/components/VerificaContattiModal";
-import { normalizeName, todayISO, tariffaStandard, saldaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -179,8 +179,10 @@ export default function PazientiPage() {
     setContantiModal({
       patientId: patient.id,
       nome: patient.nome_calendario || patient.fatturare_a,
-      dovuto: patient.contante_dovuto,
-      value: String(patient.contante_dovuto),
+      dovuto: patient.contante_dovuto || 0,
+      // Con debito già registrato l'importo parte dal totale; altrimenti (incasso
+      // alla seduta 5, prima della fattura) lo scrivi tu.
+      value: patient.contante_dovuto > 0 ? String(patient.contante_dovuto) : "",
     });
   }
 
@@ -189,7 +191,7 @@ export default function PazientiPage() {
     const importoPagato = parseFloat(value.replace(",", "."));
     if (!importoPagato || importoPagato <= 0) return;
     setContantiModal(null);
-    const nuovoSaldo = saldaContante(dovuto, importoPagato);
+    const nuovoSaldo = incassaContante(dovuto, importoPagato);
     await Promise.all([
       supabase.from("patients").update({ contante_dovuto: nuovoSaldo }).eq("id", patientId),
       supabase.from("contante_pagamenti").insert({
@@ -1035,6 +1037,10 @@ export default function PazientiPage() {
                   <td>
                     {p.contante_dovuto > 0 ? (
                       <button className="btn-small" onClick={() => apriContantiModal(p)}>€ {p.contante_dovuto}</button>
+                    ) : p.contante_dovuto < 0 ? (
+                      <button className="btn-small" title="Incassato in anticipo: si compensa alla prossima fattura" onClick={() => apriContantiModal(p)}>credito € {-p.contante_dovuto}</button>
+                    ) : p.quota_contante_seduta > 0 ? (
+                      <button className="btn-small" title="Registra un incasso in contanti" onClick={() => apriContantiModal(p)}>+ incasso</button>
                     ) : (
                       <span className="muted mono">—</span>
                     )}
@@ -1336,8 +1342,18 @@ export default function PazientiPage() {
         <Modal maxWidth={400}>
           <h2 style={{ marginTop: 0, fontFamily: "Georgia, serif", fontWeight: 500 }}>Contanti ricevuti</h2>
           <p className="muted small">
-            {contantiModal.nome} — saldo dovuto: <strong>€ {contantiModal.dovuto}</strong>. Indica quanto ha
-            effettivamente portato (puoi modificare l&apos;importo per un pagamento parziale).
+            {contantiModal.dovuto > 0 ? (
+              <>
+                {contantiModal.nome} — saldo dovuto: <strong>€ {contantiModal.dovuto}</strong>. Indica quanto ha
+                effettivamente portato (puoi modificare l&apos;importo per un pagamento parziale).
+              </>
+            ) : (
+              <>
+                {contantiModal.nome} — {contantiModal.dovuto < 0 ? <>credito già registrato: <strong>€ {-contantiModal.dovuto}</strong>. </> : "nessun debito ancora registrato. "}
+                Indica quanto ha portato: se la fattura non è ancora confermata, l&apos;incasso resta come anticipo e
+                si compensa da solo alla conferma.
+              </>
+            )}
           </p>
           <input
             type="number"
