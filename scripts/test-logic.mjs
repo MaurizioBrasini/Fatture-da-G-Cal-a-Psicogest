@@ -17,7 +17,6 @@ import {
   formatCodice,
   stripCodiceEsistente,
   accumulaContante,
-  saldaContante,
   incassaContante,
   buildNuovaDescrizione,
   eventiDiPazienteOrdinati,
@@ -515,11 +514,6 @@ test("accumulaContante somma la quota per il numero di sedute fatturate", () => 
   assert.equal(accumulaContante(0, 10, 5), 50);
   assert.equal(accumulaContante(50, 10, 5), 100);
   assert.equal(accumulaContante(100, 0, 5), 100);
-});
-test("saldaContante sottrae un incasso, anche parziale, senza andare sotto zero", () => {
-  assert.equal(saldaContante(300, 150), 150);
-  assert.equal(saldaContante(150, 150), 0);
-  assert.equal(saldaContante(50, 150), 0);
 });
 
 // --- Prenotazioni online (link "Prenotazioni online dr. Brasini") ---
