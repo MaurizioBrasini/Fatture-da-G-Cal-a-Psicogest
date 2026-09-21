@@ -148,6 +148,7 @@ export default function DisponibilitaPage() {
         <h2 className="sub-heading">Griglia settimanale, lunedì–giovedì</h2>
         <div className="disp-legend">
           <span><span className="disp-swatch" style={{ background: "var(--accent-soft)" }} />Verde "Disponibile" = spazio libero</span>
+          <span>Ogni ora è divisa in due caselle (le due settimane del ciclo quindicinale)</span>
           <span><span className="disp-swatch" style={{ background: "var(--danger)" }} />Nome in rosso = sospeso</span>
         </div>
         <div className="table-scroll" style={{ marginBottom: 28 }}>
@@ -161,24 +162,24 @@ export default function DisponibilitaPage() {
                 <div className="disp-timehead">{row.orario}</div>
                 {GIORNI.map((g) => {
                   const c = row.giorni[g];
-                  const righe = righeCella(c);
                   return (
                     <div key={g} className="disp-cell">
-                      {c && c.stato !== "libero" && <span className="disp-tag">{c.cadenza}</span>}
                       {c?.conflitto && (
-                        <div className="disp-subrow" style={{ color: "var(--danger)", fontWeight: 600 }}>
+                        <div className="disp-conflitto">
                           Conflitto: {c.conflittiDettaglio.map((coppia) => coppia.join(" vs ")).join(", ")}
                         </div>
                       )}
-                      {righe.map((riga, i) =>
-                        riga.tipo === "libero" ? (
-                          <div key={i} className="disp-subrow libero">
-                            Disponibile{riga.cadenza ? ` (${riga.cadenza})` : ""}
-                            {riga.alMese ? ` — ${riga.alMese} al mese` : ""}
-                          </div>
+                      {c.sottoSlot.map((s, i) =>
+                        s.pazienti.length === 0 ? (
+                          <div key={i} className="disp-sub libero">Disponibile</div>
                         ) : (
-                          <div key={i} className="disp-subrow occupato">
-                            <span className={riga.stato === "sospeso" ? "disp-susp" : ""}>{riga.nome}</span>
+                          <div key={i} className="disp-sub">
+                            {s.pazienti.map((p, j) => (
+                              <span key={j}>
+                                {j > 0 && " / "}
+                                <span className={p.stato === "sospeso" ? "disp-susp" : ""}>{p.nome}</span>
+                              </span>
+                            ))}
                           </div>
                         )
                       )}

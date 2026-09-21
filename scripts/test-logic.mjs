@@ -1163,6 +1163,24 @@ test("computeGrigliaDisponibilita: quindicinale senza conflitto dentro un ciclo 
   // resta libera solo 1.
   assert.equal(r.mensili[0].fasiLibere, 1);
 });
+test("computeGrigliaDisponibilita: sottoSlot — settimanale in entrambe le caselle, quindicinale in una sola, mensili della stessa parità insieme", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Domizia S.", stato: "attivo" },
+    { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08", nome: "Anna B.", stato: "attivo" },
+    { weekday: 3, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-09", nome: "Enrico O.", stato: "attivo" },
+    { weekday: 3, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-23", nome: "Susanna e Simone", stato: "attivo" },
+  ]);
+  const cella = (orario, g) => r.griglia.find((x) => x.orario === orario).giorni[g].sottoSlot.map((s) => s.pazienti.map((p) => p.nome));
+  assert.deepEqual(cella("09:30", 1), [["Domizia S."], ["Domizia S."]]);
+  const anna = cella("10:30", 2);
+  assert.equal(anna.filter((n) => n.length === 0).length, 1);
+  assert.equal(anna.filter((n) => n[0] === "Anna B.").length, 1);
+  const mensili = cella("18:30", 3);
+  assert.equal(mensili.filter((n) => n.length === 0).length, 1);
+  assert.deepEqual(new Set(mensili.find((n) => n.length).sort()), new Set(["Enrico O.", "Susanna e Simone"]));
+  // fascia senza nessuno: due caselle vuote
+  assert.deepEqual(r.griglia.find((x) => x.orario === "09:30").giorni[2].sottoSlot.map((s) => s.pazienti.length), [0, 0]);
+});
 test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fascia senza pazienti", () => {
   const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
   const riga = r.griglia.find((x) => x.orario === "09:30");

@@ -251,12 +251,30 @@ export function computeGrigliaDisponibilita(patientSlots) {
     for (const g of [1, 2, 3, 4, 5]) {
       const righe = gruppi.get(`${g}|${orario}:00`) || [];
       if (righe.length === 0) {
-        riga.giorni[g] = { stato: "libero", pazienti: [] };
+        riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [] }, { pazienti: [] }] };
         continue;
       }
       const { cicloMax, faseSlots, occupazione } = occupazioneFascia(righe);
       const fasiLibere = faseSlots - occupazione.filter((occ) => occ.length > 0).length;
+      // Vista "a due caselle" (le due settimane del ciclo quindicinale):
+      // la casella s raccoglie chi occupa le fasi k con k % 2 === s — un
+      // settimanale compare in entrambe, i mensili della stessa parità
+      // finiscono insieme nella stessa casella.
+      const sottoSlot = [0, 1].map((s) => {
+        const visti = new Set();
+        const pazienti = [];
+        occupazione.forEach((occ, k) => {
+          if (cicloMax > 7 && k % 2 !== s) return;
+          for (const r of occ) {
+            if (visti.has(r)) continue;
+            visti.add(r);
+            pazienti.push({ nome: r.nome, stato: r.stato });
+          }
+        });
+        return { pazienti };
+      });
       riga.giorni[g] = {
+        sottoSlot,
         stato: fasiLibere === 0 ? "pieno" : "parziale",
         cadenza: cicloMax === 7 ? "settimanale" : cicloMax === 14 ? "quindicinale" : "mensile",
         fasiTotali: faseSlots,
