@@ -5,10 +5,10 @@
 // riscritte secondo quanto gia' corretto in patients.
 
 import fs from "node:fs";
-import { fetchGoogleCalendarEvents } from "../src/lib/googleCalendar.js";
-import { computeRinumerazione, DEFAULT_SETTINGS } from "../src/lib/logic.js";
+import { fetchGoogleCalendarEvents } from "../../src/lib/googleCalendar.js";
+import { computeRinumerazione, DEFAULT_SETTINGS } from "../../src/lib/logic.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

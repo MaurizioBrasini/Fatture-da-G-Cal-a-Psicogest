@@ -22,8 +22,8 @@ import {
   todayISO,
   addDays,
   DEFAULT_SETTINGS,
-} from "../src/lib/logic.js";
-import { createGoogleCalendarEvent } from "../src/lib/googleCalendar.js";
+} from "../../src/lib/logic.js";
+import { createGoogleCalendarEvent } from "../../src/lib/googleCalendar.js";
 
 const args = process.argv.slice(2).filter((a) => a !== "--apply");
 const APPLY = process.argv.includes("--apply");
@@ -39,7 +39,7 @@ function log(msg) {
 }
 
 // --- credenziali da .env.local (stesso file usato dall'app) ---
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

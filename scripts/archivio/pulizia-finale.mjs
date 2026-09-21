@@ -3,9 +3,9 @@
 // chiamante rilancia trova-doppioni.mjs per la verifica finale.
 
 import fs from "node:fs";
-import { deleteGoogleCalendarEvent } from "../src/lib/googleCalendar.js";
+import { deleteGoogleCalendarEvent } from "../../src/lib/googleCalendar.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

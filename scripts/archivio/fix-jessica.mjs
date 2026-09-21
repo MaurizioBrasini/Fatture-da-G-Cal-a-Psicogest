@@ -2,10 +2,10 @@
 // era bloccato dal vecchio CHECK constraint (schema_addendum4.sql, ora eseguito).
 
 import fs from "node:fs";
-import { occorrenzeFuture, todayISO, addDays } from "../src/lib/logic.js";
-import { createGoogleCalendarEvent } from "../src/lib/googleCalendar.js";
+import { occorrenzeFuture, todayISO, addDays } from "../../src/lib/logic.js";
+import { createGoogleCalendarEvent } from "../../src/lib/googleCalendar.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

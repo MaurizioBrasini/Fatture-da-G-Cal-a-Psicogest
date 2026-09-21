@@ -5,7 +5,7 @@
 
 import fs from "node:fs";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

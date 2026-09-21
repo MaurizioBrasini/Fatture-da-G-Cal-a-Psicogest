@@ -10,10 +10,10 @@
 // Dry-run di default, --apply per scrivere davvero (patients + calendario).
 
 import fs from "node:fs";
-import { titleCaseNomeCalendario, matchPatientForEvent, todayISO, addDays } from "../src/lib/logic.js";
-import { fetchGoogleCalendarEvents, updateGoogleCalendarEventTitle } from "../src/lib/googleCalendar.js";
+import { titleCaseNomeCalendario, matchPatientForEvent, todayISO, addDays } from "../../src/lib/logic.js";
+import { fetchGoogleCalendarEvents, updateGoogleCalendarEventTitle } from "../../src/lib/googleCalendar.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

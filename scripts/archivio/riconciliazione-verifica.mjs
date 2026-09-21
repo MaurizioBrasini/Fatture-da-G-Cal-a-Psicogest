@@ -6,10 +6,10 @@
 // lettura: stampa solo il confronto, non scrive nulla.
 
 import fs from "node:fs";
-import { fetchGoogleCalendarEvents } from "../src/lib/googleCalendar.js";
-import { matchPatientForEvent } from "../src/lib/logic.js";
+import { fetchGoogleCalendarEvents } from "../../src/lib/googleCalendar.js";
+import { matchPatientForEvent } from "../../src/lib/logic.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);

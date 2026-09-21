@@ -16,7 +16,7 @@ import fs from "fs";
 const APPLY = process.argv.includes("--apply");
 
 const env = Object.fromEntries(
-  fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8")
+  fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8")
     .split("\n").filter(Boolean).map((l) => {
       const i = l.indexOf("=");
       return [l.slice(0, i), l.slice(i + 1)];
@@ -25,7 +25,7 @@ const env = Object.fromEntries(
 process.env.GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID;
 process.env.GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET;
 
-const { fetchGoogleCalendarEvents, deleteGoogleCalendarEvent } = await import("../src/lib/googleCalendar.js");
+const { fetchGoogleCalendarEvents, deleteGoogleCalendarEvent } = await import("../../src/lib/googleCalendar.js");
 
 const supabase = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 const { data: tokenRow } = await supabase.from("google_tokens").select("refresh_token, user_id").limit(1).single();

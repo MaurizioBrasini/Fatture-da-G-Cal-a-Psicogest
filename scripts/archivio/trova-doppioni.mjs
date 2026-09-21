@@ -3,9 +3,9 @@
 // Non scrive/cancella nulla — produce solo un elenco diagnostico.
 
 import fs from "node:fs";
-import { matchPatientForEvent, normalizeName } from "../src/lib/logic.js";
+import { matchPatientForEvent, normalizeName } from "../../src/lib/logic.js";
 
-const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+const envRaw = fs.readFileSync(new URL("../../.env.local", import.meta.url), "utf8");
 const env = {};
 for (const line of envRaw.split("\n")) {
   const m = line.match(/^([A-Z_]+)=(.*)$/);
