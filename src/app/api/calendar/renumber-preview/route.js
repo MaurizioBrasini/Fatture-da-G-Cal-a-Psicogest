@@ -65,12 +65,17 @@ export async function POST(request) {
 
   try {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
+    // Incassi contanti: servono per la dicitura "contanti saldati" nel giorno del saldo.
+    const { data: incassi, error: incassiError } = await supabase.from("contante_pagamenti").select("patient_id,importo,data");
+    if (incassiError) throw new Error("Errore nel caricare gli incassi contanti: " + incassiError.message);
 
     const risultato = target
       .map((p) => ({
         pazienteId: p.id,
         nome: p.nome_calendario || p.fatturare_a,
-        piano: computeRinumerazione(p, events, settings, patients).filter((r) => r.cambia),
+        piano: computeRinumerazione(p, events, settings, patients, {
+          pagamentiContante: (incassi || []).filter((x) => x.patient_id === p.id),
+        }).filter((r) => r.cambia),
       }))
       .filter((r) => r.piano.length > 0);
 

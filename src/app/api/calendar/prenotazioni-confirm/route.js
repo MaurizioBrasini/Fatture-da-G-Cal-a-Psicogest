@@ -197,9 +197,12 @@ export async function POST(request) {
       // Rilettura live DOPO tutti i rinomina: i titoli appena scritti devono
       // già essere visibili per entrare nel conteggio.
       const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
+      const { data: incassi } = await supabase.from("contante_pagamenti").select("patient_id,importo,data");
       for (const id of pazientiToccati) {
         const patient = patients.find((p) => p.id === id);
-        const piano = computeRinumerazione(patient, events, settings, patients).filter((r) => r.cambia);
+        const piano = computeRinumerazione(patient, events, settings, patients, {
+          pagamentiContante: (incassi || []).filter((x) => x.patient_id === id),
+        }).filter((r) => r.cambia);
         for (const riga of piano) {
           await updateGoogleCalendarEventDescription(tokenRow.refresh_token, riga.id, riga.descrizioneNuova);
           await new Promise((r) => setTimeout(r, 150));

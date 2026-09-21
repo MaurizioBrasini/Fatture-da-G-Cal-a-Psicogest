@@ -426,6 +426,66 @@ test("computeRinumerazione include il saldo contanti nel codice quando il pazien
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
   assert.equal(piano[0].codice, "R1 (deve 150€)");
 });
+test("stripCodiceEsistente toglie anche 'contanti saldati' e le due diciture insieme", () => {
+  assert.equal(stripCodiceEsistente("A5 fatturare (contanti saldati 100€) (deve 100€) link"), "link");
+  assert.equal(stripCodiceEsistente("A2 (contanti saldati 30€) note"), "note");
+});
+test("formatCodice: contanti saldati nel giorno dell'incasso, poi il deve residuo", () => {
+  assert.equal(formatCodice("A", 2, false, 0, 100), "A2 (contanti saldati 100€)");
+  assert.equal(formatCodice("A", 2, false, 40, 60), "A2 (contanti saldati 60€) (deve 40€)");
+});
+{
+  const patient = { nome_calendario: "Mario Rossi", regime_tariffario: "agevolata", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5, quota_contante_seduta: 20, contante_dovuto: 0 };
+  const sedute = (n, inizio = 5) => Array.from({ length: n }, (_, i) => ({ id: `e${i + 1}`, data: `2026-01-${String(inizio + i * 7).padStart(2, "0")}`, ora: "10:00", titolo: "Mario Rossi", descrizione: "" }));
+  // sedute il 5, 12, 19, 26 gennaio e 2, 9, 16 febbraio... uso solo gennaio (4) + altre date
+  const eventi = [...sedute(4), { id: "e5", data: "2026-02-02", ora: "10:00", titolo: "Mario Rossi", descrizione: "" }, { id: "e6", data: "2026-02-09", ora: "10:00", titolo: "Mario Rossi", descrizione: "" }];
+
+  test("computeRinumerazione: alla seduta 'fatturare' compare gia' il deve contanti (quota x sedute) e resta sulle successive", () => {
+    const piano = computeRinumerazione(patient, eventi, DEFAULT_SETTINGS);
+    assert.equal(piano[3].codice, "A4");
+    assert.equal(piano[4].codice, "A5 fatturare (deve 100€)");
+    assert.equal(piano[5].codice, "A1 (deve 100€)");
+  });
+
+  test("computeRinumerazione: caso cumulativo, debito ancora aperto + nuovo ciclo (100 + 100)", () => {
+    const piano = computeRinumerazione({ ...patient, contante_dovuto: 100 }, eventi, DEFAULT_SETTINGS);
+    assert.equal(piano[0].codice, "A1 (deve 100€)");
+    assert.equal(piano[4].codice, "A5 fatturare (deve 200€)");
+    assert.equal(piano[5].codice, "A1 (deve 200€)");
+  });
+
+  test("computeRinumerazione: nessuna quota (paga tutto in contanti / non paga) -> nessun deve", () => {
+    const piano = computeRinumerazione({ ...patient, quota_contante_seduta: 0 }, eventi, DEFAULT_SETTINGS);
+    assert.equal(piano[4].codice, "A5 fatturare");
+    assert.equal(piano[5].codice, "A1");
+  });
+
+  test("computeRinumerazione: nel giorno del saldo 'contanti saldati', prima resta il deve, dopo sparisce", () => {
+    // debito 100 saldato il 19/1 (contante_dovuto attuale = 0, dopo l'incasso)
+    const piano = computeRinumerazione({ ...patient, contante_dovuto: 0 }, eventi, DEFAULT_SETTINGS, undefined, {
+      pagamentiContante: [{ data: "2026-01-19", importo: 100 }],
+    });
+    assert.equal(piano[0].codice, "A1 (deve 100€)"); // 5/1: prima del saldo
+    assert.equal(piano[1].codice, "A2 (deve 100€)");
+    assert.equal(piano[2].codice, "A3 (contanti saldati 100€)"); // 19/1: giorno del saldo
+    assert.equal(piano[3].codice, "A4"); // dopo: nessuna scritta
+    assert.equal(piano[4].codice, "A5 fatturare (deve 100€)"); // nuovo ciclo: solo la quota nuova
+  });
+
+  test("computeRinumerazione: saldo parziale, il deve residuo resta dopo il giorno dell'incasso", () => {
+    const piano = computeRinumerazione({ ...patient, contante_dovuto: 40 }, eventi, DEFAULT_SETTINGS, undefined, {
+      pagamentiContante: [{ data: "2026-01-19", importo: 60 }],
+    });
+    assert.equal(piano[1].codice, "A2 (deve 100€)");
+    assert.equal(piano[2].codice, "A3 (contanti saldati 60€) (deve 40€)");
+    assert.equal(piano[3].codice, "A4 (deve 40€)");
+  });
+
+  test("computeRinumerazione: un incasso precedente all'ancora non altera le note", () => {
+    const piano = computeRinumerazione(patient, eventi, DEFAULT_SETTINGS, undefined, { pagamentiContante: [{ data: "2025-12-01", importo: 50 }] });
+    assert.equal(piano[0].codice, "A1");
+  });
+}
 test("accumulaContante somma la quota per il numero di sedute fatturate", () => {
   assert.equal(accumulaContante(0, 10, 5), 50);
   assert.equal(accumulaContante(50, 10, 5), 100);

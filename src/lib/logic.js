@@ -866,9 +866,14 @@ export function letteraCodice(patient) {
 // fatturato ancora da saldare, viene aggiunto in coda al codice — es.
 // "R3 (deve 150€)" — così resta visibile su Google Calendar senza doverlo
 // scrivere/cancellare a mano ad ogni seduta.
-export function formatCodice(lettera, numero, fatturare, contanteDovuto) {
-  const base = `${lettera}${numero}${fatturare ? " fatturare" : ""}`;
-  return contanteDovuto > 0 ? `${base} (deve ${formatEuro(contanteDovuto)}€)` : base;
+// contantiSaldati (facoltativo): importo incassato proprio il giorno di questa
+// seduta — la nota riporta "(contanti saldati 100€)" solo quel giorno; dalle
+// sedute successive il "deve" sparisce da solo (o cala, se il saldo è parziale).
+export function formatCodice(lettera, numero, fatturare, contanteDovuto, contantiSaldati) {
+  let out = `${lettera}${numero}${fatturare ? " fatturare" : ""}`;
+  if (contantiSaldati > 0) out += ` (contanti saldati ${formatEuro(contantiSaldati)}€)`;
+  if (contanteDovuto > 0) out += ` (deve ${formatEuro(contanteDovuto)}€)`;
+  return out;
 }
 
 function formatEuro(n) {
@@ -883,7 +888,7 @@ function formatEuro(n) {
 // — utile per capire quanto testo "vecchio" togliere quando si sovrascrive
 // una nota già scritta in precedenza (a mano o dall'app in un giro
 // precedente).
-const VECCHIO_CODICE_REGEX = /^\s*(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\s*(?:\(deve\s*[\d.,]+\s*€?\))?\.?\s*/i;
+const VECCHIO_CODICE_REGEX = /^\s*(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\s*(?:\((?:deve\s*[\d.,]+\s*€?|contanti\s+saldati(?:\s*[\d.,]+\s*€?)?)\)\s*){0,2}\.?\s*/i;
 
 export function stripCodiceEsistente(descrizione) {
   return (descrizione || "").replace(VECCHIO_CODICE_REGEX, "");
@@ -955,10 +960,28 @@ export function analizzaNotaPerAudit(descrizioneOriginale) {
 // allPatients (facoltativo): vedi nota su computePatientState — l'intera
 // anagrafica serve per disambiguare correttamente, ricade su [patient] se
 // omesso.
-export function computeRinumerazione(patient, allEvents, settings, allPatients) {
+//
+// Contanti (opzioni.pagamentiContante = incassi del paziente [{data, importo}]):
+// il "deve" sulle note è un saldo corrente che (a) alla seduta "fatturare"
+// include già la quota dei nuovi cicli — debito ancora aperto + quota_contante_seduta
+// × sedute del ciclo, quindi anche il caso cumulativo "100 + 100" — senza
+// aspettare la conferma della fattura, (b) resta sulle sedute successive finché
+// non viene saldato, (c) nel giorno di un incasso la seduta di quel giorno porta
+// "(contanti saldati X€)" e dalle successive il "deve" cala o sparisce. Il saldo
+// a inizio piano è contante_dovuto + gli incassi dall'ancora in poi (già sottratti
+// dal saldo attuale): tutte le sedute del piano sono dopo l'ultimo accumulo.
+export function computeRinumerazione(patient, allEvents, settings, allPatients, opzioni = {}) {
   const lettera = letteraCodice(patient);
   const soglia = patient.soglia_fatturazione || settings.soglia_default;
   const eventi = eventiDiPazienteOrdinati(patient, allEvents, allPatients);
+  const quota = patient.quota_contante_seduta || 0;
+  const arrotonda = (n) => Math.round(n * 100) / 100;
+
+  const pagamenti = (opzioni.pagamentiContante || [])
+    .filter((p) => !patient.ancora_data || p.data >= patient.ancora_data)
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+  let deve = arrotonda((patient.contante_dovuto || 0) + pagamenti.reduce((s, p) => s + (p.importo || 0), 0));
+  let iPag = 0;
 
   let contatore = patient.ancora_valore || 0;
   const piano = [];
@@ -966,7 +989,14 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients) 
   for (const ev of eventi) {
     contatore += 1;
     const fatturare = lettera !== "S" && contatore >= soglia;
-    const codice = formatCodice(lettera, contatore, fatturare, patient.contante_dovuto);
+    let saldatiOggi = 0;
+    while (iPag < pagamenti.length && pagamenti[iPag].data <= ev.data) {
+      const p = pagamenti[iPag++];
+      deve = Math.max(0, arrotonda(deve - (p.importo || 0)));
+      if (p.data === ev.data) saldatiOggi += p.importo || 0;
+    }
+    if (fatturare && quota > 0) deve = arrotonda(deve + quota * contatore);
+    const codice = formatCodice(lettera, contatore, fatturare, deve, saldatiOggi);
     const descrizioneNuova = buildNuovaDescrizione(ev.descrizione, codice);
     piano.push({
       id: ev.id,
