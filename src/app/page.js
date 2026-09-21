@@ -618,6 +618,9 @@ export default function DashboardPage() {
           nome: parti[0] || "",
           cognome: parti.slice(1).join(" "),
           email: r.bookerEmail || "",
+          // Ancora: la seduta prenotata è la n. 1 (il conteggio parte da quel giorno, incluso).
+          ancora_data: r.data,
+          ancora_valore: 0,
         });
         if (error) throw new Error("Errore nell'aggiungere " + r.bookerNome + ": " + error.message);
       }
@@ -1299,7 +1302,7 @@ export default function DashboardPage() {
                         <p className="muted small" style={{ marginBottom: 4 }}>
                           Per ciascuna scegli il paziente giusto (già proposto quando c&apos;è un solo candidato),
                           oppure <strong>＋ Nuovo paziente</strong> se non è ancora in elenco — aggiungo nome/cognome/
-                          email, il resto lo compili tu. Lascia su &quot;non ancora deciso&quot; per saltarla per ora.
+                          email e l&apos;ancora (la seduta prenotata conta come la n. 1), il resto lo compili tu. Lascia su &quot;non ancora deciso&quot; per saltarla per ora.
                           Confermando rinomino solo il titolo dell&apos;evento (colore vinaccia invariato, nessun altro
                           appuntamento toccato) e rilancio subito Rinumera.
                         </p>
