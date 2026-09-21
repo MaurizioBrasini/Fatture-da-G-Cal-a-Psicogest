@@ -76,10 +76,6 @@ export default function DisponibilitaPage() {
   }
 
   const r = report;
-  const sospesi = new Set();
-  [...r.quindicinaliPieni, ...r.quindicinaliSingoli, ...r.mensili, ...r.settimanali].forEach((g) =>
-    g.pazienti.forEach((p) => p.stato === "sospeso" && sospesi.add(p.nome))
-  );
   const slotVenerdi = [...r.settimanali, ...r.quindicinaliPieni, ...r.quindicinaliSingoli, ...r.mensili].filter(
     (g) => g.weekday === 5
   );
@@ -134,19 +130,13 @@ export default function DisponibilitaPage() {
             <div className="n">{totaleLiberi}</div>
             <div className="l">Slot quindicinali liberi</div>
           </div>
-          <div className="disp-stat">
-            <div className="n">{sospesi.size}</div>
-            <div className="l">Sospesi che occupano comunque una fascia</div>
-          </div>
         </div>
 
         <h2 className="sub-heading">Griglia settimanale, lunedì–giovedì</h2>
         <div className="disp-legend">
           <span><span className="disp-swatch" style={{ background: "#CDE4D6" }} />Verde = slot libero</span>
           <span><span className="disp-swatch" style={{ background: "#EEF5F1", border: "1px solid #CDE4D6" }} />Verde chiaro = mensile con ancora una settimana libera</span>
-          <span>Ogni ora è divisa in due caselle (le due settimane del ciclo quindicinale)</span>
-          <span><span className="disp-swatch" style={{ background: "var(--danger)" }} />Nome in rosso = sospeso</span>
-        </div>
+          <span>Ogni ora è divisa in due caselle (le due settimane del ciclo quindicinale)</span>        </div>
         <div className="table-scroll" style={{ marginBottom: 28 }}>
           <div className="disp-grid">
             <div className="disp-dayhead" />
@@ -174,7 +164,7 @@ export default function DisponibilitaPage() {
                               {s.pazienti.map((p, j) => (
                                 <span key={j}>
                                   {j > 0 && " / "}
-                                  <span className={p.stato === "sospeso" ? "disp-susp" : ""}>{p.nome}</span>
+                                  {p.nome}
                                 </span>
                               ))}
                               {s.parziale && " / Disponibile"}
@@ -217,8 +207,7 @@ export default function DisponibilitaPage() {
           </div>
         )}
         <p className="sub" style={{ marginBottom: 28 }}>
-          Il venerdì non è più considerato un giorno dedicato ai pazienti e non compare in questa griglia. I pazienti
-          sospesi occupano ancora formalmente la loro fascia: la decisione di liberarla resta manuale.
+          Il venerdì non è più considerato un giorno dedicato ai pazienti e non compare in questa griglia.
         </p>
 
         <h2 className="sub-heading">Slot settimanali — pieni per definizione ({r.settimanali.length})</h2>
