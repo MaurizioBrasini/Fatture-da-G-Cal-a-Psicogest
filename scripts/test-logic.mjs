@@ -823,6 +823,20 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.equal(conf("2026-10-08"), undefined); // 10 giorni: ok
   });
 
+  test("computeConflittiPrenotazioni: slot fisso, orizzonte massimo — oltre l'ultimo appuntamento in calendario e' bloccata, anche se la seduta sembrerebbe libera", () => {
+    // calendario popolato fino al 2/11 (l'ultimo, disdetto, conta comunque: e' ancora nello schema)
+    const events = [evL("2026-10-05"), evL("2026-10-19"), evL("2026-11-02", { descrizione: "disdetto" })];
+    const c = computeConflittiPrenotazioni([riga("lontana", "2026-12-14", 2), riga("subito", "2026-11-09", 2), riga("ok", "2026-10-30", 2)], events, patients, slotQuindicinale);
+    assert.equal(c.lontana[0].oltreOrizzonte, true);
+    assert.equal(c.lontana[0].data, "2026-11-02");
+    assert.equal(c.subito[0].oltreOrizzonte, true);
+    assert.equal(c.ok, undefined); // recupero della seduta disdetta del 2/11, prima dell'orizzonte
+  });
+
+  test("computeConflittiPrenotazioni: slot fisso, l'orizzonte non si applica ai pazienti senza slot ne' con calendario vuoto", () => {
+    assert.deepEqual(computeConflittiPrenotazioni([riga("m", "2027-03-01", 1)], [], patients, slotQuindicinale), {});
+  });
+
   test("computeConflittiPrenotazioni: una prenotazione gia' rinominata (titolo del paziente) conta come appuntamento esistente, non come prenotazione da riconciliare", () => {
     const events = [ev("2026-10-14", "Prenotazioni online dr. Brasini"), ev("2026-10-20", "Mario Rossi")];
     // la prima e' una prenotazione grezza (non conta come esistente), la seconda e' un appuntamento vero a 6 gg

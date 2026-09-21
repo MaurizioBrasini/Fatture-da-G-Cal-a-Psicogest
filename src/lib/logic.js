@@ -1166,7 +1166,18 @@ export const GIORNI_MIN_DA_APPUNTAMENTO = 6;
 // prenotazioni in ordine cronologico. Serve che gli slot abbiano interval_days
 // e anchor_date; senza, il paziente resta escluso come prima. Opzioni:
 // closures (righe slot_closures) per le date spostate dalle chiusure.
-function conflittiSlotFisso(slot, righePaz, esistentiPaz, closures) {
+//
+// Orizzonte massimo (richiesta di Maurizio, 2026-09-21): un paziente a schema
+// fisso può prenotare solo PRIMA (o nello stesso giorno) dell'ultimo
+// appuntamento già messo a calendario secondo il suo schema — cioè fino a dove
+// il calendario è "saturo". Oltre non ci sono appuntamenti che occupino le
+// sedute previste, quindi senza questo limite una prenotazione lontana
+// troverebbe sempre una seduta "libera" e passerebbe (buco reale provato: con
+// il calendario popolato fino al 14/10, una prenotazione del 12/11 veniva
+// accettata). `ultimoPrevisto` = {data, ora} dell'ultimo evento del paziente
+// (disdetti compresi: la seduta disdetta è ancora nello schema); se manca
+// (nessun evento letto) il limite non si applica.
+function conflittiSlotFisso(slot, righePaz, esistentiPaz, closures, ultimoPrevisto) {
   const reach = slot.interval_days;
   const tutte = [...esistentiPaz.map((e) => e.data), ...righePaz.map((r) => r.data)].sort();
   const inizio = addDays(tutte[0], -reach);
@@ -1197,6 +1208,10 @@ function conflittiSlotFisso(slot, righePaz, esistentiPaz, closures) {
   const distanzaMin = Math.min(GIORNI_MIN_DA_APPUNTAMENTO, Math.floor(reach / 2));
   const ordinate = [...righePaz].sort((a, b) => (a.data + (a.ora || "")).localeCompare(b.data + (b.ora || "")));
   for (const r of ordinate) {
+    if (ultimoPrevisto && r.data > ultimoPrevisto.data) {
+      esito[r.eventId] = [{ data: ultimoPrevisto.data, ora: ultimoPrevisto.ora, tipo: "appuntamento", cadenza: reach, oltreOrizzonte: true }];
+      continue;
+    }
     // Un recupero troppo a ridosso di un altro appuntamento in agenda è inutile
     // (e lascia il rischio che il paziente disdica quello, aprendo un altro buco).
     const stretti = [...esistentiPaz.map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento" })), ...tenute]
@@ -1235,7 +1250,13 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     if (!slot) continue;
     const righePaz = ordinate.filter((r) => r.patientId === id);
     const esistentiPaz = esistenti.filter((e) => matchPatientForEvent(e.titolo, patients)?.patient.id === id);
-    Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, esistentiPaz, opzioni.closures));
+    // Orizzonte: ultimo evento del paziente a calendario, disdetti inclusi.
+    const eventiPaz = (events || []).filter(
+      (e) => e.ora && !BOOKING_TITLE_REGEX.test(e.titolo || "") && matchPatientForEvent(e.titolo, patients)?.patient.id === id
+    );
+    const ultimo = eventiPaz.sort((a, b) => (a.data + a.ora).localeCompare(b.data + b.ora)).pop();
+    const ultimoPrevisto = ultimo ? { data: ultimo.data, ora: ultimo.ora } : null;
+    Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, esistentiPaz, opzioni.closures, ultimoPrevisto));
   }
 
   for (const r of ordinate) {

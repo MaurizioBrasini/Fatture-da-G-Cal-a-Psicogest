@@ -135,6 +135,7 @@ export async function POST(request) {
               conflittiTesto: conflitto.map((c) => `${formatDataItaliana(c.data)}${c.ora ? ` alle ${c.ora}` : ""}`).join(", "),
               linkPrenotazioni: settingsRow?.link_prenotazioni_online,
               frequenzaFissa: !!conflitto[0]?.cadenza,
+              oltreOrizzonte: !!conflitto[0]?.oltreOrizzonte,
             }),
           });
         } catch (e) {

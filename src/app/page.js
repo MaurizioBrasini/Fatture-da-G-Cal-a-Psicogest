@@ -1339,7 +1339,13 @@ export default function DashboardPage() {
                                 <tr>
                                   <td colSpan={3}>
                                     <div className="error-box" style={{ marginBottom: 8 }}>
-                                      {r.conflitto[0]?.troppoVicina ? (
+                                      {r.conflitto[0]?.oltreOrizzonte ? (
+                                        <>
+                                          <strong>Oltre il periodo già programmato</strong> — il calendario di questo paziente
+                                          arriva fino al {formatDataItaliana(r.conflitto[0].data)}: si può prenotare solo entro
+                                          quella data. Ultimo appuntamento in agenda:
+                                        </>
+                                      ) : r.conflitto[0]?.troppoVicina ? (
                                         <>
                                           <strong>Troppo a ridosso di un altro appuntamento</strong> — meno di{" "}
                                           {r.conflitto[0].troppoVicina} giorni: rischio di lasciare un buco se il paziente disdice
@@ -1394,7 +1400,7 @@ export default function DashboardPage() {
                             return (
                               <li key={r.eventId}>
                                 {r.bookerNome} ({r.data}) → {p ? `${p.nome || ""} ${p.cognome || ""}`.trim() : `paziente #${r.patientId}`}
-                                {r.conflitto && (r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
+                                {r.conflitto && (r.conflitto[0]?.oltreOrizzonte ? " — ⚠ oltre il periodo già programmato" : r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
                               </li>
                             );
                           })}

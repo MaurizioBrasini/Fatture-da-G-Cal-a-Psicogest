@@ -59,7 +59,18 @@ export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni })
 // appuntamento a meno di due settimane (regola "un solo appuntamento ogni due
 // settimane"). `conflitti` = [{data "YYYY-MM-DD", ora}] già formattati come
 // testo dal chiamante; `dataPrenotazione`/`oraPrenotazione` idem.
-export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa }) {
+export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa, oltreOrizzonte }) {
+  // Paziente a schema fisso che prenota oltre l'ultimo appuntamento già in
+  // calendario: sarà lui/lei a fissare più avanti, quando il calendario si estende.
+  if (oltreOrizzonte) {
+    return testoInHtml(
+      `Gentile ${nomePaziente},\n\n` +
+        `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+        `perché è oltre il periodo per cui il calendario degli incontri è già stato programmato (ultimo incontro fissato: ${conflittiTesto}).\n\n` +
+        `Gli incontri successivi verranno fissati più avanti; per esigenze particolari la prego di contattarmi direttamente.\n\n` +
+        `Cordiali saluti,\nDr. Maurizio Brasini`
+    );
+  }
   // Paziente con frequenza concordata: nessun rimando al link, per aumentare
   // le sedute deve parlarne con il dottore.
   if (frequenzaFissa) {
