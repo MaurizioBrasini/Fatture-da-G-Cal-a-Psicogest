@@ -65,18 +65,28 @@ function mcd(a, b) {
 // le due ancore è multipla del MCD dei due interval_days — se si
 // intersecano lo fanno periodicamente, quindi è un vero conflitto ricorrente,
 // non un caso limite isolato.
-// Orario: non serve più la coincidenza esatta, basta una sovrapposizione
-// reale tenendo conto di durata_minuti (default 60) — richiesta di Maurizio
-// 2026-09-22, stesso principio della griglia di Disponibilità ("mezz'ora
-// occupata" basta a creare un conflitto, es. una riunione di 2 ore che parte
-// mezz'ora prima di un nuovo slot).
-export function slotsInConflitto(slotA, slotB) {
-  if (slotA.weekday !== slotB.weekday) return false;
+// Orario: coincidenza esatta come sempre, TRANNE quando uno dei due slot ha
+// una durata esplicita (durata_minuti) più lunga della fascia standard — in
+// quel caso conta la sovrapposizione oraria reale, non l'orario di inizio.
+// Bug reale 2026-09-22: la prima versione applicava un default di 60' a
+// OGNI slot per calcolare la sovrapposizione, anche a due pazienti normali
+// senza durata esplicita — risultato, falsi conflitti ovunque due pazienti
+// qualsiasi capitassero a meno di un'ora di distanza (es. "Riunione
+// Scienziati" alle 9 faceva risultare doppio l'appuntamento di un paziente
+// delle 9:30, che con lei non c'entrava nulla). Il default 60' si usa SOLO
+// per valutare la sovrapposizione con uno slot che ha una durata esplicita.
+function sovrapposizioneOraria(slotA, slotB) {
+  if (!slotA.durata_minuti && !slotB.durata_minuti) return slotA.time_of_day === slotB.time_of_day;
   const inizioA = minutiOrario(slotA.time_of_day);
   const fineA = inizioA + (slotA.durata_minuti || 60);
   const inizioB = minutiOrario(slotB.time_of_day);
   const fineB = inizioB + (slotB.durata_minuti || 60);
-  if (inizioA >= fineB || inizioB >= fineA) return false;
+  return inizioA < fineB && inizioB < fineA;
+}
+
+export function slotsInConflitto(slotA, slotB) {
+  if (slotA.weekday !== slotB.weekday) return false;
+  if (!sovrapposizioneOraria(slotA, slotB)) return false;
   const diffGiorni = Math.round(
     (new Date(`${slotB.anchor_date}T00:00:00Z`) - new Date(`${slotA.anchor_date}T00:00:00Z`)) / 86400000
   );
@@ -186,16 +196,20 @@ export function computeGrigliaDisponibilita(patientSlots) {
     for (const g of [1, 2, 3, 4, 5]) {
       // Una fascia non è "libera" solo perché nessuno slot inizia
       // esattamente qui: se anche solo mezz'ora si sovrappone a un altro
-      // slot più lungo del solito (durata_minuti, default 60 — es. una
+      // slot con una durata ESPLICITA più lunga del solito (es. una
       // riunione di 2 ore partita mezz'ora prima), l'intera fascia va
       // considerata occupata (richiesta di Maurizio 2026-09-22: "uno slot
       // che ha mezz'ora occupata non è disponibile, deve esserlo per
-      // intero"). Sostituisce il lookup esatto su `gruppi` con un confronto
-      // di sovrapposizione oraria reale su tutti gli slot di questo weekday.
+      // intero"). Un paziente normale (durata_minuti non impostata) compare
+      // SOLO nella propria fascia esatta, esattamente come prima — un
+      // default di 60' applicato a tutti avrebbe creato falsi conflitti
+      // ovunque due pazienti qualsiasi capitassero a meno di un'ora di
+      // distanza (bug reale della prima versione di questo fix).
       const righe = patientSlots.filter((s) => {
         if (Number(s.weekday) !== g) return false;
+        if (!s.durata_minuti) return minutiOrario(s.time_of_day) === orarioMinuti;
         const inizio = minutiOrario(s.time_of_day);
-        const fine = inizio + (s.durata_minuti || 60);
+        const fine = inizio + s.durata_minuti;
         return inizio < orarioMinuti + 60 && fine > orarioMinuti;
       });
       if (righe.length === 0) {

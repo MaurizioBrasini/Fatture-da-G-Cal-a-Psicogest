@@ -1440,6 +1440,21 @@ test("computeGrigliaDisponibilita: senza durata_minuti (paziente normale), nessu
   const rigaDopo = r.griglia.find((x) => x.orario === "10:30");
   assert.deepEqual(rigaDopo.giorni[3].pazienti.map((p) => p.nome), ["Anna B."]);
 });
+test("computeGrigliaDisponibilita: bug reale 2026-09-22 — aggiungere 'Riunione Scienziati' alle 9 non deve 'raddoppiare' Domizia delle 9:30 su un'altra fascia", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 3, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato", durata_minuti: 120 },
+    { weekday: 3, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-09", nome: "Domizia S.", stato: "attivo" },
+  ]);
+  const riga900 = r.griglia.find((x) => x.orario === "09:00");
+  const riga930 = r.griglia.find((x) => x.orario === "09:30");
+  // La nuova fascia "09:00" è solo della riunione: Domizia NON deve comparirci.
+  assert.deepEqual(riga900.giorni[3].pazienti.map((p) => p.nome), ["Riunione Scienziati"]);
+  // La sua fascia "09:30" resta sua, senza sdoppiamenti.
+  assert.deepEqual(riga930.giorni[3].pazienti.map((p) => p.nome).sort(), ["Domizia S.", "Riunione Scienziati"]);
+  // E su un giorno qualunque SENZA la riunione (es. lunedì), la nuova riga
+  // "09:00" non deve materializzare falsi occupanti presi da altri weekday.
+  assert.equal(riga900.giorni[1].pazienti.length, 0);
+});
 
 // --- slotsInConflitto: sovrapposizione oraria reale, non solo orario identico ---
 test("slotsInConflitto: uno slot di 2 ore va in conflitto con uno slot che inizia mezz'ora dopo, stesso giorno reale", () => {
