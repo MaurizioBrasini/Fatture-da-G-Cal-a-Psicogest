@@ -237,7 +237,13 @@ export function computeGrigliaDisponibilita(patientSlots) {
           for (const r of occ) {
             if (visti.has(r)) continue;
             visti.add(r);
-            pazienti.push({ nome: r.nome, stato: r.stato });
+            // continua = true se questa fascia non è l'inizio reale
+            // dell'appuntamento, ma solo dove "sconfina" per via della
+            // durata (es. la seconda metà di una seduta da un'ora) — evita
+            // di mostrare lo stesso paziente come se avesse un appuntamento
+            // a parte in ogni fascia da 30' che occupa (richiesta di
+            // Maurizio 2026-09-22: "non voglio vedere Domizia 4 volte").
+            pazienti.push({ nome: r.nome, stato: r.stato, continua: minutiOrario(r.time_of_day) !== orarioMinuti });
           }
         });
         // parziale: casella occupata da mensili ma con ancora una settimana

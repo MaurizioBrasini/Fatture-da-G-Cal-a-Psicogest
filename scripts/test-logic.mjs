@@ -1432,6 +1432,22 @@ test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fas
 // diversa solo per i casi reali come "Riunione Scienziati", 120') e occupa
 // ogni fascia da 30' che attraversa davvero. Stessa regola per tutti,
 // nessun caso speciale — a differenza dei due tentativi precedenti.
+test("computeGrigliaDisponibilita: 'continua' distingue chi inizia davvero in una fascia da chi la occupa solo per sconfinamento (2026-09-22, evita di mostrare lo stesso paziente 'due volte')", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Domizia S.", stato: "attivo", durata_minuti: 60 },
+  ]);
+  const sottoSlotDi = (orario) => r.griglia.find((x) => x.orario === orario).giorni[1].sottoSlot;
+  // Nella propria fascia (09:30): inizia davvero, in entrambe le caselle (settimanale).
+  for (const s of sottoSlotDi("09:30")) {
+    assert.equal(s.pazienti.length, 1);
+    assert.equal(s.pazienti[0].continua, false);
+  }
+  // Nella fascia successiva (10:00): presente solo per sconfinamento.
+  for (const s of sottoSlotDi("10:00")) {
+    assert.equal(s.pazienti.length, 1);
+    assert.equal(s.pazienti[0].continua, true);
+  }
+});
 test("computeGrigliaDisponibilita: un paziente normale da 60' occupa la propria fascia E la successiva", () => {
   const r = computeGrigliaDisponibilita([
     { weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo", durata_minuti: 60 },
