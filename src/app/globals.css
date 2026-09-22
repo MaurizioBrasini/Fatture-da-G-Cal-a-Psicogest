@@ -170,6 +170,10 @@ input[type=number] { -moz-appearance: textfield; }
 .disp-sub + .disp-sub { border-top: 1px solid var(--border); }
 .disp-sub.libero { background: #CDE4D6; color: var(--accent); font-weight: 600; }
 .disp-sub.parziale { background: #EEF5F1; }
+/* Fascia mai dedicata ai pazienti (8:30, pausa pranzo, dopo le 19:30) —
+   diversa sia da "Disponibile" (offribile a un nuovo paziente) sia da una
+   fascia davvero occupata. */
+.disp-sub.indisponibile { background: var(--bg); color: var(--ink-soft); font-style: italic; }
 .disp-conflitto { padding: 4px 8px; color: var(--danger); font-weight: 600; border-bottom: 1px solid var(--border); }
 
 .disp-avail-row { display: grid; grid-template-columns: 70px 1fr; gap: 12px; align-items: start; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }

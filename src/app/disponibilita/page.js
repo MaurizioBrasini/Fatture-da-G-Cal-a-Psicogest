@@ -13,6 +13,14 @@ const GIORNI = [1, 2, 3, 4];
 const GIORNI_COL = { 1: "Lun", 2: "Mar", 3: "Mer", 4: "Gio" };
 const GIORNI_LABEL = { 1: "Lunedì", 2: "Martedì", 3: "Mercoledì", 4: "Giovedì" };
 
+// Fasce mai dedicate ai pazienti (richiesta di Maurizio 2026-09-22): 8:30
+// (prima dell'orario di lavoro), 14:30 (pausa pranzo), 19:30 (dopo
+// l'orario di lavoro). Non "Disponibile" (che implica "ci puoi mettere
+// qualcuno") ma "Indisponibile" — diverso anche da una fascia davvero
+// occupata da un paziente/impegno, che continua a mostrare il nome come
+// sempre se per qualche motivo ce n'è uno registrato lì.
+const FASCE_INDISPONIBILI = new Set(["08:30", "14:30", "19:30"]);
+
 // Ragionando in slot quindicinali (le due caselle di ogni ora): "liberi" =
 // caselle senza nessuno, "parziali" = caselle occupate da un mensile che hanno
 // ancora una settimana libera (ci sta un altro mensile, non un quindicinale).
@@ -81,9 +89,11 @@ export default function DisponibilitaPage() {
   );
 
   // Un elemento per orario, con i giorni che hanno almeno uno slot (libero o parziale).
+  // Le fasce indisponibili (8:30/14:30/19:30) non contano mai come "posti
+  // liberi" per un nuovo paziente, anche se strutturalmente vuote.
   const disponibili = [];
   let totaleLiberi = 0;
-  r.griglia.forEach((row) => {
+  r.griglia.filter((row) => !FASCE_INDISPONIBILI.has(row.orario)).forEach((row) => {
     const giorni = [];
     GIORNI.forEach((g) => {
       const { liberi, parziali } = contaSlot(row.giorni[g]);
@@ -136,6 +146,7 @@ export default function DisponibilitaPage() {
         <div className="disp-legend">
           <span><span className="disp-swatch" style={{ background: "#CDE4D6" }} />Verde = slot libero</span>
           <span><span className="disp-swatch" style={{ background: "#EEF5F1", border: "1px solid #CDE4D6" }} />Verde chiaro = mensile con ancora una settimana libera</span>
+          <span><span className="disp-swatch" style={{ background: "var(--bg)", border: "1px solid var(--border)" }} />Grigio corsivo = fascia non dedicata ai pazienti (8:30, pausa pranzo, dopo le 19:30)</span>
           <span>Ogni ora è divisa in due caselle (le due settimane del ciclo quindicinale)</span>        </div>
         <div className="table-scroll" style={{ marginBottom: 28 }}>
           <div className="disp-grid">
@@ -157,7 +168,11 @@ export default function DisponibilitaPage() {
                       )}
                       {c.sottoSlot.map((s, i) =>
                         s.pazienti.length === 0 ? (
-                          <div key={i} className="disp-sub libero">Disponibile</div>
+                          FASCE_INDISPONIBILI.has(row.orario) ? (
+                            <div key={i} className="disp-sub indisponibile">Indisponibile</div>
+                          ) : (
+                            <div key={i} className="disp-sub libero">Disponibile</div>
+                          )
                         ) : (
                           <div key={i} className={`disp-sub${s.parziale ? " parziale" : ""}`}>
                             <span>
