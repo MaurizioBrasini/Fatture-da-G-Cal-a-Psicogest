@@ -29,6 +29,9 @@ import {
   computePrenotazioniPreview,
   occorrenzeFuture,
   slotsInConflitto,
+  fasceToccateDa,
+  FASCE_CANONICHE,
+  FASCE_INDISPONIBILI,
   rilevaConflittiChiusura,
   computeImpattoChiusura,
   chiusuraDentroFinestra,
@@ -1447,6 +1450,29 @@ test("slotsInConflitto: stesso orario esatto continua a funzionare come prima (r
   assert.equal(slotsInConflitto(a, b), false);
   const c = { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08" };
   assert.equal(slotsInConflitto(a, c), true);
+});
+
+// --- fasceToccateDa: quali fasce canoniche un impegno reale satura (2026-09-22) ---
+test("fasceToccateDa: un'ora esatta su una fascia satura solo quella", () => {
+  assert.deepEqual(fasceToccateDa("10:30", 60), ["10:30"]);
+});
+test("fasceToccateDa: caso reale 'Riunione Scienziati' (9-11) — matematicamente tocca anche 8:30 (9:00-9:30 ci ricade), irrilevante perché sempre indisponibile", () => {
+  assert.deepEqual(fasceToccateDa("09:00", 120), ["08:30", "09:30", "10:30"]);
+  // Dopo il filtro FASCE_INDISPONIBILI (fatto da chi crea gli slot, non da
+  // fasceToccateDa stessa): restano solo le due fasce vere.
+  const daCreare = fasceToccateDa("09:00", 120).filter((f) => !FASCE_INDISPONIBILI.has(f));
+  assert.deepEqual(daCreare, ["09:30", "10:30"]);
+});
+test("fasceToccateDa: caso reale 'Palestra' (15-17) satura 14:30, 15:30 e 16:30 (14:30 comunque sempre indisponibile)", () => {
+  assert.deepEqual(fasceToccateDa("15:00", 120), ["14:30", "15:30", "16:30"]);
+});
+test("fasceToccateDa: senza durata, il default è 60' (una sola fascia se allineato)", () => {
+  assert.deepEqual(fasceToccateDa("11:30"), ["11:30"]);
+});
+test("FASCE_CANONICHE: 12 fasce da 08:30 a 19:30, un'ora l'una", () => {
+  assert.equal(FASCE_CANONICHE.length, 12);
+  assert.equal(FASCE_CANONICHE[0], "08:30");
+  assert.equal(FASCE_CANONICHE[FASCE_CANONICHE.length - 1], "19:30");
 });
 
 console.log(`\n${passed} test superati.`);

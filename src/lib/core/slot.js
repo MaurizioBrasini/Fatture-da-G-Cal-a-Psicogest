@@ -94,6 +94,43 @@ function minutiOrario(t) {
   return hh * 60 + mm;
 }
 
+// Fasce fisse del calendario: una per ora, a partire dalle :30, da 08:30 a
+// 19:30 (12 fasce) — esattamente come CALENDARIO PAZIENTI MENSILE.xlsx
+// (Foglio1). Unica fonte di verità, usata sia da computeGrigliaDisponibilita
+// sia da fasceToccateDa.
+export const FASCE_CANONICHE = (() => {
+  const out = [];
+  for (let m = minutiOrario("08:30"); m <= minutiOrario("19:30"); m += 60) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  }
+  return out;
+})();
+
+// Quali fasce canoniche (ciascuna [orario, orario+60')) un impegno con
+// orario e durata REALI tocca anche solo in parte — quella fascia va
+// considerata satura per intero, non solo la porzione toccata (richiesta di
+// Maurizio 2026-09-22, "a noi interessa solo quali slot satura", non
+// l'orario vero). Calcolo puro, senza sapere quali fasce sono strutturalmente
+// chiuse (vedi FASCE_INDISPONIBILI): un impegno dalle 9 alle 11 tocca
+// matematicamente anche 8:30 (9:00-9:30 ci ricade), che però in pratica non
+// conta perché quella fascia non è mai disponibile comunque — chi chiama
+// (vedi "Nuovo slot fisso" in Pazienti) filtra FASCE_INDISPONIBILI prima di
+// creare gli slot, per non sprecarne uno su una fascia che non si vedrà mai.
+export function fasceToccateDa(oraInizio, durataMinuti) {
+  const inizio = minutiOrario(oraInizio);
+  const fine = inizio + (durataMinuti || 60);
+  return FASCE_CANONICHE.filter((f) => {
+    const fInizio = minutiOrario(f);
+    return inizio < fInizio + 60 && fine > fInizio;
+  });
+}
+
+// Fasce mai dedicate ai pazienti (richiesta di Maurizio 2026-09-22): 8:30
+// (prima dell'orario di lavoro), 14:30 (pausa pranzo), 19:30 (dopo
+// l'orario di lavoro) — indisponibili SEMPRE, anche per impegni non-paziente
+// come riunioni o altri impegni fissi, non solo "Disponibile" libere.
+export const FASCE_INDISPONIBILI = new Set(["08:30", "14:30", "19:30"]);
+
 // Fase di anchor_date dentro il ciclo di interval_days/7 settimane (1 per
 // settimanale, 2 per quindicinale, 4 per "ogni 4 settimane") relativa a un
 // lunedì di riferimento fisso — serve a sapere non solo "c'è già qualcuno su
@@ -192,13 +229,7 @@ export function computeGrigliaDisponibilita(patientSlots) {
   // Unita agli orari effettivamente usati, per sicurezza, nel caso un
   // vecchio slot non cada esattamente su una fascia canonica (non sparisce
   // mai dalla griglia).
-  const ORARIO_GRIGLIA_INIZIO = "08:30";
-  const ORARIO_GRIGLIA_FINE = "19:30";
-  const orariCanonici = [];
-  for (let m = minutiOrario(ORARIO_GRIGLIA_INIZIO); m <= minutiOrario(ORARIO_GRIGLIA_FINE); m += 60) {
-    orariCanonici.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
-  }
-  const orariUsati = [...new Set([...orariCanonici, ...patientSlots.map((s) => s.time_of_day.slice(0, 5))])].sort();
+  const orariUsati = [...new Set([...FASCE_CANONICHE, ...patientSlots.map((s) => s.time_of_day.slice(0, 5))])].sort();
   const griglia = orariUsati.map((orario) => {
     const riga = { orario, giorni: {} };
     const orarioMinuti = minutiOrario(orario);

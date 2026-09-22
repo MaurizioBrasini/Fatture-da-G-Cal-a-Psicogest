@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import ChiusureCalendarioModal from "@/components/ChiusureCalendarioModal";
-import { computeGrigliaDisponibilita, todayISO, formatDataItaliana } from "@/lib/logic";
+import { computeGrigliaDisponibilita, todayISO, formatDataItaliana, FASCE_INDISPONIBILI } from "@/lib/logic";
 
 // Il venerdì non è più un giorno dedicato ai pazienti (vedi richiesta
 // 2026-09-15): la griglia e i conteggi di disponibilità coprono solo
@@ -12,14 +12,6 @@ import { computeGrigliaDisponibilita, todayISO, formatDataItaliana } from "@/lib
 const GIORNI = [1, 2, 3, 4];
 const GIORNI_COL = { 1: "Lun", 2: "Mar", 3: "Mer", 4: "Gio" };
 const GIORNI_LABEL = { 1: "Lunedì", 2: "Martedì", 3: "Mercoledì", 4: "Giovedì" };
-
-// Fasce mai dedicate ai pazienti (richiesta di Maurizio 2026-09-22): 8:30
-// (prima dell'orario di lavoro), 14:30 (pausa pranzo), 19:30 (dopo
-// l'orario di lavoro). Non "Disponibile" (che implica "ci puoi mettere
-// qualcuno") ma "Indisponibile" — diverso anche da una fascia davvero
-// occupata da un paziente/impegno, che continua a mostrare il nome come
-// sempre se per qualche motivo ce n'è uno registrato lì.
-const FASCE_INDISPONIBILI = new Set(["08:30", "14:30", "19:30"]);
 
 // Ragionando in slot quindicinali (le due caselle di ogni ora): "liberi" =
 // caselle senza nessuno, "parziali" = caselle occupate da un mensile che hanno

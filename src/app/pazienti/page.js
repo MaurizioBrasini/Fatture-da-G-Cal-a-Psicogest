@@ -7,7 +7,7 @@ import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
 import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
 import VerificaContattiModal from "@/components/VerificaContattiModal";
-import { normalizeName, todayISO, tariffaStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto, fasceToccateDa, FASCE_INDISPONIBILI } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -145,6 +145,12 @@ export default function PazientiPage() {
   }
 
   const [slotsByPatientId, setSlotsByPatientId] = useState({});
+  // Elenco completo (non deduplicato per paziente, a differenza di
+  // slotsByPatientId) — serve al controllo conflitti di "Nuovo slot fisso"
+  // quando un paziente ha PIÙ slot attivi (es. un impegno che tocca più
+  // fasce, come "Riunione Scienziati"): slotsByPatientId ne tiene solo uno,
+  // non basterebbe a controllare tutte le fasce coinvolte.
+  const [tuttiSlotAttivi, setTuttiSlotAttivi] = useState([]);
   // Copia dei pazienti come letti dal database: "Salva tutte le modifiche"
   // scrive SOLO i campi cambiati rispetto a questa copia. Prima riscriveva
   // ogni paziente per intero dallo stato della pagina, quindi una pagina
@@ -163,6 +169,7 @@ export default function PazientiPage() {
     snapshotPazienti.current = JSON.parse(JSON.stringify(data || []));
     if (s) setSettings(s);
     setSlotsByPatientId(Object.fromEntries((slots || []).map((sl) => [sl.patient_id, sl])));
+    setTuttiSlotAttivi(slots || []);
     setLoading(false);
   }, [supabase]);
 
@@ -573,17 +580,31 @@ export default function PazientiPage() {
     // UTC per calcolare il weekday, cosi' il cambio d'ora legale/solare non
     // fa scivolare la data di un giorno.
     const weekday = new Date(`${data}T12:00:00Z`).getUTCDay();
+    const durata = parseInt(durataMinuti, 10) || 60;
+    // Un impegno più lungo di un'ora tocca più fasce del calendario (es. una
+    // riunione di 2 ore dalle 9 tocca 9:30 e 10:30) — quella che conta è
+    // quale/i fascia/e satura, non l'orario reale (richiesta di Maurizio
+    // 2026-09-22): fasceToccateDa calcola l'elenco, uno slot fisso per
+    // ciascuna, tutti sulla stessa cadenza/ancora, invece di doverli
+    // calcolare e inserire a mano uno per uno.
+    // Le fasce mai dedicate ai pazienti (8:30/14:30/19:30) non vanno
+    // create: non si vedrebbero mai (la griglia le mostra sempre
+    // "Indisponibile", occupante o no) e sprecherebbero solo una riga.
+    const fasce = fasceToccateDa(ora, durata).filter((f) => !FASCE_INDISPONIBILI.has(f));
+    if (!fasce.length) return;
     const { data: userData } = await supabase.auth.getUser();
-    const { error: slotError } = await supabase.from("patient_slots").insert({
-      user_id: userData.user.id,
-      patient_id: patientId,
-      weekday,
-      time_of_day: `${ora}:00`,
-      interval_days: intervalDays,
-      anchor_date: data,
-      active: true,
-      durata_minuti: parseInt(durataMinuti, 10) || null,
-    });
+    const { error: slotError } = await supabase.from("patient_slots").insert(
+      fasce.map((f) => ({
+        user_id: userData.user.id,
+        patient_id: patientId,
+        weekday,
+        time_of_day: `${f}:00`,
+        interval_days: intervalDays,
+        anchor_date: data,
+        active: true,
+        durata_minuti: durata,
+      }))
+    );
     if (slotError) {
       alert("Creazione slot fallita: " + slotError.message);
       return;
@@ -1343,32 +1364,53 @@ export default function PazientiPage() {
               onChange={(e) => setNuovoSlotModal((m) => ({ ...m, durataMinuti: e.target.value }))}
             />
             <span className="muted small">
-              Usata solo per la durata dell&apos;evento quando generi le occorrenze future (non incide sulla griglia
-              di Disponibilità né sul controllo conflitti, che ragionano per fasce esatte — un impegno più lungo del
-              solito, come una riunione di 2 ore, si registra come più slot fissi separati, uno per fascia).
+              Un impegno più lungo di un&apos;ora (es. una riunione di 2 ore) tocca più fasce del calendario — le
+              trovi qui sotto appena scegli data/ora: viene creato automaticamente uno slot fisso per ciascuna,
+              invece di doverle calcolare e inserire a mano una per una.
             </span>
           </label>
           {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {
             const weekday = new Date(`${nuovoSlotModal.data}T12:00:00Z`).getUTCDay();
-            const timeOfDay = `${nuovoSlotModal.ora}:00`;
-            const nuovoSlot = {
-              weekday,
-              time_of_day: timeOfDay,
-              interval_days: nuovoSlotModal.intervalDays,
-              anchor_date: nuovoSlotModal.data,
-            };
-            const conflitto = Object.entries(slotsByPatientId).find(
-              ([pid, sl]) => Number(pid) !== nuovoSlotModal.patientId && slotsInConflitto(nuovoSlot, sl)
-            );
-            if (!conflitto) return null;
-            const altroPatient = patients.find((pp) => pp.id === Number(conflitto[0]));
-            const altroNome = altroPatient ? altroPatient.nome_calendario || altroPatient.fatturare_a : `paziente #${conflitto[0]}`;
+            const durata = parseInt(nuovoSlotModal.durataMinuti, 10) || 60;
+            const fasceGrezze = fasceToccateDa(nuovoSlotModal.ora, durata);
+            const fasce = fasceGrezze.filter((f) => !FASCE_INDISPONIBILI.has(f));
+            const fasceEscluse = fasceGrezze.filter((f) => FASCE_INDISPONIBILI.has(f));
+            const conflitti = fasce
+              .map((f) => {
+                const nuovoSlot = {
+                  weekday,
+                  time_of_day: `${f}:00`,
+                  interval_days: nuovoSlotModal.intervalDays,
+                  anchor_date: nuovoSlotModal.data,
+                };
+                const altro = tuttiSlotAttivi.find(
+                  (sl) => sl.patient_id !== nuovoSlotModal.patientId && slotsInConflitto(nuovoSlot, sl)
+                );
+                return altro ? { fascia: f, altro } : null;
+              })
+              .filter(Boolean);
             return (
-              <p className="small" style={{ color: "#b45309", marginTop: 10, marginBottom: 0 }}>
-                Attenzione: {GIORNI_LABEL[weekday]} alle {nuovoSlotModal.ora} coincide, prima o poi, con lo slot fisso di{" "}
-                <strong>{altroNome}</strong> (le due cadenze non si alternano). Scegli un altro giorno/ora, oppure controlla
-                la data di partenza se dovrebbe trattarsi di un'alternanza.
-              </p>
+              <>
+                <p className="small muted" style={{ marginTop: 10, marginBottom: 0 }}>
+                  {fasce.length > 1
+                    ? `Sature ${fasce.length} fasce: ${fasce.join(", ")}.`
+                    : fasce.length === 1
+                    ? `Satura la fascia ${fasce[0]}.`
+                    : "Nessuna fascia del calendario (8:30–19:30) coinvolta."}
+                  {fasceEscluse.length > 0 &&
+                    ` (${fasceEscluse.join(", ")} non ${fasceEscluse.length > 1 ? "vengono create" : "viene creata"}: mai disponibili.)`}
+                </p>
+                {conflitti.map(({ fascia, altro }) => {
+                  const altroPatient = patients.find((pp) => pp.id === altro.patient_id);
+                  const altroNome = altroPatient ? altroPatient.nome_calendario || altroPatient.fatturare_a : `paziente #${altro.patient_id}`;
+                  return (
+                    <p key={fascia} className="small" style={{ color: "#b45309", marginTop: 6, marginBottom: 0 }}>
+                      Attenzione: la fascia {fascia} coincide, prima o poi, con lo slot fisso di <strong>{altroNome}</strong>{" "}
+                      (le due cadenze non si alternano).
+                    </p>
+                  );
+                })}
+              </>
             );
           })()}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
