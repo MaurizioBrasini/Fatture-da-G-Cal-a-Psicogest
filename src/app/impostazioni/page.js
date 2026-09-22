@@ -181,6 +181,20 @@ export default function ImpostazioniPage() {
           </label>
         </div>
 
+        <h2 className="sub-heading">Consensi informati</h2>
+        <p className="sub" style={{ marginBottom: 12 }}>
+          Servono per generare il link (pagina Consensi informati) da mandare a un futuro paziente prima del primo
+          incontro.
+        </p>
+        <div className="settings-grid">
+          <label>
+            Indirizzo dell&apos;app (URL Vercel)
+            <input value={settings.app_base_url || ""} onChange={(e) => set("app_base_url", e.target.value)} placeholder="https://tuo-progetto.vercel.app" />
+            <span className="muted small">Serve per comporre il link /consenso/... nell&apos;email/messaggio mandato al paziente.</span>
+          </label>
+          <FirmaProfessionista settings={settings} setSettings={setSettings} />
+        </div>
+
         <h2 className="sub-heading">Strumenti diagnostici</h2>
         <p className="sub" style={{ marginBottom: 12 }}>
           Prova a vuoto (sola lettura, non scrive nulla su Google): controlla le note del calendario nell&apos;intervallo
@@ -265,5 +279,35 @@ export default function ImpostazioniPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// Caricamento della firma di Maurizio (immagine PNG/JPG) usata su ogni PDF
+// di consenso generato — vedi src/lib/consensoPdf.js. Componente a parte
+// solo per il proprio stato di caricamento, la pagina resta un unico file
+// come le altre pagine grandi dell'app.
+function FirmaProfessionista({ settings, setSettings }) {
+  const [stato, setStato] = useState("");
+  async function caricaFile(file) {
+    setStato("Caricamento…");
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/consensi/carica-firma", { method: "POST", body: formData });
+    const data = await res.json();
+    if (res.ok) {
+      setSettings((s) => ({ ...s, firma_professionista_url: data.path }));
+      setStato("Firma salvata.");
+    } else {
+      setStato(data.error || "Errore.");
+    }
+  }
+  return (
+    <label>
+      Firma del Professionista (immagine PNG o JPG)
+      <input type="file" accept="image/png,image/jpeg" onChange={(e) => e.target.files[0] && caricaFile(e.target.files[0])} />
+      <span className="muted small">
+        {settings.firma_professionista_url ? `Caricata: ${settings.firma_professionista_url}` : "Nessuna firma caricata ancora."} {stato}
+      </span>
+    </label>
   );
 }

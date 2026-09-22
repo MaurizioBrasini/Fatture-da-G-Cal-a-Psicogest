@@ -27,8 +27,15 @@ export async function middleware(request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isAuthRoute = request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/auth");
+  // /consenso e /api/consensi/pubblico sono l'unico punto dell'app pensato
+  // per essere aperto da chi NON è Maurizio (il link mandato al futuro
+  // paziente, prima ancora che esista un account) — vanno esclusi dal
+  // redirect al login, altrimenti il modulo non si aprirebbe mai.
+  const isAuthRoute =
+    request.nextUrl.pathname.startsWith("/login") ||
+    request.nextUrl.pathname.startsWith("/auth") ||
+    request.nextUrl.pathname.startsWith("/consenso") ||
+    request.nextUrl.pathname.startsWith("/api/consensi/pubblico");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();

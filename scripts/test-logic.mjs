@@ -30,6 +30,7 @@ import {
   occorrenzeFuture,
   slotsInConflitto,
   fasceToccateDa,
+  tariffaPerConsenso,
   FASCE_CANONICHE,
   FASCE_INDISPONIBILI,
   rilevaConflittiChiusura,
@@ -1471,6 +1472,13 @@ test("FASCE_CANONICHE: 12 fasce da 08:30 a 19:30, un'ora l'una", () => {
   assert.equal(FASCE_CANONICHE.length, 12);
   assert.equal(FASCE_CANONICHE[0], "08:30");
   assert.equal(FASCE_CANONICHE[FASCE_CANONICHE.length - 1], "19:30");
+});
+
+// --- Consensi informati: la tariffa mostrata nel modulo è quella VERA del paziente ---
+test("tariffaPerConsenso: usa la stessa tariffaStandard già usata in Pazienti (mai un prezzo fisso)", () => {
+  assert.equal(tariffaPerConsenso("individuale", "regolare", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_individuale_regolare);
+  assert.equal(tariffaPerConsenso("individuale", "agevolata", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_individuale_agevolata);
+  assert.equal(tariffaPerConsenso("coppia", "regolare", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_coppia_regolare);
 });
 
 console.log(`\n${passed} test superati.`);

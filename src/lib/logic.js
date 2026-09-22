@@ -8,3 +8,4 @@ export * from "./core/fatture.js";
 export * from "./core/rinumerazione.js";
 export * from "./core/prenotazioni.js";
 export * from "./core/chiusure.js";
+export * from "./core/consensi.js";

@@ -15,13 +15,17 @@ function testoInHtml(testo) {
     .join("\n");
 }
 
+// Ritorna { id } (l'id del messaggio Resend) — usato dai consensi informati
+// come prova che l'email è partita davvero verso l'indirizzo del paziente
+// (vedi src/lib/consensoPdf.js e api/consensi/invia). Gli altri chiamanti
+// continuano a ignorarlo, nessuna rottura.
 export async function sendEmail({ settings, to, subject, html }) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY non configurata.");
   const resend = new Resend(apiKey);
   const fromNome = settings?.email_mittente_nome || "Dr. Maurizio Brasini";
   const fromIndirizzo = settings?.email_mittente_indirizzo || "maurizio.brasini@psiconet.it";
-  const { error } = await resend.emails.send({
+  const { data, error } = await resend.emails.send({
     from: `${fromNome} <${fromIndirizzo}>`,
     to,
     replyTo: fromIndirizzo,
@@ -29,6 +33,7 @@ export async function sendEmail({ settings, to, subject, html }) {
     html,
   });
   if (error) throw new Error(error.message || "Errore Resend non specificato.");
+  return { id: data?.id || null };
 }
 
 // Converte il testo di un messaggio "Comunicazioni" in HTML, sostituendo il
@@ -109,6 +114,18 @@ export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotaz
       `perché risulta già un altro appuntamento a meno di due settimane di distanza (${conflittiTesto}).\n\n` +
       `È possibile fissare un solo appuntamento ogni due settimane. ` +
       (linkPrenotazioni ? `Potrà scegliere un nuovo incontro, a distanza di almeno due settimane dall'altro, da questo link:\n\n${linkPrenotazioni}\n\n` : "\n") +
+      `Cordiali saluti,\nDr. Maurizio Brasini`
+  );
+}
+
+// Email di invito a compilare il modulo di consenso informato prima del
+// primo incontro (link unico e univoco, valido una sola volta).
+export function buildEmailConsensoHtml({ nomeInvitato, link }) {
+  return testoInHtml(
+    `Gentile ${nomeInvitato},\n\n` +
+      `prima del nostro primo incontro Le chiedo di compilare il modulo con i Suoi dati e il consenso informato, dal link qui sotto:\n\n` +
+      `${link}\n\n` +
+      `Il link è personale e va usato una sola volta.\n\n` +
       `Cordiali saluti,\nDr. Maurizio Brasini`
   );
 }

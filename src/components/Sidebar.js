@@ -9,6 +9,7 @@ const ITEMS = [
   { href: "/disponibilita", label: "Disponibilità" },
   { href: "/disdette", label: "Disdette" },
   { href: "/comunicazioni", label: "Comunicazioni" },
+  { href: "/consensi", label: "Consensi informati" },
   { href: "/storico", label: "Storico fatture" },
   { href: "/impostazioni", label: "Impostazioni" },
 ];
