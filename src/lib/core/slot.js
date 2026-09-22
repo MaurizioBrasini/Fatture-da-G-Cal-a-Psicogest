@@ -57,7 +57,7 @@ function mcd(a, b) {
   return a;
 }
 
-// Due slot con lo stesso weekday+orario NON sono per forza in conflitto: se
+// Due slot con lo stesso weekday NON sono per forza in conflitto: se
 // entrambi sono quindicinali (o comunque a cadenza multipla) ma le ancore
 // cadono su settimane diverse, si alternano e non generano mai lo stesso
 // giorno reale (caso voluto, es. Livia/Pietro). Le due sequenze di date
@@ -65,8 +65,18 @@ function mcd(a, b) {
 // le due ancore è multipla del MCD dei due interval_days — se si
 // intersecano lo fanno periodicamente, quindi è un vero conflitto ricorrente,
 // non un caso limite isolato.
+// Orario: non serve più la coincidenza esatta, basta una sovrapposizione
+// reale tenendo conto di durata_minuti (default 60) — richiesta di Maurizio
+// 2026-09-22, stesso principio della griglia di Disponibilità ("mezz'ora
+// occupata" basta a creare un conflitto, es. una riunione di 2 ore che parte
+// mezz'ora prima di un nuovo slot).
 export function slotsInConflitto(slotA, slotB) {
-  if (slotA.weekday !== slotB.weekday || slotA.time_of_day !== slotB.time_of_day) return false;
+  if (slotA.weekday !== slotB.weekday) return false;
+  const inizioA = minutiOrario(slotA.time_of_day);
+  const fineA = inizioA + (slotA.durata_minuti || 60);
+  const inizioB = minutiOrario(slotB.time_of_day);
+  const fineB = inizioB + (slotB.durata_minuti || 60);
+  if (inizioA >= fineB || inizioB >= fineA) return false;
   const diffGiorni = Math.round(
     (new Date(`${slotB.anchor_date}T00:00:00Z`) - new Date(`${slotA.anchor_date}T00:00:00Z`)) / 86400000
   );
@@ -75,6 +85,12 @@ export function slotsInConflitto(slotA, slotB) {
 }
 
 const GIORNI_GRIGLIA = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
+
+// "09:30" o "09:30:00" -> 570 (minuti da mezzanotte).
+function minutiOrario(t) {
+  const [hh, mm] = t.slice(0, 5).split(":").map(Number);
+  return hh * 60 + mm;
+}
 
 // Fase di anchor_date dentro il ciclo di interval_days/7 settimane (1 per
 // settimanale, 2 per quindicinale, 4 per "ogni 4 settimane") relativa a un
@@ -166,8 +182,22 @@ export function computeGrigliaDisponibilita(patientSlots) {
   const orariUsati = [...new Set(patientSlots.map((s) => s.time_of_day.slice(0, 5)))].sort();
   const griglia = orariUsati.map((orario) => {
     const riga = { orario, giorni: {} };
+    const orarioMinuti = minutiOrario(orario);
     for (const g of [1, 2, 3, 4, 5]) {
-      const righe = gruppi.get(`${g}|${orario}:00`) || [];
+      // Una fascia non è "libera" solo perché nessuno slot inizia
+      // esattamente qui: se anche solo mezz'ora si sovrappone a un altro
+      // slot più lungo del solito (durata_minuti, default 60 — es. una
+      // riunione di 2 ore partita mezz'ora prima), l'intera fascia va
+      // considerata occupata (richiesta di Maurizio 2026-09-22: "uno slot
+      // che ha mezz'ora occupata non è disponibile, deve esserlo per
+      // intero"). Sostituisce il lookup esatto su `gruppi` con un confronto
+      // di sovrapposizione oraria reale su tutti gli slot di questo weekday.
+      const righe = patientSlots.filter((s) => {
+        if (Number(s.weekday) !== g) return false;
+        const inizio = minutiOrario(s.time_of_day);
+        const fine = inizio + (s.durata_minuti || 60);
+        return inizio < orarioMinuti + 60 && fine > orarioMinuti;
+      });
       if (righe.length === 0) {
         riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [], parziale: false }, { pazienti: [], parziale: false }] };
         continue;
