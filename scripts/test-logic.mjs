@@ -446,7 +446,7 @@ test("formatCodice: contanti saldati nel giorno dell'incasso, poi il deve residu
 });
 
 // --- Stato "non_fatturato" (pro bono, supervisioni gratuite, pseudo-pazienti — 2026-09-22) ---
-test("computeRinumerazione: non_fatturato non fattura mai, il contatore accumula senza azzerarsi (come sospeso)", () => {
+test("computeRinumerazione: non_fatturato non genera alcun piano — nessuna tariffa applicabile, non serve contare (richiesta di Maurizio 2026-09-22)", () => {
   const patient = { nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
   const events = Array.from({ length: 6 }, (_, i) => ({
     id: `e${i + 1}`,
@@ -456,9 +456,7 @@ test("computeRinumerazione: non_fatturato non fattura mai, il contatore accumula
     descrizione: "",
   }));
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
-  assert.equal(piano[4].codice, "NF5"); // alla 5a seduta, un paziente normale fatturerebbe
-  assert.equal(piano[5].codice, "NF6"); // continua a salire, nessun azzeramento
-  assert.ok(piano.every((p) => !p.codice.includes("fatturare")));
+  assert.deepEqual(piano, []);
 });
 test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
   const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };

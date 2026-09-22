@@ -131,6 +131,13 @@ export function analizzaNotaPerAudit(descrizioneOriginale) {
 // dal saldo attuale): tutte le sedute del piano sono dopo l'ultimo accumulo.
 export function computeRinumerazione(patient, allEvents, settings, allPatients, opzioni = {}) {
   const lettera = letteraCodice(patient);
+  // "non_fatturato" (richiesta di Maurizio 2026-09-22): nessuna tariffa si
+  // applica, quindi non si fattura mai — non serve nemmeno un conteggio
+  // "NF1, NF2..." sulla nota, che non porterebbe a nulla. Piano vuoto:
+  // "Rinumera" non tocca mai le note di questi pazienti/pseudo-pazienti (né
+  // scrive un nuovo codice, né rimuove uno eventualmente già scritto in
+  // passato — quello va tolto a mano una tantum se presente).
+  if (lettera === "NF") return [];
   const soglia = patient.soglia_fatturazione || settings.soglia_default;
   const eventi = eventiDiPazienteOrdinati(patient, allEvents, allPatients);
   const quota = patient.quota_contante_seduta || 0;
@@ -147,7 +154,7 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
 
   for (const ev of eventi) {
     contatore += 1;
-    const fatturare = lettera !== "S" && lettera !== "NF" && contatore >= soglia;
+    const fatturare = lettera !== "S" && contatore >= soglia; // "NF" è già uscito sopra, mai qui
     let saldatiOggi = 0;
     while (iPag < pagamenti.length && pagamenti[iPag].data <= ev.data) {
       const p = pagamenti[iPag++];
