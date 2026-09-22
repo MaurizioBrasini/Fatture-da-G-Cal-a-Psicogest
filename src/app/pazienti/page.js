@@ -1343,8 +1343,9 @@ export default function PazientiPage() {
               onChange={(e) => setNuovoSlotModal((m) => ({ ...m, durataMinuti: e.target.value }))}
             />
             <span className="muted small">
-              Usata sia per il controllo conflitti/griglia di Disponibilità sia per la durata dell&apos;evento quando
-              generi le occorrenze future — cambiala per un impegno più lungo del solito (es. 120 per 2 ore).
+              Usata solo per la durata dell&apos;evento quando generi le occorrenze future (non incide sulla griglia
+              di Disponibilità né sul controllo conflitti, che ragionano per fasce esatte — un impegno più lungo del
+              solito, come una riunione di 2 ore, si registra come più slot fissi separati, uno per fascia).
             </span>
           </label>
           {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {

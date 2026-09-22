@@ -143,9 +143,7 @@ export default function DisponibilitaPage() {
             {GIORNI.map((g) => (
               <div key={g} className="disp-dayhead">{GIORNI_COL[g]}</div>
             ))}
-            {r.griglia.map((row, rowIdx) => {
-              const nextRow = r.griglia[rowIdx + 1];
-              return (
+            {r.griglia.map((row) => (
               <div key={row.orario} style={{ display: "contents" }}>
                 <div className="disp-timehead">{row.orario}</div>
                 {GIORNI.map((g) => {
@@ -157,36 +155,13 @@ export default function DisponibilitaPage() {
                           Conflitto: {c.conflittiDettaglio.map((coppia) => coppia.join(" vs ")).join(", ")}
                         </div>
                       )}
-                      {c.sottoSlot.map((s, i) => {
-                        // Se la fascia SUCCESSIVA ha, in questa stessa casella
-                        // (stessa settimana del ciclo), qualcuno che "continua",
-                        // sopprimo il bordo inferiore: la fascia di qui e quella
-                        // dopo diventano visivamente un unico blocco, invece di
-                        // due appuntamenti separati da mezz'ora (2026-09-22).
-                        const mergeSotto = !!nextRow?.giorni[g]?.sottoSlot?.[i]?.pazienti?.some((p) => p.continua);
-                        const mergeClass = mergeSotto ? " merge-sotto" : "";
-                        if (s.pazienti.length === 0) return <div key={i} className={`disp-sub libero${mergeClass}`}>Disponibile</div>;
-                        // "continua" = nessuno di questi occupanti inizia davvero
-                        // qui, ci sono solo perché la loro seduta (durata_minuti)
-                        // sconfina da una fascia precedente — mostrarli come se
-                        // fossero un appuntamento a parte farebbe sembrare che un
-                        // paziente da un'ora abbia due appuntamenti separati da
-                        // mezz'ora (segnalato da Maurizio 2026-09-22). Nella
-                        // fascia dove iniziano davvero il nome compare come sempre.
-                        const iniziano = s.pazienti.filter((p) => !p.continua);
-                        if (iniziano.length === 0) {
-                          return (
-                            <div
-                              key={i}
-                              className={`disp-sub continua${mergeClass}`}
-                              title={`Prosegue: ${s.pazienti.map((p) => p.nome).join(", ")}`}
-                            />
-                          );
-                        }
-                        return (
-                          <div key={i} className={`disp-sub${s.parziale ? " parziale" : ""}${mergeClass}`}>
+                      {c.sottoSlot.map((s, i) =>
+                        s.pazienti.length === 0 ? (
+                          <div key={i} className="disp-sub libero">Disponibile</div>
+                        ) : (
+                          <div key={i} className={`disp-sub${s.parziale ? " parziale" : ""}`}>
                             <span>
-                              {iniziano.map((p, j) => (
+                              {s.pazienti.map((p, j) => (
                                 <span key={j}>
                                   {j > 0 && " / "}
                                   {p.nome}
@@ -195,14 +170,13 @@ export default function DisponibilitaPage() {
                               {s.parziale && " / Disponibile"}
                             </span>
                           </div>
-                        );
-                      })}
+                        )
+                      )}
                     </div>
                   );
                 })}
               </div>
-              );
-            })}
+            ))}
           </div>
         </div>
 
