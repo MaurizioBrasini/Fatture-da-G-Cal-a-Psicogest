@@ -26,17 +26,18 @@
 //    il generatore di occorrenze legga.
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
-import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
+import { deleteGoogleCalendarEvent, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
+import { incassaContante, rimuoviMarcatoreSaldato } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
   const { supabase, user, errore } = await utenteAutenticato();
   if (errore) return errore;
 
-  const { candidati } = await request.json().catch(() => ({}));
-  if (!Array.isArray(candidati) || !candidati.length) {
-    return NextResponse.json({ error: "Nessuna disdetta da registrare." }, { status: 400 });
+  const { candidati, incassi } = await request.json().catch(() => ({}));
+  if ((!Array.isArray(candidati) || !candidati.length) && (!Array.isArray(incassi) || !incassi.length)) {
+    return NextResponse.json({ error: "Nessuna disdetta o incasso da registrare." }, { status: 400 });
   }
 
   const { data: tokenRow, error: tokenError } = await supabase
@@ -48,7 +49,7 @@ export async function POST(request) {
     return rispostaSenzaGoogle();
   }
 
-  const vogliomoEmail = candidati.some((c) => c.inviaEmail);
+  const vogliomoEmail = (candidati || []).some((c) => c.inviaEmail);
   let settings = null;
   let emailByPatientId = {};
   if (vogliomoEmail) {
@@ -61,7 +62,7 @@ export async function POST(request) {
   }
 
   const risultati = [];
-  for (const c of candidati) {
+  for (const c of candidati || []) {
     let emailInviata = null; // null = non richiesta, altrimenti "ok" | "errore"
     try {
       const { error: insertError } = await supabase.from("cancellations").insert({
@@ -130,11 +131,51 @@ export async function POST(request) {
     await new Promise((r) => setTimeout(r, 150));
   }
 
+  // Incassi contanti rilevati dalla nota "saldato"/"saldato N" (stesse
+  // strutture del bottone manuale "€X" in Pazienti: patients.contante_dovuto
+  // + contante_pagamenti). Dopo la scrittura, il marcatore va tolto dalla
+  // nota dell'evento — è l'unico modo per non riproporre lo stesso incasso
+  // alla prossima scansione (idempotenza), lo stesso principio di
+  // skipped_occurrences sopra ma per il testo della nota.
+  const risultatiIncassi = [];
+  for (const inc of incassi || []) {
+    try {
+      const importo = Number(inc.importo);
+      if (!importo) throw new Error("Importo non valido.");
+      const nuovoSaldo = incassaContante(inc.saldoAttuale, importo);
+      const { error: insertError } = await supabase.from("contante_pagamenti").insert({
+        user_id: user.id,
+        patient_id: inc.patientId,
+        importo,
+        data: inc.data,
+      });
+      if (insertError) throw new Error(insertError.message);
+      const { error: updateError } = await supabase
+        .from("patients")
+        .update({ contante_dovuto: nuovoSaldo })
+        .eq("id", inc.patientId);
+      if (updateError) throw new Error(updateError.message);
+      await updateGoogleCalendarEventDescription(
+        tokenRow.refresh_token,
+        inc.eventId,
+        rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
+      );
+      risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: true });
+    } catch (e) {
+      risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: false, error: e.message });
+    }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
   const falliti = risultati.filter((r) => !r.ok);
+  const incassiFalliti = risultatiIncassi.filter((r) => !r.ok);
   return NextResponse.json({
-    ok: falliti.length === 0,
+    ok: falliti.length === 0 && incassiFalliti.length === 0,
     registrati: risultati.length - falliti.length,
     falliti: falliti.length,
     dettagli: risultati,
+    incassiRegistrati: risultatiIncassi.length - incassiFalliti.length,
+    incassiFalliti: incassiFalliti.length,
+    incassiDettagli: risultatiIncassi,
   });
 }

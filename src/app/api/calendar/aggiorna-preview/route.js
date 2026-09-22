@@ -6,7 +6,7 @@
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { computeAggiornamentoPreview, computeDuplicatiDaRipulire, todayISO, addDays } from "@/lib/logic";
+import { computeAggiornamentoPreview, computeDuplicatiDaRipulire, computeIncassiContantiDaRegistrare, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -38,7 +38,8 @@ export async function POST(request) {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
     const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []);
     const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []);
-    return NextResponse.json({ ok: true, candidati, duplicati, dataMinima, dataMassima });
+    const incassi = computeIncassiContantiDaRegistrare(events, patients || []);
+    return NextResponse.json({ ok: true, candidati, duplicati, incassi, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

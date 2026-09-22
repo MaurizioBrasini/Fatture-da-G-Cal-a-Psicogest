@@ -34,6 +34,7 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
     individuale: settings.prestazione_individuale,
     coppia: settings.prestazione_coppia,
     consulenza: settings.prestazione_consulenza,
+    supervisione: settings.prestazione_supervisione,
   };
   const prestazioneBase = prestazioneMap[patient.tipologia] || patient.tipologia;
   // Se il paziente è in regime agevolato, lo indichiamo esplicitamente nel
@@ -223,12 +224,15 @@ export const DEFAULT_SETTINGS = {
   prestazione_individuale: "psicoterapia individuale",
   prestazione_coppia: "psicoterapia di coppia",
   prestazione_consulenza: "consulenza psicologica",
+  prestazione_supervisione: "supervisione",
   tariffa_individuale_regolare: 80,
   tariffa_individuale_agevolata: 50,
   tariffa_coppia_regolare: 100,
   tariffa_coppia_agevolata: 60,
   tariffa_consulenza_regolare: 80,
   tariffa_consulenza_agevolata: 50,
+  tariffa_supervisione_regolare: 0,
+  tariffa_supervisione_agevolata: 0,
   ultimo_numero_fattura: null,
   email_mittente_nome: "Dr. Maurizio Brasini",
   email_mittente_indirizzo: "maurizio.brasini@psiconet.it",

@@ -45,6 +45,8 @@ import {
   tempoInZonaRossa,
   bilancioAlla,
   computeConflittiPrenotazioni,
+  computeIncassiContantiDaRegistrare,
+  rimuoviMarcatoreSaldato,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -299,6 +301,10 @@ test("letteraCodice: sospeso ha priorità sul regime", () => {
   assert.equal(letteraCodice({ regime_tariffario: "agevolata" }), "A");
   assert.equal(letteraCodice({ regime_tariffario: "regolare" }), "R");
 });
+test("letteraCodice: non_fatturato (NF) ha priorità sul regime, come sospeso", () => {
+  assert.equal(letteraCodice({ stato: "non_fatturato", regime_tariffario: "agevolata" }), "NF");
+  assert.equal(letteraCodice({ stato: "non_fatturato" }), "NF");
+});
 test("formatCodice aggiunge 'fatturare' solo quando richiesto", () => {
   assert.equal(formatCodice("R", 3, false), "R3");
   assert.equal(formatCodice("R", 5, true), "R5 fatturare");
@@ -433,6 +439,68 @@ test("stripCodiceEsistente toglie anche 'contanti saldati' e le due diciture ins
 test("formatCodice: contanti saldati nel giorno dell'incasso, poi il deve residuo", () => {
   assert.equal(formatCodice("A", 2, false, 0, 100), "A2 (contanti saldati 100€)");
   assert.equal(formatCodice("A", 2, false, 40, 60), "A2 (contanti saldati 60€) (deve 40€)");
+});
+
+// --- Stato "non_fatturato" (pro bono, supervisioni gratuite, pseudo-pazienti — 2026-09-22) ---
+test("computeRinumerazione: non_fatturato non fattura mai, il contatore accumula senza azzerarsi (come sospeso)", () => {
+  const patient = { nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const events = Array.from({ length: 6 }, (_, i) => ({
+    id: `e${i + 1}`,
+    data: `2026-01-${String(5 + i * 7).padStart(2, "0")}`,
+    ora: "10:00",
+    titolo: "Riunione Scienziati",
+    descrizione: "",
+  }));
+  const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
+  assert.equal(piano[4].codice, "NF5"); // alla 5a seduta, un paziente normale fatturerebbe
+  assert.equal(piano[5].codice, "NF6"); // continua a salire, nessun azzeramento
+  assert.ok(piano.every((p) => !p.codice.includes("fatturare")));
+});
+test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
+  const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };
+  const events = [{ data: "2020-01-05", titolo: "Riunione Scienziati" }];
+  const st = computePatientState(patient, events, DEFAULT_SETTINGS, [], [patient]);
+  assert.equal(st.stato, "non_fatturato");
+});
+test("computeStatisticheDisdette esclude i pazienti non_fatturato anche se hanno uno slot attivo", () => {
+  const patients = [{ id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato" }];
+  const slots = [{ patient_id: 1, active: true }];
+  const cancellazioni = [{ patient_id: 1, original_date: "2026-01-05", cancelled_at: "2026-01-01T00:00:00Z" }];
+  const events = [{ data: "2026-01-12", ora: "10:00", titolo: "Riunione Scienziati" }];
+  const stat = computeStatisticheDisdette(patients, slots, events, cancellazioni, { oggi: "2026-01-20" });
+  assert.equal(stat.righe.length, 0);
+});
+
+// --- Incasso contanti rilevato dalla nota "saldato"/"saldato N" (2026-09-22) ---
+test("computeIncassiContantiDaRegistrare: 'saldato' senza numero propone tutto il dovuto", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€) saldato" }];
+  const risultati = computeIncassiContantiDaRegistrare(events, patients);
+  assert.equal(risultati.length, 1);
+  assert.equal(risultati[0].importo, 60);
+  assert.equal(risultati[0].saldoAttuale, 60);
+  assert.equal(risultati[0].patientId, 1);
+});
+test("computeIncassiContantiDaRegistrare: 'saldato N' propone solo N (saldo parziale)", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€) saldato 30" }];
+  const risultati = computeIncassiContantiDaRegistrare(events, patients);
+  assert.equal(risultati[0].importo, 30);
+});
+test("computeIncassiContantiDaRegistrare ignora pazienti senza quota contanti impostata", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 0, contante_dovuto: 0 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "R3 fatturare saldato" }];
+  assert.equal(computeIncassiContantiDaRegistrare(events, patients).length, 0);
+});
+test("computeIncassiContantiDaRegistrare ignora note senza il marcatore 'saldato'", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€)" }];
+  assert.equal(computeIncassiContantiDaRegistrare(events, patients).length, 0);
+});
+test("rimuoviMarcatoreSaldato toglie solo il marcatore, preserva il resto della nota", () => {
+  assert.equal(rimuoviMarcatoreSaldato("A3 fatturare (deve 60€) saldato"), "A3 fatturare (deve 60€)");
+  assert.equal(rimuoviMarcatoreSaldato("A3 fatturare (deve 60€) saldato 30 link zoom"), "A3 fatturare (deve 60€) link zoom");
+  assert.equal(rimuoviMarcatoreSaldato("link zoom"), "link zoom");
 });
 {
   const patient = { nome_calendario: "Mario Rossi", regime_tariffario: "agevolata", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5, quota_contante_seduta: 20, contante_dovuto: 0 };

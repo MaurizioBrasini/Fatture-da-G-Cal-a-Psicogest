@@ -73,6 +73,12 @@ export function computePatientState(patient, events, settings, cancellazioni = [
   let stato = "senza_sedute";
   if (patient.stato === "sospeso") {
     stato = count > 0 ? "sospeso" : "senza_sedute";
+  } else if (patient.stato === "non_fatturato") {
+    // Pro bono, supervisioni gratuite, o uno pseudo-paziente che occupa solo
+    // uno slot (es. una riunione ricorrente) — mai "pronto per la fattura"
+    // né segnalato come "da valutare" per inattività: non c'è una cadenza di
+    // fatturazione da rispettare (richiesta di Maurizio 2026-09-22).
+    stato = count > 0 ? "non_fatturato" : "senza_sedute";
   } else if (patient.stato === "concluso") {
     // Percorso chiuso (es. dopo il primo incontro): mai "in corso" né "da
     // valutare" per inattività. A fine rapporto la soglia non conta: con

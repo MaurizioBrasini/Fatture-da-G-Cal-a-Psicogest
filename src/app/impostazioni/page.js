@@ -107,6 +107,10 @@ export default function ImpostazioniPage() {
             Consulenza
             <input value={settings.prestazione_consulenza} onChange={(e) => set("prestazione_consulenza", e.target.value)} />
           </label>
+          <label>
+            Supervisione
+            <input value={settings.prestazione_supervisione} onChange={(e) => set("prestazione_supervisione", e.target.value)} />
+          </label>
         </div>
 
         <h2 className="sub-heading">Tariffe standard (€ a seduta)</h2>
@@ -138,6 +142,14 @@ export default function ImpostazioniPage() {
           <label>
             Consulenza — agevolata
             <input type="number" step="0.01" className="num" value={settings.tariffa_consulenza_agevolata} onChange={(e) => set("tariffa_consulenza_agevolata", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Supervisione — regolare
+            <input type="number" step="0.01" className="num" value={settings.tariffa_supervisione_regolare} onChange={(e) => set("tariffa_supervisione_regolare", parseFloat(e.target.value) || 0)} />
+          </label>
+          <label>
+            Supervisione — agevolata
+            <input type="number" step="0.01" className="num" value={settings.tariffa_supervisione_agevolata} onChange={(e) => set("tariffa_supervisione_agevolata", parseFloat(e.target.value) || 0)} />
           </label>
         </div>
 

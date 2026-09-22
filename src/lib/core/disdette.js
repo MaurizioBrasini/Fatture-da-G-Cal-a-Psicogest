@@ -271,7 +271,13 @@ export function computeStatisticheDisdette(patients, slots, events, cancellazion
   const pazientiConSlot = new Set((slots || []).filter((s) => s.active).map((s) => s.patient_id));
   const perPaziente = {};
   for (const p of patients || []) {
-    if (pazientiConSlot.has(p.id)) perPaziente[p.id] = { patient: p, appuntamenti: new Set(), disdette: new Set() };
+    // "non_fatturato" (pro bono, supervisioni gratuite, pseudo-pazienti che
+    // occupano solo uno slot) non ha una fatturazione da cui perdere il
+    // diritto disdicendo spesso: escluso dal calcolo (richiesta di Maurizio
+    // 2026-09-22, stesso principio del filtro "attivo" già esistente).
+    if (pazientiConSlot.has(p.id) && p.stato !== "non_fatturato") {
+      perPaziente[p.id] = { patient: p, appuntamenti: new Set(), disdette: new Set() };
+    }
   }
 
   for (const e of events || []) {

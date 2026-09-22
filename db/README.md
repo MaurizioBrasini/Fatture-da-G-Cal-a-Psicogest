@@ -24,6 +24,7 @@ zero o per capire da dove viene una colonna.
 | 15 | `schema_addendum14.sql` | Chiusure calendario raggruppate (`calendar_closures`), per modificarle / eliminarle dall'app. |
 | 16 | `schema_addendum15.sql` | Tipo di email «prenotazione annullata» nel registro. |
 | 17 | `schema_addendum16.sql` | Numero di fattura nello storico (per rigenerare l'Excel). |
+| 18 | `schema_addendum17.sql` | Testo prestazione e tariffe per la tipologia "supervisione" (in `settings`). |
 | – | `schema_contante.sql` | Quota in contanti non fatturata: `quota_contante_seduta`, `contante_dovuto`, `contante_pagamenti`. Eseguito dopo `schema_addendum.sql`. |
 
 Le intestazioni dei singoli file spiegano nel dettaglio il perché di ogni modifica.

@@ -15,9 +15,23 @@ const TIPOLOGIE = [
   { value: "individuale", label: "Individuale" },
   { value: "coppia", label: "Coppia" },
   { value: "consulenza", label: "Consulenza" },
+  { value: "supervisione", label: "Supervisione" },
+  { value: "altro", label: "Altro" },
 ];
-const TIPOLOGIA_LABEL = { individuale: "Individuale", coppia: "Coppia", consulenza: "Consulenza" };
-const TIPOLOGIA_FROM_LABEL = { INDIVIDUALE: "individuale", COPPIA: "coppia", CONSULENZA: "consulenza" };
+const TIPOLOGIA_LABEL = {
+  individuale: "Individuale",
+  coppia: "Coppia",
+  consulenza: "Consulenza",
+  supervisione: "Supervisione",
+  altro: "Altro",
+};
+const TIPOLOGIA_FROM_LABEL = {
+  INDIVIDUALE: "individuale",
+  COPPIA: "coppia",
+  CONSULENZA: "consulenza",
+  SUPERVISIONE: "supervisione",
+  ALTRO: "altro",
+};
 
 // Colonne nascondibili dall'utente (spunte "Colonne visibili"). "Nome in
 // calendario" e la colonna azioni restano sempre visibili: servono sempre
@@ -1059,9 +1073,10 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.stato && (
                   <td>
-                    <select value={p.stato} onChange={(e) => cambiaStato(p, e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura. Concluso: percorso terminato, slot a 'su richiesta' e tutti gli appuntamenti futuri eliminati.">
+                    <select value={p.stato} onChange={(e) => cambiaStato(p, e.target.value)} title="In sospeso: continua a contare le sedute ma non segnala mai come pronto per la fattura. Non fatturato: come sospeso ma permanente — pro bono, supervisioni gratuite, o uno pseudo-paziente che occupa solo uno slot (es. una riunione ricorrente); mai fatturato, mai nelle statistiche disdette. Concluso: percorso terminato, slot a 'su richiesta' e tutti gli appuntamenti futuri eliminati.">
                       <option value="attivo">Attivo</option>
                       <option value="sospeso">In sospeso</option>
+                      <option value="non_fatturato">Non fatturato</option>
                       <option value="concluso">Concluso</option>
                     </select>
                   </td>

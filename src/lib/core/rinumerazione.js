@@ -6,9 +6,15 @@ import { matchPatientForEvent } from "./pazienti.js";
 // ---------------------------------------------------------------------
 
 // Lettera del codice, dedotta dai dati che il paziente ha già in anagrafica
-// (nessun dato nuovo da inserire a mano): S ha priorità perché uno stato
-// "sospeso" prevale sul regime tariffario.
+// (nessun dato nuovo da inserire a mano): NF/S hanno priorità perché lo
+// stato prevale sul regime tariffario. "non_fatturato" (2026-09-22, richiesta
+// di Maurizio) copre sia pazienti reali mai fatturati (pro bono, supervisioni
+// gratuite ad allievi) sia pseudo-pazienti che occupano solo uno slot fisso
+// senza essere una persona da fatturare (es. una riunione ricorrente) — in
+// entrambi i casi la numerazione prosegue (per tenere un conteggio), ma non
+// scatta mai "fatturare" (vedi computeRinumerazione).
 export function letteraCodice(patient) {
+  if (patient.stato === "non_fatturato") return "NF";
   if (patient.stato === "sospeso") return "S";
   return patient.regime_tariffario === "agevolata" ? "A" : "R";
 }
@@ -103,11 +109,13 @@ export function analizzaNotaPerAudit(descrizioneOriginale) {
 
 // Calcola, per un paziente, il piano di aggiornamento delle note calendario:
 // una riga per ciascun evento (passato non ancora fatturato + futuro già
-// generato), con il codice che dovrebbe avere. Per i pazienti NON sospesi,
-// il conteggio riparte da 1 ("fatturare") ogni volta che raggiunge la
-// soglia — una proiezione che assume che la fattura verrà confermata subito
-// dopo quella seduta. Per i pazienti sospesi, accumula senza mai azzerarsi
-// (nessuna fatturazione periodica prevista per loro).
+// generato), con il codice che dovrebbe avere. Per i pazienti NON sospesi e
+// NON "non_fatturato", il conteggio riparte da 1 ("fatturare") ogni volta che
+// raggiunge la soglia — una proiezione che assume che la fattura verrà
+// confermata subito dopo quella seduta. Per i pazienti sospesi o
+// "non_fatturato" (lettera S/NF), accumula senza mai azzerarsi: nessuna
+// fatturazione periodica prevista per loro (mai, per "non_fatturato"; in
+// pausa, per "sospeso").
 // allPatients (facoltativo): vedi nota su computePatientState — l'intera
 // anagrafica serve per disambiguare correttamente, ricade su [patient] se
 // omesso.
@@ -139,7 +147,7 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
 
   for (const ev of eventi) {
     contatore += 1;
-    const fatturare = lettera !== "S" && contatore >= soglia;
+    const fatturare = lettera !== "S" && lettera !== "NF" && contatore >= soglia;
     let saldatiOggi = 0;
     while (iPag < pagamenti.length && pagamenti[iPag].data <= ev.data) {
       const p = pagamenti[iPag++];
@@ -187,4 +195,59 @@ export function accumulaContante(dovutoAttuale, quotaContanteSeduta, sedute) {
 // il debito sia entrato nel saldo: alla conferma l'accumulo lo compensa.
 export function incassaContante(saldoAttuale, importoPagato) {
   return Math.round(((saldoAttuale || 0) - (importoPagato || 0)) * 100) / 100;
+}
+
+// ---------------------------------------------------------------------
+// Rilevamento nota "saldato"/"saldato N" (richiesta di Maurizio 2026-09-22):
+// stesso principio di DISDETTA_REGEX in disdette.js — lui scrive a mano sulla
+// nota della seduta del giorno "saldato" (debito interamente estinto) o
+// "saldato 30" (estinti solo 30€, es. pagamento parziale o cumulativo), e la
+// scansione propone di registrare l'incasso sulle STESSE strutture già usate
+// dal bottone manuale "€X" in Pazienti (patients.contante_dovuto +
+// contante_pagamenti, via incassaContante) — nessuna tabella nuova.
+// ---------------------------------------------------------------------
+
+export const SALDATO_REGEX = /\bsaldat[oa]\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
+
+// Scandisce gli eventi (stesso orizzonte già letto da "Registra disdette",
+// nessuna chiamata Google aggiuntiva) alla ricerca della nota "saldato"/
+// "saldato N" su pazienti con una quota contanti impostata. Non modifica
+// nulla: solo l'elenco da mostrare in anteprima, con l'importo già proposto
+// (editabile) e il saldo attuale per un controllo a vista prima di
+// confermare. Senza numero, l'importo proposto è il saldo dovuto attuale —
+// esattamente come il valore di partenza già proposto dal modale manuale
+// "Contanti ricevuti" in Pazienti (può includere una proiezione non ancora
+// fatturata: pagarla del tutto porta il saldo sotto zero, un credito che si
+// compensa da solo alla conferma della prossima fattura, comportamento
+// voluto e già in uso — vedi incassaContante).
+export function computeIncassiContantiDaRegistrare(events, patients) {
+  const risultati = [];
+  for (const e of events || []) {
+    const match = SALDATO_REGEX.exec(e.descrizione || "");
+    if (!match) continue;
+    const patient = matchPatientForEvent(e.titolo, patients)?.patient;
+    if (!patient || !(patient.quota_contante_seduta > 0)) continue;
+    const saldoAttuale = patient.contante_dovuto || 0;
+    const importoScritto = match[1] ? Number(match[1].replace(",", ".")) : null;
+    const importo = importoScritto != null ? importoScritto : saldoAttuale;
+    risultati.push({
+      eventId: e.id,
+      patientId: patient.id,
+      nome: patient.nome_calendario || patient.fatturare_a,
+      data: e.data,
+      saldoAttuale,
+      importo,
+      descrizioneOriginale: e.descrizione || "",
+    });
+  }
+  return risultati.sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+}
+
+// Toglie il marcatore "saldato"/"saldato N" dalla nota dopo averlo
+// registrato — necessario per l'idempotenza (altrimenti la prossima
+// scansione lo troverebbe di nuovo) — stesso principio chirurgico di
+// stripCodiceEsistente: tocca solo il testo riconosciuto, mai il resto della
+// nota scritta a mano.
+export function rimuoviMarcatoreSaldato(descrizione) {
+  return (descrizione || "").replace(SALDATO_REGEX, "").replace(/\s{2,}/g, " ").trim();
 }
