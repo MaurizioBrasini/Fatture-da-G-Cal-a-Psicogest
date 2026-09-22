@@ -571,7 +571,7 @@ export default function PazientiPage() {
     // fa scivolare la data di un giorno.
     const weekday = new Date(`${data}T12:00:00Z`).getUTCDay();
     const { data: userData } = await supabase.auth.getUser();
-    await supabase.from("patient_slots").insert({
+    const { error: slotError } = await supabase.from("patient_slots").insert({
       user_id: userData.user.id,
       patient_id: patientId,
       weekday,
@@ -581,6 +581,10 @@ export default function PazientiPage() {
       active: true,
       durata_minuti: parseInt(durataMinuti, 10) || null,
     });
+    if (slotError) {
+      alert("Creazione slot fallita: " + slotError.message);
+      return;
+    }
     await supabase.from("patients").update({ fuori_schema: false }).eq("id", patientId);
     patchLocal(patientId, { fuori_schema: false });
     setNuovoSlotModal(null);
