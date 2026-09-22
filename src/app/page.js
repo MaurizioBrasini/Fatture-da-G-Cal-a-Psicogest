@@ -468,11 +468,14 @@ export default function DashboardPage() {
       .map((d) => ({ ...d, cancelledAt: new Date().toISOString(), billingStatus: "not_charged" }));
     const tutte = [...daConfermare, ...daRipulire];
     // Importo modificabile prima di confermare (default: quello proposto
-    // dalla scansione); righe senza un numero valido >0 vengono saltate.
+    // dalla scansione). >= 0: uno 0 è un "solo pulisci la nota" valido (es.
+    // saldo già a posto ma marcatore "saldato" rimasto orfano da un incasso
+    // registrato altrove, come il bottone manuale in Pazienti — caso reale
+    // Francesco Mer. 2026-09-22) — solo un numero non valido viene saltato.
     const daIncassare = (aggIncassi || [])
       .filter((inc) => !aggIncassiEsclusi[inc.eventId])
       .map((inc) => ({ ...inc, importo: parseFloat(String(aggIncassiImporto[inc.eventId] ?? inc.importo).replace(",", ".")) }))
-      .filter((inc) => inc.importo > 0);
+      .filter((inc) => inc.importo >= 0);
     if (!tutte.length && !daIncassare.length) return;
     setAggStep("writing");
     try {

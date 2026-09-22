@@ -141,20 +141,28 @@ export async function POST(request) {
   for (const inc of incassi || []) {
     try {
       const importo = Number(inc.importo);
-      if (!importo) throw new Error("Importo non valido.");
-      const nuovoSaldo = incassaContante(inc.saldoAttuale, importo);
-      const { error: insertError } = await supabase.from("contante_pagamenti").insert({
-        user_id: user.id,
-        patient_id: inc.patientId,
-        importo,
-        data: inc.data,
-      });
-      if (insertError) throw new Error(insertError.message);
-      const { error: updateError } = await supabase
-        .from("patients")
-        .update({ contante_dovuto: nuovoSaldo })
-        .eq("id", inc.patientId);
-      if (updateError) throw new Error(updateError.message);
+      if (Number.isNaN(importo) || importo < 0) throw new Error("Importo non valido.");
+      // 0 = "solo pulisci la nota", nessun incasso da registrare (es. saldo
+      // già a posto ma un marcatore "saldato" rimasto orfano perché
+      // l'incasso vero è stato registrato altrove, come il bottone manuale
+      // in Pazienti — caso reale Francesco Mer. 2026-09-22): senza questo,
+      // la nota sarebbe rimasta bloccata per sempre, riproposta a ogni
+      // scansione senza un modo per toglierla dall'app.
+      if (importo > 0) {
+        const nuovoSaldo = incassaContante(inc.saldoAttuale, importo);
+        const { error: insertError } = await supabase.from("contante_pagamenti").insert({
+          user_id: user.id,
+          patient_id: inc.patientId,
+          importo,
+          data: inc.data,
+        });
+        if (insertError) throw new Error(insertError.message);
+        const { error: updateError } = await supabase
+          .from("patients")
+          .update({ contante_dovuto: nuovoSaldo })
+          .eq("id", inc.patientId);
+        if (updateError) throw new Error(updateError.message);
+      }
       await updateGoogleCalendarEventDescription(
         tokenRow.refresh_token,
         inc.eventId,
