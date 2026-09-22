@@ -240,7 +240,11 @@ export const DEFAULT_SETTINGS = {
   link_comunicazioni: "https://calendar.app.google/cYP4PBewfvmv4rKV9",
 };
 
+// regime "nessuna" (richiesta di Maurizio 2026-09-22, per chi non ha una
+// tariffa applicabile — pro bono, supervisioni gratuite, pseudo-pazienti):
+// sempre 0, non ricade su "regolare" come farebbe qualunque altro valore.
 export function tariffaStandard(tipologia, regime, settings) {
+  if (regime === "nessuna") return 0;
   const key = `tariffa_${tipologia}_${regime === "agevolata" ? "agevolata" : "regolare"}`;
   return settings[key] ?? 0;
 }

@@ -684,7 +684,7 @@ export default function PazientiPage() {
       CAP: p.cap || "",
       "Codice fiscale": p.codice_fiscale,
       Tipologia: TIPOLOGIA_LABEL[p.tipologia] || p.tipologia,
-      Regime: p.regime_tariffario === "agevolata" ? "Agevolata" : "Regolare",
+      Regime: p.regime_tariffario === "agevolata" ? "Agevolata" : p.regime_tariffario === "nessuna" ? "Nessuna" : "Regolare",
       Tariffa: p.costo_unitario,
       "Soglia fatturazione": p.soglia_fatturazione,
       "Giorni inattività": p.giorni_stale_override || "",
@@ -1050,9 +1050,14 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.regime_tariffario && (
                   <td>
-                    <select value={p.regime_tariffario || "regolare"} onChange={(e) => updateTipologiaORegime(p.id, "regime_tariffario", e.target.value)}>
+                    <select
+                      value={p.regime_tariffario || "regolare"}
+                      onChange={(e) => updateTipologiaORegime(p.id, "regime_tariffario", e.target.value)}
+                      title="Nessuna tariffa: per chi non ha un costo a seduta applicabile (pro bono, supervisioni gratuite) — la tariffa standard non si auto-compila più, resta 0 finché non la scrivi a mano."
+                    >
                       <option value="regolare">Regolare</option>
                       <option value="agevolata">Agevolata</option>
+                      <option value="nessuna">Nessuna tariffa</option>
                     </select>
                   </td>
                   )}

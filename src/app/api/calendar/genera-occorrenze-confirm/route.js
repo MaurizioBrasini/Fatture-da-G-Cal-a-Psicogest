@@ -2,12 +2,16 @@
 // evento nasce come singolo evento app-owned (mai una serie ricorrente
 // nativa — vedi istruzioni-claude-code-appuntamenti.md), colorId "6"
 // (Tangerine/mandarino, "da confermare": scelta di Maurizio 2026-09-08 per
-// ogni nuova occorrenza generata da qui in avanti), descrizione iniziale =
+// ogni nuova occorrenza generata da qui in avanti) — tranne i pazienti
+// tipologia "altro" (riunioni ricorrenti/pseudo-pazienti, 2026-09-22), che
+// usano sempre ALTRO_TIPOLOGIA_COLOR_ID per distinguerli a vista dai
+// pazienti veri, indipendentemente da conferma. Descrizione iniziale =
 // patients.note se presente (cosi' un promemoria/nota non si perde quando
 // l'evento viene creato da zero — mai piu' descrizione vuota di default).
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { createGoogleCalendarEvent } from "@/lib/googleCalendar";
+import { ALTRO_TIPOLOGIA_COLOR_ID } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -31,7 +35,7 @@ export async function POST(request) {
 
   const [{ data: tokenRow, error: tokenError }, { data: patients }] = await Promise.all([
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
-    supabase.from("patients").select("id, nome_calendario, note"),
+    supabase.from("patients").select("id, nome_calendario, note, tipologia"),
   ]);
   if (tokenError || !tokenRow) {
     return rispostaSenzaGoogle();
@@ -49,7 +53,7 @@ export async function POST(request) {
         durataMinuti: ev.durataMinuti || 60,
         titolo: patient.nome_calendario,
         descrizione: patient.note || "",
-        colorId: "6",
+        colorId: patient.tipologia === "altro" ? ALTRO_TIPOLOGIA_COLOR_ID : "6",
       });
       // Ricordato per sempre (a prescindere da cosa ne sarà di questo
       // evento): se in futuro sparisce dal calendario senza passare da

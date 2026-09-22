@@ -1,6 +1,16 @@
 // Abbinamento evento→paziente e stato di conteggio sedute di un paziente.
 import { daysBetween, normalizeName, todayISO } from "./util.js";
 
+// Colore calendario per le occorrenze generate di un paziente tipologia
+// "altro" (richiesta di Maurizio 2026-09-22: riunioni ricorrenti/pseudo-
+// pazienti che occupano solo uno slot) — "8" Graphite (grigio), mai usato
+// altrove (default=confermato, "6" mandarino=da confermare, "3" vinaccia=
+// prenotato online): si distingue a vista dagli appuntamenti con pazienti
+// veri, e per costruzione non è mai "6" — quindi computeImpattoChiusura/
+// esci-da-programmazione non lo propongono mai per la cancellazione
+// automatica, solo per la verifica manuale.
+export const ALTRO_TIPOLOGIA_COLOR_ID = "8";
+
 // Toglie un'eventuale iniziale di cognome finale ("Francesca F." ->
 // "Francesca", "Giovanni D.L." -> "Giovanni") — serve per riconoscere note
 // storiche scritte PRIMA che il nome calendario di un paziente venisse
