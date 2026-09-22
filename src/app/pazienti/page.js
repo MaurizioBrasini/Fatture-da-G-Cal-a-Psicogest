@@ -551,11 +551,14 @@ export default function PazientiPage() {
       intervalDays,
       data: "",
       ora: "",
-      // Facoltativo: lasciato vuoto, "Genera occorrenze future" continua a
-      // indovinare la durata dall'ultimo evento reale (comportamento di
-      // sempre). Valorizzalo per un impegno che NON dura la solita ora (es.
-      // una riunione di 2 ore) — ha sempre la precedenza sull'inferenza.
-      durataMinuti: "",
+      // Default 60' (modificabile): da quando la griglia di Disponibilità e
+      // il controllo conflitti ragionano per sovrapposizione oraria reale
+      // (2026-09-22), ogni slot deve avere una durata — lasciarlo vuoto
+      // farebbe ricadere sul default 60' comunque (stessa rete di sicurezza
+      // usata per gli slot storici), ma pre-compilarlo mantiene il dato
+      // esplicito invece di lasciarlo null. Cambialo per un impegno che non
+      // dura un'ora (es. una riunione di 2 ore → 120).
+      durataMinuti: "60",
     });
   }
 
@@ -1331,16 +1334,18 @@ export default function PazientiPage() {
             </label>
           </div>
           <label className="muted small" style={{ display: "block", marginTop: 12 }}>
-            Durata (minuti) — facoltativo
+            Durata (minuti)
             <input
               type="number"
               className="num"
-              placeholder="indovinata dall'ultimo evento reale"
               style={{ display: "block", width: "100%", marginTop: 4 }}
               value={nuovoSlotModal.durataMinuti}
               onChange={(e) => setNuovoSlotModal((m) => ({ ...m, durataMinuti: e.target.value }))}
             />
-            <span className="muted small">Lascia vuoto per la solita ora; scrivilo per un impegno più lungo (es. 120 per 2 ore).</span>
+            <span className="muted small">
+              Usata sia per il controllo conflitti/griglia di Disponibilità sia per la durata dell&apos;evento quando
+              generi le occorrenze future — cambiala per un impegno più lungo del solito (es. 120 per 2 ore).
+            </span>
           </label>
           {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {
             const weekday = new Date(`${nuovoSlotModal.data}T12:00:00Z`).getUTCDay();

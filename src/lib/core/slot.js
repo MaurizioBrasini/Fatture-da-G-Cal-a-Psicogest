@@ -65,20 +65,27 @@ function mcd(a, b) {
 // le due ancore è multipla del MCD dei due interval_days — se si
 // intersecano lo fanno periodicamente, quindi è un vero conflitto ricorrente,
 // non un caso limite isolato.
-// Orario: coincidenza esatta — un vero modello a sovrapposizione oraria (in
-// stile G-Cal, rettangoli di durata reale che non si toccano mai) sarebbe
-// più corretto, ma richiederebbe conoscere la durata reale di OGNI paziente,
-// non solo dei casi speciali: provato il 2026-09-22 (durata_minuti +
-// sovrapposizione), scartato subito dopo perché un default silenzioso di
-// 60' per chi non ha una durata esplicita creava falsi conflitti ovunque
-// due pazienti capitassero a meno di un'ora di distanza. Scelta di
-// Maurizio: restare sul modello semplice e collaudato; un impegno più lungo
-// del solito (es. una riunione di 2 ore) si registra come PIÙ slot fissi
-// separati sulla stessa cadenza (es. uno alle 9:30 e uno alle 10:30),
-// esattamente come due pazienti consecutivi — non un problema di questa
-// funzione.
+// Orario: sovrapposizione oraria reale (stile G-Cal — rettangoli di durata
+// reale che non si toccano mai), non più solo coincidenza esatta. Richiede
+// che OGNI slot abbia una durata reale nota — richiesta di Maurizio
+// 2026-09-22: prima assegnata a mano (script one-off) durata_minuti=60 a
+// tutti gli slot attivi esistenti (l'unica eccezione già diversa era
+// "Riunione Scienziati", 120'), così il fallback "|| 60" qui sotto serve
+// solo da rete di sicurezza per uno slot nuovo non ancora valorizzato, mai
+// da assunzione sistematica come nel primo tentativo (scartato perché
+// applicava 60' anche quando non si sapeva la durata reale, creando falsi
+// conflitti ovunque).
+function sovrapposizioneOraria(slotA, slotB) {
+  const inizioA = minutiOrario(slotA.time_of_day);
+  const fineA = inizioA + (slotA.durata_minuti || 60);
+  const inizioB = minutiOrario(slotB.time_of_day);
+  const fineB = inizioB + (slotB.durata_minuti || 60);
+  return inizioA < fineB && inizioB < fineA;
+}
+
 export function slotsInConflitto(slotA, slotB) {
-  if (slotA.weekday !== slotB.weekday || slotA.time_of_day !== slotB.time_of_day) return false;
+  if (slotA.weekday !== slotB.weekday) return false;
+  if (!sovrapposizioneOraria(slotA, slotB)) return false;
   const diffGiorni = Math.round(
     (new Date(`${slotB.anchor_date}T00:00:00Z`) - new Date(`${slotA.anchor_date}T00:00:00Z`)) / 86400000
   );
@@ -198,12 +205,18 @@ export function computeGrigliaDisponibilita(patientSlots) {
     const riga = { orario, giorni: {} };
     const orarioMinuti = minutiOrario(orario);
     for (const g of [1, 2, 3, 4, 5]) {
-      // Corrispondenza esatta, come sempre: una fascia mostra solo chi ha
-      // davvero quel weekday+orario. Un impegno più lungo del solito (es.
-      // una riunione di 2 ore) occupa più righe perché è registrato come
-      // più slot fissi separati (uno per riga), non per un calcolo di
-      // sovrapposizione — vedi nota su slotsInConflitto più sopra.
-      const righe = patientSlots.filter((s) => Number(s.weekday) === g && minutiOrario(s.time_of_day) === orarioMinuti);
+      // Ogni riga è un blocco di 30' indipendente: uno slot vi compare se la
+      // sua durata reale (durata_minuti, sempre valorizzata — vedi nota su
+      // slotsInConflitto più sopra) attraversa anche solo in parte quel
+      // blocco. Un paziente da un'ora occupa così la propria fascia E quella
+      // successiva; una riunione di 2 ore ne occupa quattro. Stessa regola
+      // per tutti, nessun caso speciale.
+      const righe = patientSlots.filter((s) => {
+        if (Number(s.weekday) !== g) return false;
+        const inizio = minutiOrario(s.time_of_day);
+        const fine = inizio + (s.durata_minuti || 60);
+        return inizio < orarioMinuti + 30 && fine > orarioMinuti;
+      });
       if (righe.length === 0) {
         riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [], parziale: false }, { pazienti: [], parziale: false }] };
         continue;

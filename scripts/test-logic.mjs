@@ -1427,19 +1427,63 @@ test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fas
   assert.equal(riga.giorni[1].stato, "pieno");
   assert.equal(riga.giorni[3].stato, "libero");
 });
-test("computeGrigliaDisponibilita: un impegno più lungo del solito (es. riunione 2h) si registra come DUE slot separati, uno per fascia — nessun calcolo di sovrapposizione (scelta di Maurizio 2026-09-22, dopo aver scartato il modello a durata/sovrapposizione)", () => {
+// --- Modello unificato "G-Cal" (2026-09-22): ogni slot ha una durata reale
+// (durata_minuti, assegnata a tutti gli slot esistenti — 60' di default,
+// diversa solo per i casi reali come "Riunione Scienziati", 120') e occupa
+// ogni fascia da 30' che attraversa davvero. Stessa regola per tutti,
+// nessun caso speciale — a differenza dei due tentativi precedenti.
+test("computeGrigliaDisponibilita: un paziente normale da 60' occupa la propria fascia E la successiva", () => {
   const r = computeGrigliaDisponibilita([
-    { weekday: 3, time_of_day: "09:30:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato" },
-    { weekday: 3, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato" },
+    { weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo", durata_minuti: 60 },
+  ]);
+  const nomiIn = (orario) => r.griglia.find((x) => x.orario === orario).giorni[1].pazienti.map((p) => p.nome);
+  assert.deepEqual(nomiIn("09:30"), ["Mario R."]);
+  assert.deepEqual(nomiIn("10:00"), ["Mario R."]);
+  assert.deepEqual(nomiIn("09:00"), []);
+  assert.deepEqual(nomiIn("10:30"), []);
+});
+test("computeGrigliaDisponibilita: una riunione di 2 ore occupa esattamente le 4 fasce da 30' che attraversa, non una di più né di meno (caso reale 'Riunione Scienziati')", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 3, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato", durata_minuti: 120 },
   ]);
   const nomiIn = (orario) => r.griglia.find((x) => x.orario === orario).giorni[3].pazienti.map((p) => p.nome);
-  assert.deepEqual(nomiIn("09:30"), ["Riunione Scienziati"]);
-  assert.deepEqual(nomiIn("10:30"), ["Riunione Scienziati"]);
-  // Nessuno spillover: le fasce prima/dopo/intermedie non toccate restano libere.
-  assert.deepEqual(nomiIn("09:00"), []);
+  for (const orario of ["09:00", "09:30", "10:00", "10:30"]) assert.deepEqual(nomiIn(orario), ["Riunione Scienziati"]);
+  assert.deepEqual(nomiIn("08:30"), []);
   assert.deepEqual(nomiIn("11:00"), []);
 });
-test("slotsInConflitto: stesso orario esatto continua a funzionare come prima (retrocompatibilità)", () => {
+test("computeGrigliaDisponibilita: due pazienti da 60' offset di mezz'ora sullo STESSO giorno reale sono un vero conflitto", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 2, time_of_day: "09:00:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo", durata_minuti: 60 },
+    { weekday: 2, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Anna B.", stato: "attivo", durata_minuti: 60 },
+  ]);
+  const riga930 = r.griglia.find((x) => x.orario === "09:30").giorni[2];
+  assert.deepEqual(riga930.pazienti.map((p) => p.nome).sort(), ["Anna B.", "Mario R."]);
+  assert.equal(riga930.conflitto, true);
+});
+test("computeGrigliaDisponibilita: stesso offset di mezz'ora ma quindicinali su settimane alternate — nessun conflitto reale (mai lo stesso giorno)", () => {
+  const r = computeGrigliaDisponibilita([
+    { weekday: 2, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo", durata_minuti: 60 },
+    { weekday: 2, time_of_day: "09:30:00", interval_days: 14, anchor_date: "2026-09-15", nome: "Anna B.", stato: "attivo", durata_minuti: 60 },
+  ]);
+  const riga930 = r.griglia.find((x) => x.orario === "09:30").giorni[2];
+  assert.equal(riga930.conflitto, false);
+});
+test("slotsInConflitto: due slot da 60' offset di mezz'ora, stesso giorno reale, sono in conflitto", () => {
+  const a = { weekday: 2, time_of_day: "09:00:00", interval_days: 7, anchor_date: "2026-09-08", durata_minuti: 60 };
+  const b = { weekday: 2, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-08", durata_minuti: 60 };
+  assert.equal(slotsInConflitto(a, b), true);
+});
+test("slotsInConflitto: due slot da 60' consecutivi (9-10 e 10-11) NON sono in conflitto — si toccano, non si sovrappongono", () => {
+  const a = { weekday: 2, time_of_day: "09:00:00", interval_days: 7, anchor_date: "2026-09-08", durata_minuti: 60 };
+  const b = { weekday: 2, time_of_day: "10:00:00", interval_days: 7, anchor_date: "2026-09-08", durata_minuti: 60 };
+  assert.equal(slotsInConflitto(a, b), false);
+});
+test("slotsInConflitto: uno slot di 2 ore (riunione) e un nuovo slot da 60' che inizia mezz'ora dopo, stesso giorno reale — conflitto", () => {
+  const riunione = { weekday: 3, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-09", durata_minuti: 120 };
+  const nuovo = { weekday: 3, time_of_day: "09:30:00", interval_days: 14, anchor_date: "2026-09-09", durata_minuti: 60 };
+  assert.equal(slotsInConflitto(riunione, nuovo), true);
+});
+test("slotsInConflitto: senza durata_minuti (rete di sicurezza), il default 60' vale per entrambi come prima", () => {
   const a = { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08" };
   const b = { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-15" }; // alternati, mai lo stesso giorno
   assert.equal(slotsInConflitto(a, b), false);
