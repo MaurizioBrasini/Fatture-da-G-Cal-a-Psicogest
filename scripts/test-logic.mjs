@@ -1427,22 +1427,22 @@ test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fas
   assert.equal(riga.giorni[1].stato, "pieno");
   assert.equal(riga.giorni[3].stato, "libero");
 });
-test("computeGrigliaDisponibilita: uno slot più lungo di un'ora occupa anche la fascia successiva, non solo la propria (caso reale 'Riunione Scienziati' 2h, 2026-09-22)", () => {
+test("computeGrigliaDisponibilita: uno slot più lungo di 30' occupa ogni fascia da 30' che attraversa davvero, non un'ora piena a scorrimento (caso reale 'Riunione Scienziati' 2h, 2026-09-22)", () => {
   const r = computeGrigliaDisponibilita([
-    { weekday: 3, time_of_day: "09:30:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato", durata_minuti: 120 },
+    { weekday: 3, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato", durata_minuti: 120 },
     { weekday: 3, time_of_day: "10:30:00", interval_days: 7, anchor_date: "2026-09-02", nome: "Mario R.", stato: "attivo" },
   ]);
-  const rigaMezzo = r.griglia.find((x) => x.orario === "09:30");
-  const rigaDopo = r.griglia.find((x) => x.orario === "10:30");
-  // Fascia propria: occupata come sempre (quindicinale da sola resta
-  // "parziale", 1 fase su 2 — stessa regola di un normale quindicinale
-  // singolo, non c'entra la durata).
-  assert.ok(rigaMezzo.giorni[3].pazienti.some((p) => p.nome === "Riunione Scienziati"));
-  // Fascia successiva (10:30-11:30): la riunione la copre fino alle 11:30,
-  // quindi "Mario R." (che parte proprio alle 10:30) è in reale conflitto —
-  // prima del fix questa fascia sarebbe sembrata libera per la riunione.
-  assert.ok(rigaDopo.giorni[3].pazienti.some((p) => p.nome === "Riunione Scienziati"));
-  assert.equal(rigaDopo.giorni[3].conflitto, true);
+  const nomiIn = (orario) => r.griglia.find((x) => x.orario === orario).giorni[3].pazienti.map((p) => p.nome);
+  // Le 4 fasce da 30' che la riunione (9:00-11:00) attraversa davvero.
+  for (const orario of ["09:00", "09:30", "10:00", "10:30"]) {
+    assert.ok(nomiIn(orario).includes("Riunione Scienziati"), `attesa in ${orario}`);
+  }
+  // MAI nella fascia prima (8:30-9:00, non toccata) né in quella dopo (11:00-11:30).
+  assert.ok(!nomiIn("08:30").includes("Riunione Scienziati"));
+  assert.ok(!nomiIn("11:00").includes("Riunione Scienziati"));
+  // "Mario R." (che parte proprio alle 10:30) è in reale conflitto con la
+  // coda della riunione — prima del fix questa fascia sarebbe sembrata libera.
+  assert.equal(r.griglia.find((x) => x.orario === "10:30").giorni[3].conflitto, true);
 });
 test("computeGrigliaDisponibilita: senza durata_minuti (paziente normale), nessuno spillover nella fascia successiva", () => {
   const r = computeGrigliaDisponibilita([
@@ -1457,8 +1457,14 @@ test("computeGrigliaDisponibilita: bug reale 2026-09-22 — aggiungere 'Riunione
     { weekday: 3, time_of_day: "09:00:00", interval_days: 14, anchor_date: "2026-09-09", nome: "Riunione Scienziati", stato: "non_fatturato", durata_minuti: 120 },
     { weekday: 3, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-09", nome: "Domizia S.", stato: "attivo" },
   ]);
+  const riga830 = r.griglia.find((x) => x.orario === "08:30");
   const riga900 = r.griglia.find((x) => x.orario === "09:00");
   const riga930 = r.griglia.find((x) => x.orario === "09:30");
+  // La fascia PRIMA (8:30-9:00) non è toccata dalla riunione (parte alle 9
+  // in punto): deve restare libera, non un'ora "a scorrimento" fantasma
+  // (bug reale segnalato da Maurizio subito dopo il primo fix).
+  assert.equal(riga830.giorni[3].pazienti.length, 0);
+  assert.equal(riga830.giorni[3].stato, "libero");
   // La nuova fascia "09:00" è solo della riunione: Domizia NON deve comparirci.
   assert.deepEqual(riga900.giorni[3].pazienti.map((p) => p.nome), ["Riunione Scienziati"]);
   // La sua fascia "09:30" resta sua, senza sdoppiamenti.

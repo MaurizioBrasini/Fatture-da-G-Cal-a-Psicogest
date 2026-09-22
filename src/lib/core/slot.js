@@ -206,23 +206,21 @@ export function computeGrigliaDisponibilita(patientSlots) {
     const riga = { orario, giorni: {} };
     const orarioMinuti = minutiOrario(orario);
     for (const g of [1, 2, 3, 4, 5]) {
-      // Una fascia non è "libera" solo perché nessuno slot inizia
-      // esattamente qui: se anche solo mezz'ora si sovrappone a un altro
-      // slot con una durata ESPLICITA più lunga del solito (es. una
-      // riunione di 2 ore partita mezz'ora prima), l'intera fascia va
-      // considerata occupata (richiesta di Maurizio 2026-09-22: "uno slot
-      // che ha mezz'ora occupata non è disponibile, deve esserlo per
-      // intero"). Un paziente normale (durata_minuti non impostata) compare
-      // SOLO nella propria fascia esatta, esattamente come prima — un
-      // default di 60' applicato a tutti avrebbe creato falsi conflitti
-      // ovunque due pazienti qualsiasi capitassero a meno di un'ora di
-      // distanza (bug reale della prima versione di questo fix).
+      // Ogni riga è un blocco di 30' INDIPENDENTE (mai un'ora "a scorrimento"
+      // che sconfina nella riga prima/dopo — bug reale 2026-09-22: la prima
+      // versione trattava ogni riga come un'ora piena, quindi una riunione
+      // dalle 9 alle 11 risultava (sbagliato) anche nella riga 08:30, una
+      // fascia che in realtà non tocca affatto). Un paziente normale
+      // (durata_minuti non impostata) compare SOLO nella propria fascia
+      // esatta, come sempre. Uno slot con durata ESPLICITA più lunga di 30'
+      // (es. una riunione di 2 ore) compare in ogni riga di 30' che la sua
+      // durata reale attraversa — non una di più, non una di meno.
       const righe = patientSlots.filter((s) => {
         if (Number(s.weekday) !== g) return false;
         if (!s.durata_minuti) return minutiOrario(s.time_of_day) === orarioMinuti;
         const inizio = minutiOrario(s.time_of_day);
         const fine = inizio + s.durata_minuti;
-        return inizio < orarioMinuti + 60 && fine > orarioMinuti;
+        return inizio < orarioMinuti + 30 && fine > orarioMinuti;
       });
       if (righe.length === 0) {
         riga.giorni[g] = { stato: "libero", pazienti: [], sottoSlot: [{ pazienti: [], parziale: false }, { pazienti: [], parziale: false }] };
