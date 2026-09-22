@@ -1409,15 +1409,16 @@ test("computeGrigliaDisponibilita: sottoSlot — un mensile da solo occupa la ca
   ]);
   assert.ok(due.griglia.find((x) => x.orario === "18:30").giorni[2].sottoSlot.every((x) => !x.parziale));
 });
-test("computeGrigliaDisponibilita: la griglia copre sempre 08:30–20:30 ogni mezz'ora, anche le fasce senza alcun paziente (richiesta di Maurizio 2026-09-22)", () => {
-  const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "11:00:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo" }]);
-  assert.equal(r.griglia.length, 25); // 08:30..20:30 ogni 30' = 25 righe
+test("computeGrigliaDisponibilita: la griglia copre sempre 08:30–19:30, UNA fascia per ora (non ogni mezz'ora — bug reale 2026-09-22, fasce fantasma come '9:00')", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "10:30:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo" }]);
+  assert.equal(r.griglia.length, 12); // 08:30..19:30 ogni ora = 12 righe
   assert.equal(r.griglia[0].orario, "08:30");
-  assert.equal(r.griglia[r.griglia.length - 1].orario, "20:30");
+  assert.equal(r.griglia[r.griglia.length - 1].orario, "19:30");
+  assert.ok(!r.griglia.some((x) => x.orario === "09:00")); // nessuna fascia intermedia
   const rigaVuota = r.griglia.find((x) => x.orario === "08:30");
   assert.equal(rigaVuota.giorni[2].stato, "libero");
 });
-test("computeGrigliaDisponibilita: un orario reale fuori dal range canonico (es. non allineato alla mezz'ora) non sparisce dalla griglia", () => {
+test("computeGrigliaDisponibilita: un orario reale fuori dal range canonico (es. non allineato all'ora) non sparisce dalla griglia", () => {
   const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "21:00:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo" }]);
   assert.ok(r.griglia.some((x) => x.orario === "21:00"));
 });
@@ -1435,9 +1436,10 @@ test("computeGrigliaDisponibilita: un impegno più lungo del solito (es. riunion
   const nomiIn = (orario) => r.griglia.find((x) => x.orario === orario).giorni[3].pazienti.map((p) => p.nome);
   assert.deepEqual(nomiIn("09:30"), ["Riunione Scienziati"]);
   assert.deepEqual(nomiIn("10:30"), ["Riunione Scienziati"]);
-  // Nessuno spillover: le fasce prima/dopo/intermedie non toccate restano libere.
-  assert.deepEqual(nomiIn("09:00"), []);
-  assert.deepEqual(nomiIn("11:00"), []);
+  // Nessuna fascia fantasma intermedia (es. "9:00"), e le fasce vere prima/dopo restano libere.
+  assert.ok(!r.griglia.some((x) => x.orario === "09:00"));
+  assert.deepEqual(nomiIn("08:30"), []);
+  assert.deepEqual(nomiIn("11:30"), []);
 });
 test("slotsInConflitto: stesso orario esatto continua a funzionare come prima (retrocompatibilità)", () => {
   const a = { weekday: 2, time_of_day: "10:30:00", interval_days: 14, anchor_date: "2026-09-08" };

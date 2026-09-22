@@ -181,16 +181,21 @@ export function computeGrigliaDisponibilita(patientSlots) {
     else if (intervalli.has(28)) mensili.push(info);
   }
 
-  // Griglia fissa 08:30–20:30 ogni mezz'ora (richiesta di Maurizio
-  // 2026-09-22: vedere anche le fasce vuote, non solo quelle già usate da
-  // qualche paziente, per capire a colpo d'occhio dove infilarne uno nuovo,
-  // "sfalsato" rispetto agli orari esistenti) — unita agli orari
-  // effettivamente usati, per sicurezza, nel caso un vecchio slot non cada
-  // esattamente su una mezz'ora canonica (non sparisce mai dalla griglia).
+  // Griglia fissa 08:30–19:30, UNA fascia per ora (non ogni mezz'ora — bug
+  // reale 2026-09-22: la prima versione generava anche le fasce intermedie
+  // "9:00", "10:00" ecc., che non sono mai esistite nel calendario di
+  // Maurizio e comparivano come due caselle "Disponibile" fantasma). Le
+  // fasce vere scattano ogni ora a partire dalle :30, esattamente come nel
+  // vecchio CALENDARIO PAZIENTI MENSILE.xlsx (Foglio1): 8:30, 9:30, 10:30…
+  // fino a 19:30 — comprese quelle mai usate (es. 8:30, pausa pranzo alle
+  // 14:30), per vedere a colpo d'occhio dove infilare un nuovo paziente.
+  // Unita agli orari effettivamente usati, per sicurezza, nel caso un
+  // vecchio slot non cada esattamente su una fascia canonica (non sparisce
+  // mai dalla griglia).
   const ORARIO_GRIGLIA_INIZIO = "08:30";
-  const ORARIO_GRIGLIA_FINE = "20:30";
+  const ORARIO_GRIGLIA_FINE = "19:30";
   const orariCanonici = [];
-  for (let m = minutiOrario(ORARIO_GRIGLIA_INIZIO); m <= minutiOrario(ORARIO_GRIGLIA_FINE); m += 30) {
+  for (let m = minutiOrario(ORARIO_GRIGLIA_INIZIO); m <= minutiOrario(ORARIO_GRIGLIA_FINE); m += 60) {
     orariCanonici.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
   }
   const orariUsati = [...new Set([...orariCanonici, ...patientSlots.map((s) => s.time_of_day.slice(0, 5))])].sort();
