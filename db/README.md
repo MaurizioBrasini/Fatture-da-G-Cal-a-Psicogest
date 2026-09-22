@@ -25,6 +25,7 @@ zero o per capire da dove viene una colonna.
 | 16 | `schema_addendum15.sql` | Tipo di email «prenotazione annullata» nel registro. |
 | 17 | `schema_addendum16.sql` | Numero di fattura nello storico (per rigenerare l'Excel). |
 | 18 | `schema_addendum17.sql` | Testo prestazione e tariffe per la tipologia "supervisione" (in `settings`). |
+| 19 | `schema_addendum18.sql` | Durata esplicita di uno slot fisso (`patient_slots.durata_minuti`), ha la precedenza sull'inferenza dall'ultimo evento reale. |
 | – | `schema_contante.sql` | Quota in contanti non fatturata: `quota_contante_seduta`, `contante_dovuto`, `contante_pagamenti`. Eseguito dopo `schema_addendum.sql`. |
 
 Le intestazioni dei singoli file spiegano nel dettaglio il perché di ogni modifica.

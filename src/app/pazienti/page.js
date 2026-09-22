@@ -542,7 +542,7 @@ export default function PazientiPage() {
   }
 
   // --- Nuovo slot fisso (paziente "su richiesta" che passa a una cadenza fissa) ---
-  const [nuovoSlotModal, setNuovoSlotModal] = useState(null); // { patientId, nome, intervalDays, data, ora } | null
+  const [nuovoSlotModal, setNuovoSlotModal] = useState(null); // { patientId, nome, intervalDays, data, ora, durataMinuti } | null
 
   function apriNuovoSlot(patient, intervalDays) {
     setNuovoSlotModal({
@@ -551,6 +551,11 @@ export default function PazientiPage() {
       intervalDays,
       data: "",
       ora: "",
+      // Facoltativo: lasciato vuoto, "Genera occorrenze future" continua a
+      // indovinare la durata dall'ultimo evento reale (comportamento di
+      // sempre). Valorizzalo per un impegno che NON dura la solita ora (es.
+      // una riunione di 2 ore) — ha sempre la precedenza sull'inferenza.
+      durataMinuti: "",
     });
   }
 
@@ -559,7 +564,7 @@ export default function PazientiPage() {
   }
 
   async function confermaNuovoSlot() {
-    const { patientId, intervalDays, data, ora } = nuovoSlotModal;
+    const { patientId, intervalDays, data, ora, durataMinuti } = nuovoSlotModal;
     if (!data || !ora) return;
     // Stessa convenzione già usata negli script di migrazione: mezzogiorno
     // UTC per calcolare il weekday, cosi' il cambio d'ora legale/solare non
@@ -574,6 +579,7 @@ export default function PazientiPage() {
       interval_days: intervalDays,
       anchor_date: data,
       active: true,
+      durata_minuti: parseInt(durataMinuti, 10) || null,
     });
     await supabase.from("patients").update({ fuori_schema: false }).eq("id", patientId);
     patchLocal(patientId, { fuori_schema: false });
@@ -1320,6 +1326,18 @@ export default function PazientiPage() {
               />
             </label>
           </div>
+          <label className="muted small" style={{ display: "block", marginTop: 12 }}>
+            Durata (minuti) — facoltativo
+            <input
+              type="number"
+              className="num"
+              placeholder="indovinata dall'ultimo evento reale"
+              style={{ display: "block", width: "100%", marginTop: 4 }}
+              value={nuovoSlotModal.durataMinuti}
+              onChange={(e) => setNuovoSlotModal((m) => ({ ...m, durataMinuti: e.target.value }))}
+            />
+            <span className="muted small">Lascia vuoto per la solita ora; scrivilo per un impegno più lungo (es. 120 per 2 ore).</span>
+          </label>
           {nuovoSlotModal.data && nuovoSlotModal.ora && (() => {
             const weekday = new Date(`${nuovoSlotModal.data}T12:00:00Z`).getUTCDay();
             const timeOfDay = `${nuovoSlotModal.ora}:00`;

@@ -462,6 +462,12 @@ test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', 
   const st = computePatientState(patient, events, DEFAULT_SETTINGS, [], [patient]);
   assert.equal(st.stato, "non_fatturato");
 });
+test("computePatientState: non_fatturato resta visibile anche a ZERO sedute contate (bug reale 2026-09-22: appena creato spariva)", () => {
+  const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: null, ancora_valore: 0, soglia_fatturazione: 5 };
+  const st = computePatientState(patient, [], DEFAULT_SETTINGS, [], [patient]);
+  assert.equal(st.stato, "non_fatturato");
+  assert.equal(st.count, 0);
+});
 test("computeStatisticheDisdette esclude i pazienti non_fatturato anche se hanno uno slot attivo", () => {
   const patients = [{ id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato" }];
   const slots = [{ patient_id: 1, active: true }];
@@ -1261,6 +1267,21 @@ test("computeOccorrenzeDaGenerare non propone nulla per una data con un evento r
   const { mancanti, anomale } = computeOccorrenzeDaGenerare(slots, patients, events, [], new Set(), new Set(), 14, "2026-10-01");
   assert.equal(anomale.length, 0);
   assert.deepEqual(mancanti[0].date, ["2026-10-13"]);
+});
+test("computeOccorrenzeDaGenerare: slot.durata_minuti ha la precedenza sull'ultimo evento reale (2026-09-22, caso 'riunione 2 ore')", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06", durata_minuti: 120 }];
+  const patients = [{ id: 1, nome_calendario: "Riunione Scienziati" }];
+  // Un evento reale passato da 60' non deve far scendere la durata sotto i 120' impostati sullo slot.
+  const events = [{ data: "2026-09-29", ora: "15:00", titolo: "Riunione Scienziati", descrizione: "", durataMinuti: 60 }];
+  const { mancanti } = computeOccorrenzeDaGenerare(slots, patients, events, [], new Set(), new Set(), 14, "2026-10-01");
+  assert.equal(mancanti[0].durataMinuti, 120);
+});
+test("computeOccorrenzeDaGenerare: senza slot.durata_minuti, torna a indovinare dall'ultimo evento reale come prima", () => {
+  const slots = [{ patient_id: 1, active: true, weekday: 2, time_of_day: "15:00:00", interval_days: 7, anchor_date: "2026-10-06" }];
+  const patients = [{ id: 1, nome_calendario: "Mario R." }];
+  const events = [{ data: "2026-09-29", ora: "15:00", titolo: "Mario R.", descrizione: "", durataMinuti: 90 }];
+  const { mancanti } = computeOccorrenzeDaGenerare(slots, patients, events, [], new Set(), new Set(), 14, "2026-10-01");
+  assert.equal(mancanti[0].durataMinuti, 90);
 });
 
 // --- computeDuplicatiDaRipulire ---

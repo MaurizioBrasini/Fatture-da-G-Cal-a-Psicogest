@@ -87,8 +87,13 @@ export function computePatientState(patient, events, settings, cancellazioni = [
     // Pro bono, supervisioni gratuite, o uno pseudo-paziente che occupa solo
     // uno slot (es. una riunione ricorrente) — mai "pronto per la fattura"
     // né segnalato come "da valutare" per inattività: non c'è una cadenza di
-    // fatturazione da rispettare (richiesta di Maurizio 2026-09-22).
-    stato = count > 0 ? "non_fatturato" : "senza_sedute";
+    // fatturazione da rispettare (richiesta di Maurizio 2026-09-22). A
+    // differenza di "sospeso", resta visibile anche a zero sedute contate:
+    // è spesso lo stato appena impostato la prima volta (nessun evento
+    // ancora abbinato), e Maurizio deve poterlo comunque vedere in Dashboard
+    // per confermare che è configurato bene (bug reale 2026-09-22: appena
+    // creato spariva del tutto, "senza_sedute" non ha una sezione visibile).
+    stato = "non_fatturato";
   } else if (patient.stato === "concluso") {
     // Percorso chiuso (es. dopo il primo incontro): mai "in corso" né "da
     // valutare" per inattività. A fine rapporto la soglia non conta: con

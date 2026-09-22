@@ -203,7 +203,12 @@ export function computeOccorrenzeDaGenerare(slots, patients, events, closures, s
     const eventoRecente = events
       .filter((e) => eventoDiQuestoPaziente(e) && e.ora)
       .sort((a, b) => (a.data < b.data ? 1 : -1))[0];
-    const durataMinuti = eventoRecente?.durataMinuti || 60;
+    // slot.durata_minuti (facoltativo, 2026-09-22) ha sempre la precedenza
+    // sull'inferenza dall'ultimo evento reale — quella dipende dal trovarne
+    // uno abbastanza recente nell'orizzonte letto (solo 14gg indietro),
+    // inaffidabile per cadenze larghe (es. quindicinale) col fallback
+    // silenzioso a 60 minuti, sbagliato per un impegno più lungo.
+    const durataMinuti = slot.durata_minuti || eventoRecente?.durataMinuti || 60;
     const ora = slot.time_of_day.slice(0, 5);
     const nome = patient.nome_calendario || patient.fatturare_a;
 
