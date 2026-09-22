@@ -40,7 +40,7 @@ export default function DisponibilitaPage() {
     setError("");
     const [{ data: patients, error: errP }, { data: slots, error: errS }] = await Promise.all([
       supabase.from("patients").select("id,nome_calendario,fatturare_a,stato"),
-      supabase.from("patient_slots").select("weekday,time_of_day,interval_days,anchor_date,patient_id").eq("active", true),
+      supabase.from("patient_slots").select("weekday,time_of_day,interval_days,anchor_date,patient_id,durata_minuti").eq("active", true),
     ]);
     if (errP || errS) {
       setError((errP || errS).message);

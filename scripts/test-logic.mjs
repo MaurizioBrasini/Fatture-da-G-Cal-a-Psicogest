@@ -1400,14 +1400,26 @@ test("computeGrigliaDisponibilita: sottoSlot — settimanale in entrambe le case
 });
 test("computeGrigliaDisponibilita: sottoSlot — un mensile da solo occupa la casella ma resta 'parziale'; due mensili nella stessa parità la riempiono", () => {
   const solo = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-08", nome: "Paolo S.", stato: "attivo" }]);
-  const s = solo.griglia[0].giorni[2].sottoSlot;
+  const s = solo.griglia.find((x) => x.orario === "18:30").giorni[2].sottoSlot;
   assert.deepEqual(s.map((x) => x.parziale).sort(), [false, true]);
   assert.equal(s.find((x) => x.parziale).pazienti[0].nome, "Paolo S.");
   const due = computeGrigliaDisponibilita([
     { weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-08", nome: "Paolo S.", stato: "attivo" },
     { weekday: 2, time_of_day: "18:30:00", interval_days: 28, anchor_date: "2026-09-22", nome: "Enrico O.", stato: "attivo" },
   ]);
-  assert.ok(due.griglia[0].giorni[2].sottoSlot.every((x) => !x.parziale));
+  assert.ok(due.griglia.find((x) => x.orario === "18:30").giorni[2].sottoSlot.every((x) => !x.parziale));
+});
+test("computeGrigliaDisponibilita: la griglia copre sempre 08:30–20:30 ogni mezz'ora, anche le fasce senza alcun paziente (richiesta di Maurizio 2026-09-22)", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "11:00:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo" }]);
+  assert.equal(r.griglia.length, 25); // 08:30..20:30 ogni 30' = 25 righe
+  assert.equal(r.griglia[0].orario, "08:30");
+  assert.equal(r.griglia[r.griglia.length - 1].orario, "20:30");
+  const rigaVuota = r.griglia.find((x) => x.orario === "08:30");
+  assert.equal(rigaVuota.giorni[2].stato, "libero");
+});
+test("computeGrigliaDisponibilita: un orario reale fuori dal range canonico (es. non allineato alla mezz'ora) non sparisce dalla griglia", () => {
+  const r = computeGrigliaDisponibilita([{ weekday: 2, time_of_day: "21:00:00", interval_days: 7, anchor_date: "2026-09-08", nome: "Mario R.", stato: "attivo" }]);
+  assert.ok(r.griglia.some((x) => x.orario === "21:00"));
 });
 test("computeGrigliaDisponibilita: la griglia settimanale segna 'libero' una fascia senza pazienti", () => {
   const r = computeGrigliaDisponibilita([{ weekday: 1, time_of_day: "09:30:00", interval_days: 7, anchor_date: "2026-09-07", nome: "Mario R.", stato: "attivo" }]);
