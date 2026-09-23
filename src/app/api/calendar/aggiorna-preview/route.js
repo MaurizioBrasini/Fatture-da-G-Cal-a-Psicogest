@@ -20,11 +20,12 @@ export async function POST(request) {
   const giorniIndietro = Number(body.giorniIndietro) || 30;
   const giorniAvanti = Number(body.giorniAvanti) || 60;
 
-  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }, { data: cancellazioniNotCharged }] = await Promise.all([
+  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }, { data: cancellazioniNotCharged }, { data: pagamentiContante }] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
     supabase.from("cancellations").select("patient_id, original_date").eq("user_id", user.id),
     supabase.from("cancellations").select("patient_id, original_date, billing_status").eq("user_id", user.id).eq("billing_status", "not_charged"),
+    supabase.from("contante_pagamenti").select("patient_id, data"),
   ]);
 
   if (tokenError || !tokenRow) {
@@ -38,7 +39,7 @@ export async function POST(request) {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
     const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []);
     const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []);
-    const incassi = computeIncassiContantiDaRegistrare(events, patients || []);
+    const incassi = computeIncassiContantiDaRegistrare(events, patients || [], pagamentiContante || []);
     return NextResponse.json({ ok: true, candidati, duplicati, incassi, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });

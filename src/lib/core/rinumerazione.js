@@ -24,13 +24,26 @@ export function letteraCodice(patient) {
 // "R3 (deve 150€)" — così resta visibile su Google Calendar senza doverlo
 // scrivere/cancellare a mano ad ogni seduta.
 // contantiSaldati (facoltativo): importo incassato proprio il giorno di questa
-// seduta — la nota riporta "(contanti saldati 100€)" solo quel giorno; dalle
-// sedute successive il "deve" sparisce da solo (o cala, se il saldo è parziale).
+// seduta. In quel caso contanteDovuto è il debito PRIMA dell'incasso, e la
+// nota di quel giorno conserva entrambi (richiesta di Maurizio 2026-09-23):
+// "(deve 100€ saldato)" se ha pagato tutto, "(deve 100€ saldato 50€)" se in
+// parte; dalle sedute successive il "deve" sparisce (o cala al residuo).
 export function formatCodice(lettera, numero, fatturare, contanteDovuto, contantiSaldati) {
   let out = `${lettera}${numero}${fatturare ? " fatturare" : ""}`;
-  if (contantiSaldati > 0) out += ` (contanti saldati ${formatEuro(contantiSaldati)}€)`;
-  if (contanteDovuto > 0) out += ` (deve ${formatEuro(contanteDovuto)}€)`;
+  if (contantiSaldati > 0) out += ` ${formatSaldato(contanteDovuto, contantiSaldati)}`;
+  else if (contanteDovuto > 0) out += ` (deve ${formatEuro(contanteDovuto)}€)`;
   return out;
+}
+
+// "(deve X€ saldato)" = pagato esattamente il dovuto; "(deve X€ saldato Y€)" =
+// pagato Y (parziale o in eccesso); "(saldato Y€)" = pagato senza un debito
+// già maturato (anticipo, diventa credito).
+export function formatSaldato(deve, saldati) {
+  const d = Math.round((deve || 0) * 100) / 100;
+  const s = Math.round((saldati || 0) * 100) / 100;
+  if (d <= 0) return `(saldato ${formatEuro(s)}€)`;
+  if (s === d) return `(deve ${formatEuro(d)}€ saldato)`;
+  return `(deve ${formatEuro(d)}€ saldato ${formatEuro(s)}€)`;
 }
 
 function formatEuro(n) {
@@ -45,7 +58,16 @@ function formatEuro(n) {
 // — utile per capire quanto testo "vecchio" togliere quando si sovrascrive
 // una nota già scritta in precedenza (a mano o dall'app in un giro
 // precedente).
-const VECCHIO_CODICE_REGEX = /^\s*(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\s*(?:\((?:deve\s*[\d.,]+\s*€?|contanti\s+saldati(?:\s*[\d.,]+\s*€?)?)\)\s*){0,2}\.?\s*/i;
+// Diciture contanti tra parentesi scritte dall'app: "(deve 100€)", "(deve
+// 100€ saldato)", "(deve 100€ saldato 50€)", "(saldato 20€)" e il vecchio
+// "(contanti saldati 100€)". Riconosciute anche senza un codice davanti (nota
+// senza numerazione su cui è stato registrato un incasso): sono abbastanza
+// specifiche da non confondersi con testo scritto a mano.
+const TAG_CONTANTI = String.raw`\((?:deve\s*[\d.,]+\s*€?(?:\s*saldat[oa](?:\s*[\d.,]+\s*€?)?)?|saldat[oa]\s*[\d.,]+\s*€?|contanti\s+saldati(?:\s*[\d.,]+\s*€?)?)\)\s*`;
+const VECCHIO_CODICE_REGEX = new RegExp(
+  String.raw`^\s*(?:(?:(?:np|npa|nf|pc)\s*\d+|\d+\s*(?:np|npa|nf|pc)|[ras]\d+(?:\s*fatturare)?)\s*(?:${TAG_CONTANTI}){0,2}|(?:${TAG_CONTANTI}){1,2})\.?\s*`,
+  "i"
+);
 
 export function stripCodiceEsistente(descrizione) {
   return (descrizione || "").replace(VECCHIO_CODICE_REGEX, "");
@@ -126,7 +148,7 @@ export function analizzaNotaPerAudit(descrizioneOriginale) {
 // × sedute del ciclo, quindi anche il caso cumulativo "100 + 100" — senza
 // aspettare la conferma della fattura, (b) resta sulle sedute successive finché
 // non viene saldato, (c) nel giorno di un incasso la seduta di quel giorno porta
-// "(contanti saldati X€)" e dalle successive il "deve" cala o sparisce. Il saldo
+// "(deve X€ saldato)" / "(deve X€ saldato Y€)" e dalle successive il "deve" cala o sparisce. Il saldo
 // a inizio piano è contante_dovuto + gli incassi dall'ancora in poi (già sottratti
 // dal saldo attuale): tutte le sedute del piano sono dopo l'ultimo accumulo.
 export function computeRinumerazione(patient, allEvents, settings, allPatients, opzioni = {}) {
@@ -155,17 +177,22 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
   for (const ev of eventi) {
     contatore += 1;
     const fatturare = lettera !== "S" && contatore >= soglia; // "NF" è già uscito sopra, mai qui
-    let saldatiOggi = 0;
-    while (iPag < pagamenti.length && pagamenti[iPag].data <= ev.data) {
-      const p = pagamenti[iPag++];
-      // Senza tetto a zero: un incasso in anticipo (prima che il debito sia
-      // maturato) è un credito che il prossimo accumulo compensa; formatCodice
-      // scrive il "deve" solo se il saldo è positivo.
-      deve = arrotonda(deve - (p.importo || 0));
-      if (p.data === ev.data) saldatiOggi += p.importo || 0;
+    // Incassi dei giorni precedenti: già sottratti prima di questa seduta.
+    // Senza tetto a zero: un incasso in anticipo (prima che il debito sia
+    // maturato) è un credito che il prossimo accumulo compensa; formatCodice
+    // scrive il "deve" solo se il saldo è positivo.
+    while (iPag < pagamenti.length && pagamenti[iPag].data < ev.data) {
+      deve = arrotonda(deve - (pagamenti[iPag++].importo || 0));
     }
     if (fatturare && quota > 0) deve = arrotonda(deve + quota * contatore);
+    // Incasso dello stesso giorno: dopo l'accumulo, così la nota mostra il
+    // dovuto di quella seduta accanto a quanto saldato ("deve 100€ saldato").
+    let saldatiOggi = 0;
+    while (iPag < pagamenti.length && pagamenti[iPag].data === ev.data) {
+      saldatiOggi = arrotonda(saldatiOggi + (pagamenti[iPag++].importo || 0));
+    }
     const codice = formatCodice(lettera, contatore, fatturare, deve, saldatiOggi);
+    deve = arrotonda(deve - saldatiOggi);
     const descrizioneNuova = buildNuovaDescrizione(ev.descrizione, codice);
     piano.push({
       id: ev.id,
@@ -227,35 +254,39 @@ export const SALDATO_REGEX = /\bsaldat[oa]\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
 // fatturata: pagarla del tutto porta il saldo sotto zero, un credito che si
 // compensa da solo alla conferma della prossima fattura, comportamento
 // voluto e già in uso — vedi incassaContante).
-export function computeIncassiContantiDaRegistrare(events, patients) {
+//
+// pagamenti (facoltativo, righe di contante_pagamenti {patient_id, data}): la
+// nota del giorno dell'incasso ora CONSERVA "saldato" ("deve 100€ saldato",
+// richiesta di Maurizio 2026-09-23), quindi l'idempotenza non passa più dal
+// togliere il marcatore ma dal database: se per quel paziente c'è già un
+// incasso registrato in quella data, la nota è già stata gestita e si salta.
+export function computeIncassiContantiDaRegistrare(events, patients, pagamenti = []) {
+  const giaRegistrati = new Set((pagamenti || []).map((p) => `${p.patient_id}|${p.data}`));
   const risultati = [];
   for (const e of events || []) {
     const match = SALDATO_REGEX.exec(e.descrizione || "");
     if (!match) continue;
     const patient = matchPatientForEvent(e.titolo, patients)?.patient;
     if (!patient || !(patient.quota_contante_seduta > 0)) continue;
+    if (giaRegistrati.has(`${patient.id}|${e.data}`)) continue;
     const saldoAttuale = patient.contante_dovuto || 0;
     const importoScritto = match[1] ? Number(match[1].replace(",", ".")) : null;
-    // Senza numero: prima il "(deve X€)" già scritto dall'app su quella nota
+    // Dovuto a quella seduta: il "(deve X€)" già scritto dall'app sulla nota
     // (include la proiezione del ciclo non ancora fatturato, che il saldo in
-    // anagrafica non ha ancora), poi il saldo se è un debito. Con saldo a zero
-    // o in credito (paga in anticipo) mai 0 o un importo negativo — che
-    // aumenterebbe il debito — ma una quota a seduta, correggibile in anteprima.
-    const deveInNota = /\(deve\s*([\d.,]+)\s*€?\)/i.exec(e.descrizione || "");
-    const importo =
-      importoScritto != null
-        ? importoScritto
-        : deveInNota
-          ? Number(deveInNota[1].replace(",", "."))
-          : saldoAttuale > 0
-            ? saldoAttuale
-            : patient.quota_contante_seduta;
+    // anagrafica non ha ancora), altrimenti il saldo se è un debito.
+    const deveInNota = /\(deve\s*([\d.,]+)/i.exec(e.descrizione || "");
+    const deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
+    // Senza numero si propone il dovuto; con saldo a zero o in credito (paga
+    // in anticipo) mai 0 o un importo negativo — che aumenterebbe il debito —
+    // ma una quota a seduta, correggibile in anteprima.
+    const importo = importoScritto != null ? importoScritto : deveAlGiorno > 0 ? deveAlGiorno : patient.quota_contante_seduta;
     risultati.push({
       eventId: e.id,
       patientId: patient.id,
       nome: patient.nome_calendario || patient.fatturare_a,
       data: e.data,
       saldoAttuale,
+      deveAlGiorno,
       importo,
       descrizioneOriginale: e.descrizione || "",
     });
@@ -270,4 +301,25 @@ export function computeIncassiContantiDaRegistrare(events, patients) {
 // nota scritta a mano.
 export function rimuoviMarcatoreSaldato(descrizione) {
   return (descrizione || "").replace(SALDATO_REGEX, "").replace(/\s{2,}/g, " ").trim();
+}
+
+// Dopo aver registrato un incasso dalla nota: il "saldato" scritto a mano
+// diventa la dicitura standard nel codice della seduta — "A5 fatturare (deve
+// 100€ saldato)" o "(deve 100€ saldato 50€)" — e resta lì. Scritto subito
+// qui, non solo dalla rinumerazione, perché la seduta può già essere prima
+// dell'ancora (ciclo già fatturato) e la rinumerazione non la toccherebbe
+// più. Il resto della nota scritto a mano resta intatto.
+export function annotaSaldatoInNota(descrizione, deveAlGiorno, importo) {
+  const originale = descrizione || "";
+  const resto = stripCodiceEsistente(originale);
+  const codice = originale
+    .slice(0, originale.length - resto.length)
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.$/, "");
+  const restoPulito = rimuoviMarcatoreSaldato(resto);
+  const tag = formatSaldato(deveAlGiorno, importo);
+  const testaNota = codice ? `${codice} ${tag}` : tag;
+  return restoPulito ? `${testaNota} ${restoPulito}` : testaNota;
 }

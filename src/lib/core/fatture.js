@@ -249,11 +249,17 @@ export function tariffaStandard(tipologia, regime, settings) {
 }
 
 // Quota contanti a seduta di default: +20€ per ogni agevolato (individuale,
-// coppia, consulenza), 0 altrimenti — e 0 dove non c'è una tariffa da
-// fatturare (supervisione, regime "nessuna"). Le eccezioni (scuola che paga,
-// tutto in contanti...) restano correggibili a mano per paziente in Pazienti.
-export function quotaContanteStandard(tipologia, regime, settings) {
+// coppia, consulenza) che paga con BONIFICO — chi paga in contanti versa già
+// tutto in contanti, senza surplus (regola di Maurizio 2026-09-23). 0 anche
+// dove non c'è una tariffa da fatturare (supervisione, regime "nessuna"). Le
+// eccezioni (scuola che paga...) restano correggibili a mano in Pazienti.
+// modalitaPagamento mancante = "Bonifico", lo stesso default di buildInvoiceRow.
+// costoUnitario (facoltativo): il costo reale del paziente — a 0 (es. paga la
+// scuola, non si fattura nulla) non c'è nemmeno un surplus.
+export function quotaContanteStandard(tipologia, regime, settings, modalitaPagamento = "Bonifico", costoUnitario) {
   if (regime !== "agevolata") return 0;
+  if (!/bonifico/i.test(modalitaPagamento || "Bonifico")) return 0;
   if (!(tariffaStandard(tipologia, regime, settings) > 0)) return 0;
+  if (costoUnitario != null && !(costoUnitario > 0)) return 0;
   return settings.quota_contante_agevolata ?? DEFAULT_SETTINGS.quota_contante_agevolata;
 }

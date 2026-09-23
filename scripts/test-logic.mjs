@@ -53,6 +53,7 @@ import {
   computeConflittiPrenotazioni,
   computeIncassiContantiDaRegistrare,
   rimuoviMarcatoreSaldato,
+  annotaSaldatoInNota,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -444,13 +445,21 @@ test("computeRinumerazione include il saldo contanti nel codice quando il pazien
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
   assert.equal(piano[0].codice, "R1 (deve 150€)");
 });
+test("stripCodiceEsistente toglie 'deve X saldato' e le diciture contanti anche senza codice", () => {
+  assert.equal(stripCodiceEsistente("A5 fatturare (deve 100€ saldato) link"), "link");
+  assert.equal(stripCodiceEsistente("A3 (deve 100€ saldato 50€) link"), "link");
+  assert.equal(stripCodiceEsistente("A2 (saldato 20€) note"), "note");
+  assert.equal(stripCodiceEsistente("(deve 100€ saldato) note"), "note");
+  assert.equal(stripCodiceEsistente("(chiamare prima) note"), "(chiamare prima) note");
+});
 test("stripCodiceEsistente toglie anche 'contanti saldati' e le due diciture insieme", () => {
   assert.equal(stripCodiceEsistente("A5 fatturare (contanti saldati 100€) (deve 100€) link"), "link");
   assert.equal(stripCodiceEsistente("A2 (contanti saldati 30€) note"), "note");
 });
-test("formatCodice: contanti saldati nel giorno dell'incasso, poi il deve residuo", () => {
-  assert.equal(formatCodice("A", 2, false, 0, 100), "A2 (contanti saldati 100€)");
-  assert.equal(formatCodice("A", 2, false, 40, 60), "A2 (contanti saldati 60€) (deve 40€)");
+test("formatCodice: nel giorno dell'incasso resta il dovuto accanto al saldato", () => {
+  assert.equal(formatCodice("A", 2, false, 100, 100), "A2 (deve 100€ saldato)");
+  assert.equal(formatCodice("A", 2, false, 100, 60), "A2 (deve 100€ saldato 60€)");
+  assert.equal(formatCodice("A", 2, false, 0, 20), "A2 (saldato 20€)");
 });
 
 // --- Stato "non_fatturato" (pro bono, supervisioni gratuite, pseudo-pazienti — 2026-09-22) ---
@@ -523,6 +532,22 @@ test("computeIncassiContantiDaRegistrare ignora note senza il marcatore 'saldato
   const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€)" }];
   assert.equal(computeIncassiContantiDaRegistrare(events, patients).length, 0);
 });
+test("computeIncassiContantiDaRegistrare: salta la nota se l'incasso di quel giorno è già registrato (la nota conserva 'saldato')", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 0 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A5 fatturare (deve 100€ saldato)" }];
+  assert.equal(computeIncassiContantiDaRegistrare(events, patients, [{ patient_id: 1, data: "2026-01-05" }]).length, 0);
+  // scritto a mano dentro la parentesi e non ancora registrato: va proposto
+  const r = computeIncassiContantiDaRegistrare(events, patients, []);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].importo, 100);
+  assert.equal(r[0].deveAlGiorno, 100);
+});
+test("annotaSaldatoInNota: il saldato scritto a mano diventa la dicitura standard e resta, il resto della nota intatto", () => {
+  assert.equal(annotaSaldatoInNota("A5 fatturare (deve 100€) saldato", 100, 100), "A5 fatturare (deve 100€ saldato)");
+  assert.equal(annotaSaldatoInNota("A5 fatturare (deve 100€) saldato 50 link zoom", 100, 50), "A5 fatturare (deve 100€ saldato 50€) link zoom");
+  assert.equal(annotaSaldatoInNota("A2 saldato 20", 0, 20), "A2 (saldato 20€)");
+  assert.equal(annotaSaldatoInNota("saldato 30", 30, 30), "(deve 30€ saldato)");
+});
 test("rimuoviMarcatoreSaldato toglie solo il marcatore, preserva il resto della nota", () => {
   assert.equal(rimuoviMarcatoreSaldato("A3 fatturare (deve 60€) saldato"), "A3 fatturare (deve 60€)");
   assert.equal(rimuoviMarcatoreSaldato("A3 fatturare (deve 60€) saldato 30 link zoom"), "A3 fatturare (deve 60€) link zoom");
@@ -561,7 +586,7 @@ test("rimuoviMarcatoreSaldato toglie solo il marcatore, preserva il resto della 
     });
     assert.equal(piano[0].codice, "A1 (deve 100€)"); // 5/1: prima del saldo
     assert.equal(piano[1].codice, "A2 (deve 100€)");
-    assert.equal(piano[2].codice, "A3 (contanti saldati 100€)"); // 19/1: giorno del saldo
+    assert.equal(piano[2].codice, "A3 (deve 100€ saldato)"); // 19/1: giorno del saldo
     assert.equal(piano[3].codice, "A4"); // dopo: nessuna scritta
     assert.equal(piano[4].codice, "A5 fatturare (deve 100€)"); // nuovo ciclo: solo la quota nuova
   });
@@ -571,7 +596,7 @@ test("rimuoviMarcatoreSaldato toglie solo il marcatore, preserva il resto della 
       pagamentiContante: [{ data: "2026-01-19", importo: 60 }],
     });
     assert.equal(piano[1].codice, "A2 (deve 100€)");
-    assert.equal(piano[2].codice, "A3 (contanti saldati 60€) (deve 40€)");
+    assert.equal(piano[2].codice, "A3 (deve 100€ saldato 60€)");
     assert.equal(piano[3].codice, "A4 (deve 40€)");
   });
 
@@ -587,7 +612,7 @@ test("rimuoviMarcatoreSaldato toglie solo il marcatore, preserva il resto della 
       pagamentiContante: [{ data: "2026-02-02", importo: 100 }],
     });
     assert.equal(piano[3].codice, "A4");
-    assert.equal(piano[4].codice, "A5 fatturare (contanti saldati 100€)");
+    assert.equal(piano[4].codice, "A5 fatturare (deve 100€ saldato)");
     assert.equal(piano[5].codice, "A1");
   });
 
@@ -1510,6 +1535,13 @@ test("quotaContanteStandard: 20€ agli agevolati, 0 ai regolari e dove non si f
   assert.equal(quotaContanteStandard("coppia", "regolare", DEFAULT_SETTINGS), 0);
   assert.equal(quotaContanteStandard("supervisione", "agevolata", DEFAULT_SETTINGS), 0);
   assert.equal(quotaContanteStandard("individuale", "nessuna", DEFAULT_SETTINGS), 0);
+});
+test("quotaContanteStandard: il surplus vale solo per chi paga con bonifico", () => {
+  assert.equal(quotaContanteStandard("individuale", "agevolata", DEFAULT_SETTINGS, "Bonifico"), 20);
+  assert.equal(quotaContanteStandard("individuale", "agevolata", DEFAULT_SETTINGS, "Contante"), 0);
+  assert.equal(quotaContanteStandard("coppia", "agevolata", DEFAULT_SETTINGS, "Paypal"), 0);
+  assert.equal(quotaContanteStandard("consulenza", "agevolata", DEFAULT_SETTINGS, "Bonifico", 0), 0); // paga la scuola
+  assert.equal(quotaContanteStandard("individuale", "agevolata", DEFAULT_SETTINGS, "Bonifico", 60), 20);
 });
 
 console.log(`\n${passed} test superati.`);

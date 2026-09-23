@@ -28,7 +28,7 @@
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { deleteGoogleCalendarEvent, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
-import { incassaContante, rimuoviMarcatoreSaldato } from "@/lib/logic";
+import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -163,10 +163,16 @@ export async function POST(request) {
           .eq("id", inc.patientId);
         if (updateError) throw new Error(updateError.message);
       }
+      // Con un incasso vero la nota conserva la dicitura "(deve X€ saldato)"
+      // / "(deve X€ saldato Y€)" (l'idempotenza ora la garantisce la riga in
+      // contante_pagamenti, vedi computeIncassiContantiDaRegistrare); con 0
+      // il marcatore orfano viene solo tolto.
       await updateGoogleCalendarEventDescription(
         tokenRow.refresh_token,
         inc.eventId,
-        rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
+        importo > 0
+          ? annotaSaldatoInNota(inc.descrizioneOriginale, Number(inc.deveAlGiorno) || 0, importo)
+          : rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
       );
       risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: true });
     } catch (e) {

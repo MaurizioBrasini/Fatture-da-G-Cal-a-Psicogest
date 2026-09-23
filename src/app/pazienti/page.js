@@ -655,12 +655,15 @@ export default function PazientiPage() {
     if (eraTariffaStandard) {
       patch.costo_unitario = tariffaStandard(nextTipologia, nextRegime, settings);
     }
-    // Stessa regola per la quota contanti (+20€ di default sugli agevolati):
-    // segue la nuova categoria solo se era sul default della precedente, così
-    // le eccezioni impostate a mano (es. 0 per chi paga la scuola) restano.
-    const eraQuotaStandard = (p.quota_contante_seduta || 0) === quotaContanteStandard(p.tipologia, p.regime_tariffario, settings);
+    // Stessa regola per la quota contanti (+20€ di default sugli agevolati che
+    // pagano con bonifico): segue la nuova categoria/modalità solo se era sul
+    // default della precedente, così le eccezioni impostate a mano (es. 0 per
+    // chi paga la scuola) restano. Vale anche al cambio di "Pagamento".
+    const nextModalita = field === "modalita_pagamento" ? value : p.modalita_pagamento;
+    const eraQuotaStandard =
+      (p.quota_contante_seduta || 0) === quotaContanteStandard(p.tipologia, p.regime_tariffario, settings, p.modalita_pagamento, p.costo_unitario);
     if (eraQuotaStandard) {
-      patch.quota_contante_seduta = quotaContanteStandard(nextTipologia, nextRegime, settings);
+      patch.quota_contante_seduta = quotaContanteStandard(nextTipologia, nextRegime, settings, nextModalita, patch.costo_unitario ?? p.costo_unitario);
     }
     patchLocal(id, patch);
     await persistPatch(id, patch);
@@ -1129,7 +1132,7 @@ export default function PazientiPage() {
                   )}
                   {visibleCols.modalita_pagamento && (
                   <td>
-                    <select value={p.modalita_pagamento} onChange={(e) => updateField(p.id, "modalita_pagamento", e.target.value)}>
+                    <select value={p.modalita_pagamento} onChange={(e) => updateTipologiaORegime(p.id, "modalita_pagamento", e.target.value)}>
                       <option>Bonifico</option><option>Contante</option><option>Paypal</option><option>Carta</option>
                     </select>
                   </td>
@@ -1519,7 +1522,7 @@ export default function PazientiPage() {
             }}
           />
           <label className="muted small" style={{ display: "block", marginTop: 12 }}>
-            Data dell&apos;incasso (la dicitura &quot;contanti saldati&quot; compare sulla seduta di quel giorno)
+            Data dell&apos;incasso (la dicitura &quot;deve … saldato&quot; compare sulla seduta di quel giorno)
             <input
               type="date"
               max={todayISO()}
