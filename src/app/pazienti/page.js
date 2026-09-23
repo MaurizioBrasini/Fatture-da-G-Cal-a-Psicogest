@@ -7,7 +7,7 @@ import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
 import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
 import VerificaContattiModal from "@/components/VerificaContattiModal";
-import { normalizeName, todayISO, tariffaStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto, fasceToccateDa, FASCE_INDISPONIBILI } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, quotaContanteStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto, fasceToccateDa, FASCE_INDISPONIBILI } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
@@ -649,11 +649,18 @@ export default function PazientiPage() {
     // tariffa concordata a parte (es. 60€ invece di 50€ per un individuale
     // agevolato), cambiare tipologia/regime non deve sovrascriverla in
     // silenzio: resta com'è, correggibile a mano.
+    const nextTipologia = field === "tipologia" ? value : p.tipologia;
+    const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
     const eraTariffaStandard = p.costo_unitario === tariffaStandard(p.tipologia, p.regime_tariffario, settings);
     if (eraTariffaStandard) {
-      const nextTipologia = field === "tipologia" ? value : p.tipologia;
-      const nextRegime = field === "regime_tariffario" ? value : p.regime_tariffario;
       patch.costo_unitario = tariffaStandard(nextTipologia, nextRegime, settings);
+    }
+    // Stessa regola per la quota contanti (+20€ di default sugli agevolati):
+    // segue la nuova categoria solo se era sul default della precedente, così
+    // le eccezioni impostate a mano (es. 0 per chi paga la scuola) restano.
+    const eraQuotaStandard = (p.quota_contante_seduta || 0) === quotaContanteStandard(p.tipologia, p.regime_tariffario, settings);
+    if (eraQuotaStandard) {
+      patch.quota_contante_seduta = quotaContanteStandard(nextTipologia, nextRegime, settings);
     }
     patchLocal(id, patch);
     await persistPatch(id, patch);

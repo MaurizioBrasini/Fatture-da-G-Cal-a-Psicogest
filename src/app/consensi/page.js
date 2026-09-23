@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import Modal from "@/components/Modal";
-import { DEFAULT_SETTINGS, tariffaStandard, formatDataItaliana } from "@/lib/logic";
+import { DEFAULT_SETTINGS, tariffaStandard, quotaContanteStandard, formatDataItaliana } from "@/lib/logic";
 
 const TIPOLOGIA_LABEL = { individuale: "Individuale", coppia: "Coppia", consulenza: "Consulenza", supervisione: "Supervisione" };
 
@@ -88,6 +88,7 @@ export default function ConsensiPage() {
     setDatiApprova({
       nome_calendario: c.tipo === "coppia" ? "" : `${c.nome || ""} ${c.cognome || ""}`.trim(),
       costo_unitario: tariffaStandard(c.tipologia, c.regime_tariffario, settings),
+      quota_contante_seduta: quotaContanteStandard(c.tipologia, c.regime_tariffario, settings),
       soglia_fatturazione: 5,
       modalita_pagamento: "Bonifico",
       fatturareAConsensoId: c.id,
@@ -376,6 +377,10 @@ export default function ConsensiPage() {
               <label className="muted small" style={{ flex: 1 }}>
                 Costo a seduta
                 <input type="number" step="0.01" style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px" }} value={datiApprova.costo_unitario} onChange={(e) => setDatiApprova((d) => ({ ...d, costo_unitario: parseFloat(e.target.value) || 0 }))} />
+              </label>
+              <label className="muted small" style={{ flex: 1 }} title="Quota extra a seduta non fatturata, pagata a parte in contanti (0 se non si applica)">
+                Contante/seduta €
+                <input type="number" step="0.01" style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px" }} value={datiApprova.quota_contante_seduta} onChange={(e) => setDatiApprova((d) => ({ ...d, quota_contante_seduta: parseFloat(e.target.value) || 0 }))} />
               </label>
               <label className="muted small" style={{ flex: 1 }}>
                 Soglia fatturazione

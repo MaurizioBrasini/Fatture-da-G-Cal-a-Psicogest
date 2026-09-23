@@ -236,7 +236,20 @@ export function computeIncassiContantiDaRegistrare(events, patients) {
     if (!patient || !(patient.quota_contante_seduta > 0)) continue;
     const saldoAttuale = patient.contante_dovuto || 0;
     const importoScritto = match[1] ? Number(match[1].replace(",", ".")) : null;
-    const importo = importoScritto != null ? importoScritto : saldoAttuale;
+    // Senza numero: prima il "(deve X€)" già scritto dall'app su quella nota
+    // (include la proiezione del ciclo non ancora fatturato, che il saldo in
+    // anagrafica non ha ancora), poi il saldo se è un debito. Con saldo a zero
+    // o in credito (paga in anticipo) mai 0 o un importo negativo — che
+    // aumenterebbe il debito — ma una quota a seduta, correggibile in anteprima.
+    const deveInNota = /\(deve\s*([\d.,]+)\s*€?\)/i.exec(e.descrizione || "");
+    const importo =
+      importoScritto != null
+        ? importoScritto
+        : deveInNota
+          ? Number(deveInNota[1].replace(",", "."))
+          : saldoAttuale > 0
+            ? saldoAttuale
+            : patient.quota_contante_seduta;
     risultati.push({
       eventId: e.id,
       patientId: patient.id,

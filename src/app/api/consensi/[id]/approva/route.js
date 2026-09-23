@@ -6,7 +6,7 @@
 import { utenteAutenticato } from "@/lib/apiAuth";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 import { generaPdfIndividuale, generaPdfVideoregistrazione } from "@/lib/consensoPdf";
-import { tariffaStandard } from "@/lib/logic";
+import { tariffaStandard, quotaContanteStandard, DEFAULT_SETTINGS } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 // Storage via service role in tutta questa rotta: il bucket "consensi" è
@@ -35,11 +35,11 @@ export async function POST(request, { params }) {
   }
 
   const body = await request.json().catch(() => ({}));
-  const { nome_calendario, costo_unitario, soglia_fatturazione, modalita_pagamento, fatturareAConsensoId } = body;
+  const { nome_calendario, costo_unitario, quota_contante_seduta, soglia_fatturazione, modalita_pagamento, fatturareAConsensoId } = body;
   if (!nome_calendario) return NextResponse.json({ error: "Nome calendario mancante." }, { status: 400 });
 
   const { data: settingsRow } = await supabase.from("settings").select("*").maybeSingle();
-  const settings = settingsRow || {};
+  const settings = { ...DEFAULT_SETTINGS, ...(settingsRow || {}) };
   const storage = createServiceRoleClient();
   const { firmaBytes, firmaTipo } = await scaricaFirma(storage, settings);
   const approvatoAt = new Date().toISOString();
@@ -74,6 +74,7 @@ export async function POST(request, { params }) {
           tipologia: consenso.tipologia,
           regime_tariffario: consenso.regime_tariffario,
           costo_unitario: costo_unitario ?? tariffaStandard(consenso.tipologia, consenso.regime_tariffario, settings),
+          quota_contante_seduta: quota_contante_seduta ?? quotaContanteStandard(consenso.tipologia, consenso.regime_tariffario, settings),
           soglia_fatturazione: soglia_fatturazione || 5,
           modalita_pagamento: modalita_pagamento || "Bonifico",
           ancora_data: prossimoLunedi,
@@ -131,6 +132,7 @@ export async function POST(request, { params }) {
         tipologia: consenso.tipologia,
         regime_tariffario: consenso.regime_tariffario,
         costo_unitario: costo_unitario ?? tariffaStandard(consenso.tipologia, consenso.regime_tariffario, settings),
+        quota_contante_seduta: quota_contante_seduta ?? quotaContanteStandard(consenso.tipologia, consenso.regime_tariffario, settings),
         soglia_fatturazione: soglia_fatturazione || 5,
         modalita_pagamento: modalita_pagamento || "Bonifico",
         ancora_data: prossimoLunedi,

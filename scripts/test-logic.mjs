@@ -31,6 +31,7 @@ import {
   slotsInConflitto,
   fasceToccateDa,
   tariffaPerConsenso,
+  quotaContanteStandard,
   FASCE_CANONICHE,
   FASCE_INDISPONIBILI,
   rilevaConflittiChiusura,
@@ -235,6 +236,12 @@ test("buildInvoiceRow: contante → nessun IBAN nelle note", () => {
   const computed = { count: 1, usati: [{ data: "2026-01-10" }], ultimaData: "2026-01-10" };
   const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-15", 1, 100);
   assert.ok(!row.fatturaNOTE.includes("IT16"));
+});
+test("buildInvoiceRow: nelle note nessun periodo (dal/al/il data)", () => {
+  const patient = { costo_unitario: 80, tipologia: "individuale", regime_tariffario: "regolare", modalita_pagamento: "Contante" };
+  const computed = { count: 2, usati: [{ data: "2026-01-10" }, { data: "2026-01-17" }], ultimaData: "2026-01-17" };
+  const row = buildInvoiceRow(patient, computed, DEFAULT_SETTINGS, "2026-01-20", 1, 100);
+  assert.equal(row.fatturaNOTE, "n. 2 sedute (psicoterapia individuale)");
 });
 
 // --- buildPsicogestAnagraficaRow: export anagrafica per l'import Psicogest ---
@@ -495,6 +502,16 @@ test("computeIncassiContantiDaRegistrare: 'saldato N' propone solo N (saldo parz
   const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€) saldato 30" }];
   const risultati = computeIncassiContantiDaRegistrare(events, patients);
   assert.equal(risultati[0].importo, 30);
+});
+test("computeIncassiContantiDaRegistrare: 'saldato' senza numero usa il (deve X€) proiettato in nota, anche se il saldo non l'ha ancora", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 0 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A5 fatturare (deve 100€) saldato" }];
+  assert.equal(computeIncassiContantiDaRegistrare(events, patients)[0].importo, 100);
+});
+test("computeIncassiContantiDaRegistrare: 'saldato' senza numero con saldo in credito propone una quota, mai 0 o negativo", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: -40 }];
+  const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 saldato" }];
+  assert.equal(computeIncassiContantiDaRegistrare(events, patients)[0].importo, 20);
 });
 test("computeIncassiContantiDaRegistrare ignora pazienti senza quota contanti impostata", () => {
   const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 0, contante_dovuto: 0 }];
@@ -1479,6 +1496,20 @@ test("tariffaPerConsenso: usa la stessa tariffaStandard già usata in Pazienti (
   assert.equal(tariffaPerConsenso("individuale", "regolare", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_individuale_regolare);
   assert.equal(tariffaPerConsenso("individuale", "agevolata", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_individuale_agevolata);
   assert.equal(tariffaPerConsenso("coppia", "regolare", DEFAULT_SETTINGS), DEFAULT_SETTINGS.tariffa_coppia_regolare);
+  assert.equal(tariffaPerConsenso("individuale", "regolare", DEFAULT_SETTINGS), 80);
+  assert.equal(tariffaPerConsenso("individuale", "agevolata", DEFAULT_SETTINGS), 50);
+  assert.equal(tariffaPerConsenso("coppia", "regolare", DEFAULT_SETTINGS), 100);
+  assert.equal(tariffaPerConsenso("coppia", "agevolata", DEFAULT_SETTINGS), 60);
+});
+
+// --- Quota contanti di default: +20€ a seduta per ogni agevolato (2026-09-23) ---
+test("quotaContanteStandard: 20€ agli agevolati, 0 ai regolari e dove non si fattura", () => {
+  assert.equal(quotaContanteStandard("individuale", "agevolata", DEFAULT_SETTINGS), 20);
+  assert.equal(quotaContanteStandard("coppia", "agevolata", DEFAULT_SETTINGS), 20);
+  assert.equal(quotaContanteStandard("individuale", "regolare", DEFAULT_SETTINGS), 0);
+  assert.equal(quotaContanteStandard("coppia", "regolare", DEFAULT_SETTINGS), 0);
+  assert.equal(quotaContanteStandard("supervisione", "agevolata", DEFAULT_SETTINGS), 0);
+  assert.equal(quotaContanteStandard("individuale", "nessuna", DEFAULT_SETTINGS), 0);
 });
 
 console.log(`\n${passed} test superati.`);

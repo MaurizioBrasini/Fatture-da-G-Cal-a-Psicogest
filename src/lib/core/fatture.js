@@ -46,15 +46,10 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
   // sulla riga della fattura, quindi il numero di sedute non ci comparirebbe
   // da nessuna parte se non lo mettiamo qui, nella Descrizione stessa.
   const prestazioneRiga = `${count} sedute di ${prestazione}`;
-  const date = computed.usati.map((e) => e.data).sort();
-  const dal = date[0] || computed.ultimaData || dataFattura;
-  const al = date[date.length - 1] || computed.ultimaData || dataFattura;
 
   const modoPagamento = patient.modalita_pagamento || "Bonifico";
-  const noteSedute =
-    dal === al
-      ? `n. ${count} sedute (${prestazione}) - il ${dal}`
-      : `n. ${count} sedute (${prestazione}) - dal ${dal} al ${al}`;
+  // Niente periodo "dal ... al ..." nelle note (richiesta di Maurizio 2026-09-23).
+  const noteSedute = `n. ${count} sedute (${prestazione})`;
   // L'IBAN serve solo a chi paga con bonifico (le fatture in contanti, come
   // la 140, non hanno le coordinate bancarie).
   const note = /bonifico/i.test(modoPagamento)
@@ -233,6 +228,10 @@ export const DEFAULT_SETTINGS = {
   tariffa_consulenza_agevolata: 50,
   tariffa_supervisione_regolare: 0,
   tariffa_supervisione_agevolata: 0,
+  // Quota in contanti non fatturata, di default, per ogni regime agevolato
+  // (richiesta di Maurizio 2026-09-23). Nessuna colonna in settings: vale
+  // questo valore finché non serve renderlo modificabile da Impostazioni.
+  quota_contante_agevolata: 20,
   ultimo_numero_fattura: null,
   email_mittente_nome: "Dr. Maurizio Brasini",
   email_mittente_indirizzo: "maurizio.brasini@psiconet.it",
@@ -247,4 +246,14 @@ export function tariffaStandard(tipologia, regime, settings) {
   if (regime === "nessuna") return 0;
   const key = `tariffa_${tipologia}_${regime === "agevolata" ? "agevolata" : "regolare"}`;
   return settings[key] ?? 0;
+}
+
+// Quota contanti a seduta di default: +20€ per ogni agevolato (individuale,
+// coppia, consulenza), 0 altrimenti — e 0 dove non c'è una tariffa da
+// fatturare (supervisione, regime "nessuna"). Le eccezioni (scuola che paga,
+// tutto in contanti...) restano correggibili a mano per paziente in Pazienti.
+export function quotaContanteStandard(tipologia, regime, settings) {
+  if (regime !== "agevolata") return 0;
+  if (!(tariffaStandard(tipologia, regime, settings) > 0)) return 0;
+  return settings.quota_contante_agevolata ?? DEFAULT_SETTINGS.quota_contante_agevolata;
 }
