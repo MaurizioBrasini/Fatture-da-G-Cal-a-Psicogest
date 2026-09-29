@@ -6,8 +6,18 @@ import { toDateObj } from "./util.js";
 // tonda originale (es. 250€) per mostrarla nelle schermate di storico,
 // senza toccare il dato salvato. Unica fonte di verità per questo calcolo:
 // usata sia in storico/page.js sia in pazienti/page.js (storico paziente).
+// Due formule perché nel tempo è cambiato il calcolo (dal 2026-09-29 l'ENPAP
+// si scorpora anche sul bollo, vedi buildInvoiceRow): le fatture vecchie
+// hanno onorario = tariffa/1.02, quelle nuove (tariffa+2)/1.02−2. Si sceglie
+// la formula che dà una cifra tonda in euro; le tariffe sono sempre intere.
 export function importoLordoDaOnorario(onorario) {
-  return Math.round(onorario * 1.02 * 100) / 100;
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const vecchia = r2(onorario * 1.02);
+  const nuova = r2((onorario + 2) * 1.02 - 2);
+  const tonda = (n) => Math.abs(n - Math.round(n)) < 0.005;
+  if (tonda(vecchia)) return vecchia;
+  if (tonda(nuova)) return nuova;
+  return vecchia;
 }
 
 // IBAN dello studio, stampato sulle fatture pagate con bonifico. Nelle fatture
@@ -20,15 +30,17 @@ export function buildInvoiceRow(patient, computed, settings, dataFattura, fattur
   const count = computed.count;
 
   // Tariffa tonda (es. 80€, 100€) = costo_unitario × numero sedute.
-  // Da qui si scorpora l'onorario (imponibile sanitario) in modo che
-  // onorario + ENPAP torni esattamente alla cifra tonda, ed eventualmente
-  // il bollo (2€ fisso) si aggiunge sopra, senza toccare lo scorporo.
+  // Il totale deve essere la cifra tonda + bollo (es. 252, 402, 502). Psicogest
+  // applica l'ENPAP (2%) anche sul bollo a carico del paziente (verificato
+  // sull'XML della fattura 153: ImponibileCassa = onorario + 2,00), quindi
+  // l'onorario si scorpora da (tariffa + bollo) e non dalla sola tariffa:
+  // altrimenti il totale finiva 4 centesimi sopra (252,04 invece di 252,00).
   const tariffa = Math.round(patient.costo_unitario * count * 100) / 100;
-  const onorario = Math.round((tariffa / 1.02) * 100) / 100;
-  const enpap = Math.round((tariffa - onorario) * 100) / 100;
   const bolloDovuto = tariffa > settings.bollo_soglia;
   const bollo = bolloDovuto ? 2 : 0;
-  const totale = Math.round((tariffa + bollo) * 100) / 100;
+  const onorario = Math.round(((tariffa + bollo) / 1.02 - bollo) * 100) / 100;
+  const enpap = Math.round((onorario + bollo) * 0.02 * 100) / 100;
+  const totale = Math.round((onorario + enpap + bollo) * 100) / 100;
 
   const prestazioneMap = {
     individuale: settings.prestazione_individuale,
