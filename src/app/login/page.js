@@ -52,6 +52,9 @@ export default function LoginPage() {
         >
           Accedi con Google
         </button>
+        <p style={{ marginTop: 20, fontSize: 12, color: "#55645D" }}>
+          <a href="/privacy">Informativa sulla privacy</a> &middot; <a href="/termini">Termini di servizio</a>
+        </p>
       </div>
     </div>
   );

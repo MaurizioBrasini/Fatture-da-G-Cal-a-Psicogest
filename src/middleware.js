@@ -35,6 +35,8 @@ export async function middleware(request) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/auth") ||
     request.nextUrl.pathname.startsWith("/consenso") ||
+    request.nextUrl.pathname.startsWith("/privacy") ||
+    request.nextUrl.pathname.startsWith("/termini") ||
     request.nextUrl.pathname.startsWith("/api/consensi/pubblico");
 
   if (!user && !isAuthRoute) {
