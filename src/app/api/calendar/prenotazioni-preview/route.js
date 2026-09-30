@@ -63,7 +63,8 @@ export async function POST(request) {
     const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(events, patients || []);
     const tutte = [...pronte, ...inAttesa, ...ambigue, ...nuove];
 
-    const conflitti = computeConflittiPrenotazioni(tutte, eventiLarghi, patients || [], slots || [], { closures: closures || [] });
+    const { data: cancellazioni } = await supabase.from("cancellations").select("patient_id, original_date").eq("user_id", user.id);
+    const conflitti = computeConflittiPrenotazioni(tutte, eventiLarghi, patients || [], slots || [], { closures: closures || [], cancellazioni: cancellazioni || [] });
     for (const r of tutte) {
       if (conflitti[r.eventId]) r.conflitto = conflitti[r.eventId];
     }

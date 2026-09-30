@@ -92,7 +92,8 @@ export async function POST(request) {
     const { pronte, inAttesa, ambigue, nuove } = computePrenotazioniPreview(eventiLarghi.filter((e) => e.data >= oggi), patients || []);
     // anche ambigue/nuove: la regola delle fasce riservate vale per chiunque prenoti
     const righe = [...pronte, ...inAttesa, ...ambigue, ...nuove];
-    const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || [], { closures: closures || [] });
+    const { data: cancellazioni } = await supabase.from("cancellations").select("patient_id, original_date").eq("user_id", user.id);
+    const conflitti = computeConflittiPrenotazioni(righe, eventiLarghi, patients || [], slots || [], { closures: closures || [], cancellazioni: cancellazioni || [] });
 
     for (const rf of rifiuti) {
       const riga = righe.find((r) => r.eventId === rf.eventId);

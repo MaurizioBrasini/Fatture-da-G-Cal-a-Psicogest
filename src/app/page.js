@@ -728,15 +728,17 @@ export default function DashboardPage() {
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={!!routine.prenotazioni} onChange={() => segna("prenotazioni", !routine.prenotazioni)} />
+              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
               <span
                 className="small"
-                style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}
-                title={'Cerca gli appuntamenti presi dai pazienti tramite il link "Prenotazioni online dr. Brasini" (li riconosce dal titolo grezzo che mette Google). Per ognuno: lo colora vinaccia (per riconoscerlo a colpo d\'occhio), prova ad abbinarlo a un paziente esistente (via email, con margine anche solo su nome/cognome), e — se confermi l\'abbinamento — rinomina il titolo con il nome giusto e salva l\'email sul profilo paziente se mancava. Chi non è riconosciuto resta segnalato come "nuovo paziente da creare".'}
+                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
+                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
               >
-                1. Prenotazioni online
+                1. Aggiorna dal calendario
               </span>
-              <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
+              <button className="btn-small" onClick={handleSync} disabled={syncing}>
+                {syncing ? "Lettura…" : "Fai ora"}
+              </button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
@@ -750,17 +752,15 @@ export default function DashboardPage() {
               <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
+              <input type="checkbox" checked={!!routine.prenotazioni} onChange={() => segna("prenotazioni", !routine.prenotazioni)} />
               <span
                 className="small"
-                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
-                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
+                style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}
+                title={'Cerca gli appuntamenti presi dai pazienti tramite il link "Prenotazioni online dr. Brasini" (li riconosce dal titolo grezzo che mette Google). Per ognuno: lo colora vinaccia (per riconoscerlo a colpo d\'occhio), prova ad abbinarlo a un paziente esistente (via email, con margine anche solo su nome/cognome), e — se confermi l\'abbinamento — rinomina il titolo con il nome giusto e salva l\'email sul profilo paziente se mancava. Chi non è riconosciuto resta segnalato come "nuovo paziente da creare".'}
               >
-                3. Aggiorna dal calendario
+                3. Prenotazioni online
               </span>
-              <button className="btn-small" onClick={handleSync} disabled={syncing}>
-                {syncing ? "Lettura…" : "Fai ora"}
-              </button>
+              <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />

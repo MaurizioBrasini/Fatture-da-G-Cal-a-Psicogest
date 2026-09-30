@@ -277,7 +277,14 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     const slot = slotAttivi.find((s) => s.patient_id === id && s.interval_days && s.anchor_date);
     if (!slot) continue;
     const ultimo = ultimoEvento(id);
-    const ultimoPrevisto = ultimo ? { data: ultimo.data, ora: ultimo.ora } : null;
+    let ultimoPrevisto = ultimo ? { data: ultimo.data, ora: ultimo.ora } : null;
+    // Una seduta disdetta e già registrata (evento eliminato dal calendario)
+    // è ancora nello schema: conta per l'orizzonte come se l'evento ci fosse,
+    // così il risultato non dipende dall'aver registrato le disdette prima o
+    // dopo la riconciliazione.
+    for (const c of opzioni.cancellazioni || []) {
+      if (c.patient_id === id && ultimoPrevisto && c.original_date > ultimoPrevisto.data) ultimoPrevisto = { data: c.original_date, ora: null };
+    }
     const righePaz = ordinate.filter((r) => r.patientId === id);
     Object.assign(conflitti, conflittiSlotFisso(slot, righePaz, attivi(id), opzioni.closures, ultimoPrevisto));
   }

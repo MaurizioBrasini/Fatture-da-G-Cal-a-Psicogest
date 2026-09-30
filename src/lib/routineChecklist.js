@@ -1,13 +1,14 @@
 // Checklist "routine di fine giornata" mostrata in Dashboard: tiene traccia
-// di quali dei 4 passaggi (prenotazioni online, aggiorna dal calendario,
-// registra disdette, rinumera tutti) sono già stati fatti OGGI — persistita
+// di quali dei 4 passaggi (aggiorna dal calendario, registra disdette,
+// prenotazioni online, rinumera tutti — in quest'ordine: le disdette
+// sistemano il calendario prima di giudicare le prenotazioni) sono già stati fatti OGGI — persistita
 // in localStorage,
 // per viewer (non condivisa tra dispositivi/browser), azzerata da sola ogni
 // nuovo giorno perché la chiave include la data. Rinumera tutti si fa dalla
 // pagina Pazienti (pagina diversa), quindi la scrittura da lì usa la stessa
 // chiave per restare in sync quando si torna in Dashboard.
 
-const STEPS = ["prenotazioni", "sync", "disdette", "rinumera"];
+const STEPS = ["sync", "disdette", "prenotazioni", "rinumera"];
 
 function chiave(dataISO) {
   return `routine-fine-giornata-${dataISO}`;
