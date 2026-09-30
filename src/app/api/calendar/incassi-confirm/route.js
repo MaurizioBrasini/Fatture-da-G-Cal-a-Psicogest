@@ -29,11 +29,13 @@ export async function POST(request) {
     try {
       const importo = Number(inc.importo);
       if (Number.isNaN(importo) || importo < 0) throw new Error("Importo non valido.");
-      let nuovaNota = rimuoviMarcatoreSaldato(inc.descrizioneOriginale);
+      // Natura del paziente riletta dal database, non dal client.
+      const { data: paz } = await supabase.from("patients").select("stato, tipologia").eq("id", inc.patientId).single();
+      const nonFatturato = paz?.stato === "non_fatturato" && paz?.tipologia !== "altro";
+      // Per un NF la parola "saldato" è il segno che chiude il ciclo: con
+      // importo 0 la nota resta com'è (toglierla farebbe perdere la ripartenza).
+      let nuovaNota = nonFatturato ? inc.descrizioneOriginale : rimuoviMarcatoreSaldato(inc.descrizioneOriginale);
       if (importo > 0) {
-        // Natura del paziente riletta dal database, non dal client.
-        const { data: paz } = await supabase.from("patients").select("stato, tipologia").eq("id", inc.patientId).single();
-        const nonFatturato = paz?.stato === "non_fatturato" && paz?.tipologia !== "altro";
         await registraIncassoContanti(supabase, { userId: user.id, patientId: inc.patientId, importo, data: inc.data, nonFatturato });
         const dovuto = Number(inc.deveAlGiorno) || 0;
         // NF: la nota tiene la parola "saldato" semplice (è il segno che chiude
