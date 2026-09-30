@@ -55,7 +55,6 @@ import {
   rimuoviMarcatoreSaldato,
   annotaSaldatoInNota,
   annotaSaldatoNFInNota,
-  ancoraValoreDopoIncassoNF,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -484,27 +483,47 @@ test("computeRinumerazione: non_fatturato (non 'altro') conta NF1, NF2... con (d
   assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2", "NF3"]);
   assert.equal(piano[0].descrizioneNuova, "NF1");
 });
-test("annotaSaldatoNFInNota / ancoraValoreDopoIncassoNF: 'NF4 saldato' se paga tutto, importo se parziale e il residuo in sedute diventa il nuovo punto di partenza", () => {
+test("annotaSaldatoNFInNota: 'NF4 saldato' se paga tutto, importo se parziale, la parola semplice resta (è il segno che chiude il ciclo)", () => {
   assert.equal(annotaSaldatoNFInNota("NF4 saldato", 240, 240), "NF4 saldato");
   assert.equal(annotaSaldatoNFInNota("NF4 saldato 120 ciao", 240, 120), "NF4 saldato 120€ ciao");
-  assert.equal(ancoraValoreDopoIncassoNF(240, 240, 60), 0);
-  assert.equal(ancoraValoreDopoIncassoNF(240, 120, 60), 2);
-  assert.equal(ancoraValoreDopoIncassoNF(240, 300, 60), 0);
 });
-test("computeIncassiContantiDaRegistrare: 'saldato' di un non_fatturato chiude il ciclo e propone costo × sedute; tipologia 'altro' è esclusa", () => {
-  const patient = { id: 1, nome_calendario: "Michela M.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0, contante_dovuto: 0 };
+const pazNF = { id: 1, nome_calendario: "Romano R.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0 };
+const evNF = (descrizioni) => descrizioni.map((d, i) => ({ id: `e${i}`, data: `2026-10-${String(5 + i * 7).padStart(2, "0")}`, ora: "10:00", titolo: "Romano R.", descrizione: d }));
+test("NF: 'saldato' chiude il ciclo, la seduta successiva riparte da NF1 (caso Romano)", () => {
+  const piano = computeRinumerazione(pazNF, evNF(["NF1 saldato", "", "", ""]), DEFAULT_SETTINGS, [pazNF]);
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF1", "NF2", "NF3"]);
+});
+test("NF: 'saldato N' parziale riparte dal residuo in sedute (n×prezzo − N)", () => {
+  const piano = computeRinumerazione(pazNF, evNF(["", "", "", "NF4 saldato 120", ""]), DEFAULT_SETTINGS, [pazNF]);
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2", "NF3", "NF4", "NF3"]); // 240 dovuti − 120 = 2 sedute residue → la successiva è la terza
+});
+test("NF: 'deve Y' scritto a mano accanto a 'saldato' ha la precedenza sul calcolo", () => {
+  const piano = computeRinumerazione(pazNF, evNF(["", "", "saldato 100 deve 60", ""]), DEFAULT_SETTINGS, [pazNF]);
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2", "NF3", "NF2"]); // residuo 60€ = 1 seduta → la successiva è NF2
+});
+test("NF: 'non saldato' non chiude il ciclo", () => {
+  const piano = computeRinumerazione(pazNF, evNF(["NF1 non saldato", ""]), DEFAULT_SETTINGS, [pazNF]);
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2"]);
+});
+test("computePatientState NF: il conteggio Dashboard riparte dopo la seduta 'saldato' (stessa regola di Rinumera)", () => {
+  const passati = ["2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24"].map((data, i) => ({ id: `p${i}`, data, ora: "10:00", titolo: "Romano R.", descrizione: i === 1 ? "NF2 saldato" : "" }));
+  const pz = { ...pazNF, ancora_data: "2026-08-01" };
+  const st = computePatientState(pz, passati, DEFAULT_SETTINGS, [], [pz]);
+  assert.equal(st.count, 2);
+});
+test("computeIncassiContantiDaRegistrare: 'saldato' di un NF propone n × prezzo dal numero NF della seduta; tipologia 'altro' è esclusa", () => {
   const events = [
-    { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Michela M.", descrizione: "NF1" },
-    { id: "b", data: "2026-10-12", ora: "10:00", titolo: "Michela M.", descrizione: "NF2 saldato" },
+    { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Romano R.", descrizione: "NF1" },
+    { id: "b", data: "2026-10-12", ora: "10:00", titolo: "Romano R.", descrizione: "NF2 saldato" },
   ];
-  const [inc] = computeIncassiContantiDaRegistrare(events, [patient], []);
-  assert.equal(inc.chiudiCiclo, true);
+  const [inc] = computeIncassiContantiDaRegistrare(events, [pazNF], []);
+  assert.equal(inc.nonFatturato, true);
+  assert.equal(inc.deveAlGiorno, 120);
   assert.equal(inc.importo, 120);
-  const altro = { ...patient, tipologia: "altro" };
+  const altro = { ...pazNF, tipologia: "altro" };
   assert.deepEqual(computeIncassiContantiDaRegistrare(events, [altro], []), []);
   assert.deepEqual(computeRinumerazione(altro, events, DEFAULT_SETTINGS), []);
-});
-test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
+});test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
   const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };
   const events = [{ data: "2020-01-05", titolo: "Riunione Scienziati" }];
   const st = computePatientState(patient, events, DEFAULT_SETTINGS, [], [patient]);

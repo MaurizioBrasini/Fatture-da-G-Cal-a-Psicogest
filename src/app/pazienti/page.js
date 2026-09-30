@@ -7,8 +7,9 @@ import Modal from "@/components/Modal";
 import SortableTh from "@/components/SortableTh";
 import GoogleContactSearchButton from "@/components/GoogleContactSearchButton";
 import VerificaContattiModal from "@/components/VerificaContattiModal";
-import { normalizeName, todayISO, tariffaStandard, quotaContanteStandard, incassaContante, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto, fasceToccateDa, FASCE_INDISPONIBILI } from "@/lib/logic";
+import { normalizeName, todayISO, tariffaStandard, quotaContanteStandard, DEFAULT_SETTINGS, importoLordoDaOnorario, buildPsicogestAnagraficaRow, PSICOGEST_ANAGRAFICA_COLUMN_ORDER, titleCaseNomeCalendario, slotsInConflitto, fasceToccateDa, FASCE_INDISPONIBILI } from "@/lib/logic";
 import { rinumeraPazienteSilenzioso } from "@/lib/renumerazioneClient";
+import { registraIncassoContanti } from "@/lib/incassiContanti";
 import { useRinumerazione } from "@/lib/useRinumerazione";
 
 const TIPOLOGIE = [
@@ -249,21 +250,18 @@ export default function PazientiPage() {
   }
 
   async function confermaContanti() {
-    const { patientId, dovuto, value, data } = contantiModal;
+    const { patientId, value, data } = contantiModal;
     const importoPagato = parseFloat(value.replace(",", "."));
     if (!importoPagato || importoPagato <= 0) return;
     if (!data || data > todayISO()) return; // niente incassi nel futuro
     setContantiModal(null);
-    const nuovoSaldo = incassaContante(dovuto, importoPagato);
-    await Promise.all([
-      supabase.from("patients").update({ contante_dovuto: nuovoSaldo }).eq("id", patientId),
-      supabase.from("contante_pagamenti").insert({
-        user_id: (await supabase.auth.getUser()).data.user.id,
-        patient_id: patientId,
-        importo: importoPagato,
-        data,
-      }),
-    ]);
+    // Stessa procedura della nota "saldato" letta da Rinumera.
+    const nuovoSaldo = await registraIncassoContanti(supabase, {
+      userId: (await supabase.auth.getUser()).data.user.id,
+      patientId,
+      importo: importoPagato,
+      data,
+    });
     patchLocal(patientId, { contante_dovuto: nuovoSaldo });
     rinumeraPazienteSilenzioso(patientId).catch((e) => console.error("Rinumerazione automatica fallita:", e));
   }

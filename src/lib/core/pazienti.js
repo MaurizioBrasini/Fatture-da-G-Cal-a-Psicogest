@@ -42,6 +42,50 @@ export function matchPatientForEvent(title, patients) {
   return null;
 }
 
+// Non fatturati che pagano a cicli (2026-09-30): pagano in contanti senza
+// fattura, ogni tanto o ogni volta, e si conta "NF1, NF2...". Gli pseudo-
+// pazienti tipologia "altro" (Riunione Scienziati) non sono mai numerati.
+export function contaNonFatturato(patient) {
+  return patient.stato === "non_fatturato" && patient.tipologia !== "altro";
+}
+
+export function importoSedutaNonFatturato(patient) {
+  return patient.quota_contante_seduta > 0 ? patient.quota_contante_seduta : patient.costo_unitario || 0;
+}
+
+// "saldato" / "saldato N" scritto a mano sulla nota di una seduta: il
+// paziente ha pagato. Stessa parola per tutti; "non saldato" dice l'opposto.
+export const SALDATO_REGEX = /(?<!\bnon\s)\bsaldat[oa]\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
+
+// Numerazione NF di una sequenza di sedute (già ordinate, dalla più vecchia):
+// si conta NF1, NF2... partendo da ancora_valore. La seduta con "saldato" in
+// nota chiude il ciclo: resta NFn e dalla successiva il conteggio riparte da
+// 0 — o dal debito residuo in sedute (al prezzo unitario) se "saldato N" paga
+// meno del dovuto n × prezzo. Il residuo si può anche scrivere a mano in nota
+// ("saldato 40 deve 20"): in quel caso vale il "deve" scritto, non il calcolo.
+// Nessuno stato nel database: lo legge la stessa nota, sia Rinumera sia il
+// conteggio della Dashboard (computePatientState).
+export function numeraNonFatturato(patient, eventi) {
+  const prezzo = importoSedutaNonFatturato(patient);
+  let contatore = patient.ancora_valore || 0;
+  const numeri = [];
+  for (const ev of eventi) {
+    contatore += 1;
+    numeri.push(contatore);
+    const m = SALDATO_REGEX.exec(ev.descrizione || "");
+    if (!m) continue;
+    const pagato = m[1] ? Number(m[1].replace(",", ".")) : null;
+    const deveScritto = /\bdeve\s*(\d+(?:[.,]\d+)?)/i.exec(ev.descrizione || "");
+    let residuo = 0;
+    if (prezzo > 0) {
+      if (deveScritto) residuo = Math.round(Number(deveScritto[1].replace(",", ".")) / prezzo);
+      else if (pagato != null) residuo = Math.round((contatore * prezzo - pagato) / prezzo);
+    }
+    contatore = Math.max(residuo, 0);
+  }
+  return { numeri, contatoreFinale: contatore };
+}
+
 // events: [{data: 'YYYY-MM-DD', titolo: '...'}]
 // cancellazioni: righe di `cancellations` per questo paziente (o per tutti,
 // vengono filtrate qui) — una data con billing_status='not_charged' non
@@ -74,7 +118,12 @@ export function computePatientState(patient, events, settings, cancellazioni = [
     .filter((e) => !nonAddebitate.has(e.data))
     .sort((a, b) => (a.data < b.data ? -1 : 1));
 
-  const count = (patient.ancora_valore || 0) + usati.length;
+  let count = (patient.ancora_valore || 0) + usati.length;
+  if (contaNonFatturato(patient)) {
+    // Il ciclo riparte dopo la seduta segnata "saldato" (stessa regola di
+    // computeRinumerazione).
+    count = numeraNonFatturato(patient, usati).contatoreFinale;
+  }
   const ultimaData = passate.length ? passate.map((e) => e.data).sort().slice(-1)[0] : null;
   const prossimaData = future.length ? future.map((e) => e.data).sort()[0] : null;
   const soglia = patient.soglia_fatturazione || settings.soglia_default;

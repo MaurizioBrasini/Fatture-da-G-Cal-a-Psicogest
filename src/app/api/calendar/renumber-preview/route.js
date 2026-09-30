@@ -5,7 +5,7 @@
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { computeRinumerazione, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
+import { computeRinumerazione, computeIncassiContantiDaRegistrare, DEFAULT_SETTINGS, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -63,6 +63,13 @@ export async function POST(request) {
     const { data: incassi, error: incassiError } = await supabase.from("contante_pagamenti").select("patient_id,importo,data");
     if (incassiError) throw new Error("Errore nel caricare gli incassi contanti: " + incassiError.message);
 
+    // Incassi "saldato"/"saldato N" scritti in nota e non ancora registrati
+    // (stessa procedura per tutti i pazienti, vedi incassi-confirm): da
+    // registrare PRIMA di confermare le note, perché la rinumerazione mostra
+    // "(deve X€ saldato)" solo dopo.
+    const idTarget = new Set(target.map((p) => p.id));
+    const incassiDaRegistrare = computeIncassiContantiDaRegistrare(events, patients || [], incassi || []).filter((i) => idTarget.has(i.patientId));
+
     const risultato = target
       .map((p) => ({
         pazienteId: p.id,
@@ -73,7 +80,7 @@ export async function POST(request) {
       }))
       .filter((r) => r.piano.length > 0);
 
-    return NextResponse.json({ ok: true, pazienti: risultato, dataMinima, dataMassima });
+    return NextResponse.json({ ok: true, pazienti: risultato, incassi: incassiDaRegistrare, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

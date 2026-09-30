@@ -21,6 +21,11 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
   const [renumWriteResult, setRenumWriteResult] = useState(null);
   const [renumError, setRenumError] = useState("");
   const [renumProgress, setRenumProgress] = useState(null);
+  // Incassi "saldato"/"saldato N" letti dalle note, da registrare prima delle note
+  const [renumIncassi, setRenumIncassi] = useState([]);
+  const [renumIncassiEsclusi, setRenumIncassiEsclusi] = useState({}); // { eventId: true } = spunta tolta
+  const [renumIncassiImporto, setRenumIncassiImporto] = useState({}); // { eventId: "testo" } = importo corretto a mano
+  const [renumIncassiBusy, setRenumIncassiBusy] = useState(false);
 
   async function caricaAnteprimaRinumerazione(patientId, giorni) {
     setRenumStep("loading");
@@ -38,10 +43,41 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
         return;
       }
       setRenumData(data.pazienti || []);
+      setRenumIncassi(data.incassi || []);
+      setRenumIncassiEsclusi({});
+      setRenumIncassiImporto({});
       setRenumStep("preview");
     } catch (e) {
       setRenumError(e.message);
       setRenumStep("error");
+    }
+  }
+
+  // Registra gli incassi con la spunta (importo editabile; 0 = solo pulisci la
+  // nota) e rilegge l'anteprima: le note con "(deve X€ saldato)" e la nuova
+  // ripartenza NF si vedono subito dopo.
+  async function registraIncassiRinumerazione() {
+    const daRegistrare = renumIncassi
+      .filter((inc) => !renumIncassiEsclusi[inc.eventId])
+      .map((inc) => ({ ...inc, importo: parseFloat(String(renumIncassiImporto[inc.eventId] ?? inc.importo).replace(",", ".")) }))
+      .filter((inc) => inc.importo >= 0);
+    if (!daRegistrare.length) return;
+    setRenumIncassiBusy(true);
+    try {
+      const res = await fetch("/api/calendar/incassi-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ incassi: daRegistrare }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Registrazione incassi non riuscita.");
+      if (data.falliti > 0) throw new Error(`${data.falliti} incassi non registrati: ${(data.dettagli || []).filter((d) => !d.ok).map((d) => d.error).join("; ")}`);
+      await caricaAnteprimaRinumerazione(renumTarget, renumGiorni);
+    } catch (e) {
+      setRenumError(e.message);
+      setRenumStep("error");
+    } finally {
+      setRenumIncassiBusy(false);
     }
   }
 
@@ -111,6 +147,7 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
     setRenumWriteResult(null);
     setRenumError("");
     setRenumProgress(null);
+    setRenumIncassi([]);
   }
 
   const renumerazioneModal = renumStep && (
@@ -139,6 +176,48 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
             />
             <button className="btn btn-ghost" onClick={() => caricaAnteprimaRinumerazione(renumTarget, renumGiorni)}>Ricalcola</button>
           </div>
+
+          {renumIncassi.length > 0 && (
+            <div style={{ marginBottom: 16, padding: 10, border: "1px solid #7A9", borderRadius: 8, background: "#F3FAF5" }}>
+              <p className="muted small" style={{ marginTop: 0 }}>
+                <strong>Incassi rilevati</strong> — nota &quot;saldato&quot; (tutto il dovuto) o &quot;saldato N&quot; (solo N€) su una
+                seduta. Importo modificabile; 0 = togli solo la dicitura dalla nota. Registrali prima di confermare le note.
+              </p>
+              <table style={{ width: "100%", fontSize: 13 }}>
+                <tbody>
+                  {renumIncassi.map((inc) => (
+                    <tr key={inc.eventId}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={!renumIncassiEsclusi[inc.eventId]}
+                          onChange={() => setRenumIncassiEsclusi((prev) => ({ ...prev, [inc.eventId]: !prev[inc.eventId] }))}
+                        />
+                      </td>
+                      <td className="mono" style={{ whiteSpace: "nowrap" }}>{inc.data}</td>
+                      <td>{inc.nome}</td>
+                      <td className="muted small">dovuto € {inc.deveAlGiorno}</td>
+                      <td style={{ textAlign: "right" }}>
+                        €{" "}
+                        <input
+                          type="text"
+                          className="num"
+                          style={{ width: 70 }}
+                          value={renumIncassiImporto[inc.eventId] ?? inc.importo}
+                          onChange={(e) => setRenumIncassiImporto((prev) => ({ ...prev, [inc.eventId]: e.target.value }))}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={registraIncassiRinumerazione} disabled={renumIncassiBusy}>
+                  {renumIncassiBusy ? "Registrazione…" : "Registra incassi"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {(!renumData || renumData.length === 0) ? (
             <p className="muted">Nessuna modifica da fare: le note sono già aggiornate.</p>

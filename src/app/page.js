@@ -124,13 +124,6 @@ export default function DashboardPage() {
   const [aggDuplicati, setAggDuplicati] = useState(null);
   const [aggDuplicatiEsclusi, setAggDuplicatiEsclusi] = useState({});
   const [aggScartati, setAggScartati] = useState([]); // già scartati in passato (disdette_scartate), ripristinabili
-  // Incassi contanti rilevati dalla nota "saldato"/"saldato N" (richiesta di
-  // Maurizio 2026-09-22) — vedi computeIncassiContantiDaRegistrare in logic.js.
-  // aggIncassiImporto tiene le modifiche manuali all'importo proposto prima
-  // di confermare (chiave eventId, valore stringa dell'input).
-  const [aggIncassi, setAggIncassi] = useState(null);
-  const [aggIncassiEsclusi, setAggIncassiEsclusi] = useState({});
-  const [aggIncassiImporto, setAggIncassiImporto] = useState({});
   const [aggRisultato, setAggRisultato] = useState(null);
   const [aggErrore, setAggErrore] = useState("");
   // Form "Aggiungi disdetta manuale": per un evento già eliminato a mano da
@@ -431,9 +424,6 @@ export default function DashboardPage() {
     setAggEmailSelezionate({});
     setAggDuplicati(null);
     setAggDuplicatiEsclusi({});
-    setAggIncassi(null);
-    setAggIncassiEsclusi({});
-    setAggIncassiImporto({});
     setAggRisultato(null);
     try {
       const res = await fetch("/api/calendar/aggiorna-preview", {
@@ -450,11 +440,10 @@ export default function DashboardPage() {
       setAggCandidati(data.candidati || []);
       setAggDuplicati(data.duplicati || []);
       setAggScartati(data.scartati || []);
-      setAggIncassi(data.incassi || []);
       setAggStep("preview");
-      // Se non c'è nulla da registrare, ripulire o incassare, il passaggio è
+      // Se non c'è nulla da registrare o ripulire, il passaggio è
       // comunque "fatto": l'utente ha controllato, nulla da gestire oggi.
-      if (!data.candidati?.length && !data.duplicati?.length && !data.incassi?.length) segna("disdette");
+      if (!data.candidati?.length && !data.duplicati?.length) segna("disdette");
     } catch (e) {
       setAggErrore(e.message);
       setAggStep("error");
@@ -479,22 +468,13 @@ export default function DashboardPage() {
         .filter((d) => aggDuplicatiEsclusi[d.eventId])
         .map((d) => ({ eventId: d.eventId, tipo: "duplicato", patientId: d.patientId, data: d.data, ora: d.ora, nome: d.nome })),
     ];
-    // Importo modificabile prima di confermare (default: quello proposto
-    // dalla scansione). >= 0: uno 0 è un "solo pulisci la nota" valido (es.
-    // saldo già a posto ma marcatore "saldato" rimasto orfano da un incasso
-    // registrato altrove, come il bottone manuale in Pazienti — caso reale
-    // Francesco Mer. 2026-09-22) — solo un numero non valido viene saltato.
-    const daIncassare = (aggIncassi || [])
-      .filter((inc) => !aggIncassiEsclusi[inc.eventId])
-      .map((inc) => ({ ...inc, importo: parseFloat(String(aggIncassiImporto[inc.eventId] ?? inc.importo).replace(",", ".")) }))
-      .filter((inc) => inc.importo >= 0);
-    if (!tutte.length && !daIncassare.length && !daScartare.length) return;
+    if (!tutte.length && !daScartare.length) return;
     setAggStep("writing");
     try {
       const res = await fetch("/api/calendar/aggiorna-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidati: tutte, incassi: daIncassare, scartati: daScartare }),
+        body: JSON.stringify({ candidati: tutte, scartati: daScartare }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -506,12 +486,6 @@ export default function DashboardPage() {
       setAggStep("done");
       segna("disdette");
       load();
-      // Rilancia in automatico la rinumerazione dei pazienti incassati, per
-      // aggiornare subito la nota (deve/contanti saldati) — stesso richiamo
-      // già usato dal bottone manuale "€X" in Pazienti dopo un incasso.
-      for (const patientId of new Set(daIncassare.map((inc) => inc.patientId))) {
-        rinumeraPazienteSilenzioso(patientId).catch((e) => console.error("Rinumerazione automatica fallita:", e));
-      }
     } catch (e) {
       setAggErrore(e.message);
       setAggStep("error");
@@ -542,9 +516,6 @@ export default function DashboardPage() {
     setAggEmailSelezionate({});
     setAggDuplicati(null);
     setAggDuplicatiEsclusi({});
-    setAggIncassi(null);
-    setAggIncassiEsclusi({});
-    setAggIncassiImporto({});
     setAggRisultato(null);
     setAggErrore("");
     setManPatientId("");
@@ -1215,60 +1186,8 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              {aggIncassi && aggIncassi.length > 0 && (
-                <div style={{ marginBottom: 16, padding: 10, border: "1px solid #7a7", borderRadius: 8, background: "#F5FFF5" }}>
-                  <p className="muted small" style={{ marginTop: 0 }}>
-                    <strong>Incassi contanti rilevati</strong> — nota &quot;saldato&quot; (tutto il dovuto) o{" "}
-                    &quot;saldato N&quot; (solo N€) su una seduta. Importo modificabile prima di confermare;
-                    confermando si registra l&apos;incasso (stesse strutture del bottone &quot;€&quot; in Pazienti) e
-                    si toglie il marcatore dalla nota, per non riproporlo al prossimo giro.
-                  </p>
-                  <table style={{ width: "100%", fontSize: 13 }}>
-                    <thead>
-                      <tr>
-                        <th></th>
-                        <th style={{ textAlign: "left" }}>Data</th>
-                        <th style={{ textAlign: "left" }}>Paziente</th>
-                        <th style={{ textAlign: "left" }}>Dovuto</th>
-                        <th style={{ textAlign: "left" }}>Incasso €</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {aggIncassi.map((inc) => (
-                        <tr key={inc.eventId}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={!aggIncassiEsclusi[inc.eventId]}
-                              onChange={() =>
-                                setAggIncassiEsclusi((prev) => ({ ...prev, [inc.eventId]: !prev[inc.eventId] }))
-                              }
-                            />
-                          </td>
-                          <td className="mono" style={{ whiteSpace: "nowrap" }}>{inc.data}</td>
-                          <td>{inc.nome}</td>
-                          <td>€ {inc.saldoAttuale}</td>
-                          <td>
-                            <input
-                              type="number"
-                              step="0.01"
-                              className="num"
-                              style={{ width: 80 }}
-                              value={aggIncassiImporto[inc.eventId] ?? inc.importo}
-                              onChange={(e) =>
-                                setAggIncassiImporto((prev) => ({ ...prev, [inc.eventId]: e.target.value }))
-                              }
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
               {(!aggCandidati || aggCandidati.length === 0) ? (
-                (!aggDuplicati || aggDuplicati.length === 0) && (!aggIncassi || aggIncassi.length === 0) && (
+                (!aggDuplicati || aggDuplicati.length === 0) && (
                   <p className="muted">Nessuna disdetta nuova trovata dalla scansione delle note.</p>
                 )
               ) : (
@@ -1393,8 +1312,7 @@ export default function DashboardPage() {
                 {((aggCandidati && aggCandidati.some((c) => !c.manual)) ||
                   (aggDuplicati && aggDuplicati.length > 0) ||
                   (aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0) ||
-                  (aggDuplicati && aggDuplicati.filter((d) => !aggDuplicatiEsclusi[d.eventId]).length > 0) ||
-                  (aggIncassi && aggIncassi.filter((inc) => !aggIncassiEsclusi[inc.eventId]).length > 0)) && (
+                  (aggDuplicati && aggDuplicati.filter((d) => !aggDuplicatiEsclusi[d.eventId]).length > 0)) && (
                   <button
                     className="btn btn-primary"
                     onClick={confermaRegistraDisdette}
@@ -1416,13 +1334,6 @@ export default function DashboardPage() {
                   ? `Fatto: ${aggRisultato.registrati} disdette registrate.`
                   : `${aggRisultato.registrati} registrate, ${aggRisultato.falliti} fallite.`}
               </p>
-              {(aggRisultato.incassiRegistrati > 0 || aggRisultato.incassiFalliti > 0) && (
-                <p>
-                  {aggRisultato.incassiFalliti > 0
-                    ? `${aggRisultato.incassiRegistrati} incassi contanti registrati, ${aggRisultato.incassiFalliti} falliti.`
-                    : `${aggRisultato.incassiRegistrati} incassi contanti registrati.`}
-                </p>
-              )}
               {aggRisultato.dettagli?.some((d) => d.emailInviata) && (
                 <p className="muted small">
                   Email di riprenotazione: {aggRisultato.dettagli.filter((d) => d.emailInviata === "ok").length} inviate

@@ -26,16 +26,15 @@
 //    il generatore di occorrenze legga.
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
-import { deleteGoogleCalendarEvent, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
+import { deleteGoogleCalendarEvent } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
-import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota, annotaSaldatoNFInNota, ancoraValoreDopoIncassoNF, importoSedutaNonFatturato, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
   const { supabase, user, errore } = await utenteAutenticato();
   if (errore) return errore;
 
-  const { candidati, incassi, scartati } = await request.json().catch(() => ({}));
+  const { candidati, scartati } = await request.json().catch(() => ({}));
   const haScartati = Array.isArray(scartati) && scartati.length > 0;
 
   // Spunte tolte da Maurizio: si ricordano, così non vengono riproposte.
@@ -56,9 +55,9 @@ export async function POST(request) {
     scartatiSalvati = righe.length;
   }
 
-  if ((!Array.isArray(candidati) || !candidati.length) && (!Array.isArray(incassi) || !incassi.length)) {
+  if (!Array.isArray(candidati) || !candidati.length) {
     if (haScartati) return NextResponse.json({ ok: true, registrati: 0, falliti: 0, dettagli: [], scartatiSalvati });
-    return NextResponse.json({ error: "Nessuna disdetta o incasso da registrare." }, { status: 400 });
+    return NextResponse.json({ error: "Nessuna disdetta da registrare." }, { status: 400 });
   }
 
   const { data: tokenRow, error: tokenError } = await supabase
@@ -152,77 +151,12 @@ export async function POST(request) {
     await new Promise((r) => setTimeout(r, 150));
   }
 
-  // Incassi contanti rilevati dalla nota "saldato"/"saldato N" (stesse
-  // strutture del bottone manuale "€X" in Pazienti: patients.contante_dovuto
-  // + contante_pagamenti). Dopo la scrittura, il marcatore va tolto dalla
-  // nota dell'evento — è l'unico modo per non riproporre lo stesso incasso
-  // alla prossima scansione (idempotenza), lo stesso principio di
-  // skipped_occurrences sopra ma per il testo della nota.
-  const risultatiIncassi = [];
-  for (const inc of incassi || []) {
-    try {
-      const importo = Number(inc.importo);
-      if (Number.isNaN(importo) || importo < 0) throw new Error("Importo non valido.");
-      // 0 = "solo pulisci la nota", nessun incasso da registrare (es. saldo
-      // già a posto ma un marcatore "saldato" rimasto orfano perché
-      // l'incasso vero è stato registrato altrove, come il bottone manuale
-      // in Pazienti — caso reale Francesco Mer. 2026-09-22): senza questo,
-      // la nota sarebbe rimasta bloccata per sempre, riproposta a ogni
-      // scansione senza un modo per toglierla dall'app.
-      let notaSaldato = null;
-      if (importo > 0) {
-        // Non fatturato che paga in contanti: il saldo non passa da
-        // contante_dovuto (il dovuto è prezzo unitario × sedute, vedi
-        // computeRinumerazione); "saldato" chiude il ciclo: il conteggio
-        // riparte dal giorno dopo, dal debito residuo in sedute se il
-        // pagamento è parziale. Lo stato si rilegge dal database, non ci si
-        // fida del client.
-        const { data: paz } = await supabase.from("patients").select("stato, tipologia, costo_unitario, quota_contante_seduta").eq("id", inc.patientId).single();
-        const chiudiCiclo = paz?.stato === "non_fatturato" && paz?.tipologia !== "altro";
-        const dovuto = Number(inc.deveAlGiorno) || 0;
-        notaSaldato = chiudiCiclo
-          ? annotaSaldatoNFInNota(inc.descrizioneOriginale, dovuto, importo)
-          : annotaSaldatoInNota(inc.descrizioneOriginale, dovuto, importo);
-        const nuovoSaldo = chiudiCiclo ? inc.saldoAttuale : incassaContante(inc.saldoAttuale, importo);
-        const { error: insertError } = await supabase.from("contante_pagamenti").insert({
-          user_id: user.id,
-          patient_id: inc.patientId,
-          importo,
-          data: inc.data,
-        });
-        if (insertError) throw new Error(insertError.message);
-        const { error: updateError } = await supabase
-          .from("patients")
-          .update(chiudiCiclo ? { ancora_data: addDays(inc.data, 1), ancora_valore: ancoraValoreDopoIncassoNF(dovuto, importo, importoSedutaNonFatturato(paz)) } : { contante_dovuto: nuovoSaldo })
-          .eq("id", inc.patientId);
-        if (updateError) throw new Error(updateError.message);
-      }
-      // Con un incasso vero la nota conserva la dicitura "(deve X€ saldato)"
-      // / "(deve X€ saldato Y€)" (l'idempotenza ora la garantisce la riga in
-      // contante_pagamenti, vedi computeIncassiContantiDaRegistrare); con 0
-      // il marcatore orfano viene solo tolto.
-      await updateGoogleCalendarEventDescription(
-        tokenRow.refresh_token,
-        inc.eventId,
-        notaSaldato ?? rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
-      );
-      risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: true });
-    } catch (e) {
-      risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: false, error: e.message });
-    }
-    await new Promise((r) => setTimeout(r, 150));
-  }
-
   const falliti = risultati.filter((r) => !r.ok);
-  const incassiFalliti = risultatiIncassi.filter((r) => !r.ok);
   return NextResponse.json({
-    ok: falliti.length === 0 && incassiFalliti.length === 0,
+    ok: falliti.length === 0,
     scartatiSalvati,
     registrati: risultati.length - falliti.length,
     falliti: falliti.length,
     dettagli: risultati,
-    incassiRegistrati: risultatiIncassi.length - incassiFalliti.length,
-    incassiFalliti: incassiFalliti.length,
-    incassiDettagli: risultatiIncassi,
   });
 }

@@ -6,7 +6,7 @@
 
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { fetchGoogleCalendarEvents } from "@/lib/googleCalendar";
-import { computeAggiornamentoPreview, computeDuplicatiDaRipulire, computeIncassiContantiDaRegistrare, todayISO, addDays } from "@/lib/logic";
+import { computeAggiornamentoPreview, computeDuplicatiDaRipulire, todayISO, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -20,12 +20,11 @@ export async function POST(request) {
   const giorniIndietro = Number(body.giorniIndietro) || 30;
   const giorniAvanti = Number(body.giorniAvanti) || 60;
 
-  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }, { data: cancellazioniNotCharged }, { data: pagamentiContante }] = await Promise.all([
+  const [{ data: patients }, { data: tokenRow, error: tokenError }, { data: cancellazioni }, { data: cancellazioniNotCharged }] = await Promise.all([
     supabase.from("patients").select("*").order("id"),
     supabase.from("google_tokens").select("refresh_token").eq("user_id", user.id).single(),
     supabase.from("cancellations").select("patient_id, original_date").eq("user_id", user.id),
     supabase.from("cancellations").select("patient_id, original_date, billing_status").eq("user_id", user.id).eq("billing_status", "not_charged"),
-    supabase.from("contante_pagamenti").select("patient_id, data"),
   ]);
 
   if (tokenError || !tokenRow) {
@@ -44,8 +43,7 @@ export async function POST(request) {
     const scartato = (tipo, eventId) => scartati.some((s) => s.tipo === tipo && s.event_id === eventId);
     const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []).filter((c) => !scartato("disdetta", c.eventId));
     const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []).filter((d) => !scartato("duplicato", d.eventId));
-    const incassi = computeIncassiContantiDaRegistrare(events, patients || [], pagamentiContante || []);
-    return NextResponse.json({ ok: true, candidati, duplicati, incassi, scartati, dataMinima, dataMassima });
+    return NextResponse.json({ ok: true, candidati, duplicati, scartati, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
