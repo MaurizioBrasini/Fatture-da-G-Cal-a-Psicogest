@@ -35,8 +35,29 @@ export async function POST(request) {
   const { supabase, user, errore } = await utenteAutenticato();
   if (errore) return errore;
 
-  const { candidati, incassi } = await request.json().catch(() => ({}));
+  const { candidati, incassi, scartati } = await request.json().catch(() => ({}));
+  const haScartati = Array.isArray(scartati) && scartati.length > 0;
+
+  // Spunte tolte da Maurizio: si ricordano, così non vengono riproposte.
+  // Prima di tutto il resto, così vale anche se non c'è nulla da registrare.
+  let scartatiSalvati = 0;
+  if (haScartati) {
+    const righe = scartati.map((s) => ({
+      user_id: user.id,
+      event_id: s.eventId,
+      tipo: s.tipo === "duplicato" ? "duplicato" : "disdetta",
+      patient_id: s.patientId ?? null,
+      data: s.data ?? null,
+      ora: s.ora ?? null,
+      nome: s.nome ?? null,
+    }));
+    const { error: scartiError } = await supabase.from("disdette_scartate").upsert(righe, { onConflict: "user_id,event_id,tipo", ignoreDuplicates: true });
+    if (scartiError) return NextResponse.json({ error: `Scarti non salvati (hai eseguito schema_addendum20.sql?): ${scartiError.message}` }, { status: 500 });
+    scartatiSalvati = righe.length;
+  }
+
   if ((!Array.isArray(candidati) || !candidati.length) && (!Array.isArray(incassi) || !incassi.length)) {
+    if (haScartati) return NextResponse.json({ ok: true, registrati: 0, falliti: 0, dettagli: [], scartatiSalvati });
     return NextResponse.json({ error: "Nessuna disdetta o incasso da registrare." }, { status: 400 });
   }
 
@@ -196,6 +217,7 @@ export async function POST(request) {
   const incassiFalliti = risultatiIncassi.filter((r) => !r.ok);
   return NextResponse.json({
     ok: falliti.length === 0 && incassiFalliti.length === 0,
+    scartatiSalvati,
     registrati: risultati.length - falliti.length,
     falliti: falliti.length,
     dettagli: risultati,

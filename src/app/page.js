@@ -123,6 +123,7 @@ export default function DashboardPage() {
   // vedi computeDuplicatiDaRipulire in logic.js.
   const [aggDuplicati, setAggDuplicati] = useState(null);
   const [aggDuplicatiEsclusi, setAggDuplicatiEsclusi] = useState({});
+  const [aggScartati, setAggScartati] = useState([]); // già scartati in passato (disdette_scartate), ripristinabili
   // Incassi contanti rilevati dalla nota "saldato"/"saldato N" (richiesta di
   // Maurizio 2026-09-22) — vedi computeIncassiContantiDaRegistrare in logic.js.
   // aggIncassiImporto tiene le modifiche manuali all'importo proposto prima
@@ -448,6 +449,7 @@ export default function DashboardPage() {
       }
       setAggCandidati(data.candidati || []);
       setAggDuplicati(data.duplicati || []);
+      setAggScartati(data.scartati || []);
       setAggIncassi(data.incassi || []);
       setAggStep("preview");
       // Se non c'è nulla da registrare, ripulire o incassare, il passaggio è
@@ -467,6 +469,16 @@ export default function DashboardPage() {
       .filter((d) => !aggDuplicatiEsclusi[d.eventId])
       .map((d) => ({ ...d, cancelledAt: new Date().toISOString(), billingStatus: "not_charged" }));
     const tutte = [...daConfermare, ...daRipulire];
+    // Spunte tolte: da ricordare, così la prossima scansione non le riporta.
+    // Le righe aggiunte a mano (c.manual) non vengono da una scansione.
+    const daScartare = [
+      ...(aggCandidati || [])
+        .filter((c) => aggEsclusi[c.eventId] && !c.manual)
+        .map((c) => ({ eventId: c.eventId, tipo: "disdetta", patientId: c.patientId, data: c.data, ora: c.ora, nome: c.nome })),
+      ...(aggDuplicati || [])
+        .filter((d) => aggDuplicatiEsclusi[d.eventId])
+        .map((d) => ({ eventId: d.eventId, tipo: "duplicato", patientId: d.patientId, data: d.data, ora: d.ora, nome: d.nome })),
+    ];
     // Importo modificabile prima di confermare (default: quello proposto
     // dalla scansione). >= 0: uno 0 è un "solo pulisci la nota" valido (es.
     // saldo già a posto ma marcatore "saldato" rimasto orfano da un incasso
@@ -476,13 +488,13 @@ export default function DashboardPage() {
       .filter((inc) => !aggIncassiEsclusi[inc.eventId])
       .map((inc) => ({ ...inc, importo: parseFloat(String(aggIncassiImporto[inc.eventId] ?? inc.importo).replace(",", ".")) }))
       .filter((inc) => inc.importo >= 0);
-    if (!tutte.length && !daIncassare.length) return;
+    if (!tutte.length && !daIncassare.length && !daScartare.length) return;
     setAggStep("writing");
     try {
       const res = await fetch("/api/calendar/aggiorna-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidati: tutte, incassi: daIncassare }),
+        body: JSON.stringify({ candidati: tutte, incassi: daIncassare, scartati: daScartare }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -506,8 +518,25 @@ export default function DashboardPage() {
     }
   }
 
+  // Rimette in proposta un evento scartato: l'ultima parola resta a Maurizio.
+  async function ripristinaScartato(id) {
+    try {
+      const res = await fetch("/api/calendar/aggiorna-ripristina", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Ripristino non riuscito.");
+      await apriRegistraDisdette(); // rilegge l'anteprima: l'evento torna tra le proposte
+    } catch (e) {
+      setAggErrore(e.message);
+    }
+  }
+
   function chiudiRegistraDisdette() {
     setAggStep(null);
+    setAggScartati([]);
     setAggCandidati(null);
     setAggEsclusi({});
     setAggEmailSelezionate({});
@@ -1339,13 +1368,39 @@ export default function DashboardPage() {
                 </div>
               </div>
 
+              {aggScartati.length > 0 && (
+                <details style={{ marginTop: 16 }}>
+                  <summary className="muted small" style={{ cursor: "pointer" }}>Scartati da te ({aggScartati.length}) — non vengono riproposti</summary>
+                  <table style={{ width: "100%", fontSize: 13, marginTop: 8 }}>
+                    <tbody>
+                      {aggScartati.map((s) => (
+                        <tr key={s.id}>
+                          <td className="mono" style={{ whiteSpace: "nowrap" }}>{s.data}{s.ora ? ` ${s.ora}` : ""}</td>
+                          <td>{s.nome}</td>
+                          <td className="muted small">{s.tipo === "duplicato" ? "duplicato" : "disdetta"}</td>
+                          <td style={{ textAlign: "right" }}>
+                            <button className="btn-small" onClick={() => ripristinaScartato(s.id)}>Rimetti in proposta</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </details>
+              )}
+
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
                 <button className="btn btn-ghost" onClick={chiudiRegistraDisdette}>Annulla</button>
-                {((aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0) ||
+                {((aggCandidati && aggCandidati.some((c) => !c.manual)) ||
+                  (aggDuplicati && aggDuplicati.length > 0) ||
+                  (aggCandidati && aggCandidati.filter((c) => !aggEsclusi[c.eventId]).length > 0) ||
                   (aggDuplicati && aggDuplicati.filter((d) => !aggDuplicatiEsclusi[d.eventId]).length > 0) ||
                   (aggIncassi && aggIncassi.filter((inc) => !aggIncassiEsclusi[inc.eventId]).length > 0)) && (
-                  <button className="btn btn-primary" onClick={confermaRegistraDisdette}>
-                    Conferma e registra
+                  <button
+                    className="btn btn-primary"
+                    onClick={confermaRegistraDisdette}
+                    title="Le righe con la spunta vengono registrate come disdette; quelle senza spunta vengono ricordate come «non disdette» e non ti verranno riproposte."
+                  >
+                    Salva
                   </button>
                 )}
               </div>

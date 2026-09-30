@@ -37,10 +37,15 @@ export async function POST(request) {
 
   try {
     const events = await fetchGoogleCalendarEvents(tokenRow.refresh_token, dataMinima, dataMassima);
-    const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []);
-    const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []);
+    // Scartati da Maurizio (spunta tolta + conferma): non si riproporranno.
+    // Se la tabella non esiste ancora (SQL non eseguito) si procede senza.
+    const { data: scartatiRighe } = await supabase.from("disdette_scartate").select("*").eq("user_id", user.id).order("data");
+    const scartati = scartatiRighe || [];
+    const scartato = (tipo, eventId) => scartati.some((s) => s.tipo === tipo && s.event_id === eventId);
+    const candidati = computeAggiornamentoPreview(events, patients || [], cancellazioni || []).filter((c) => !scartato("disdetta", c.eventId));
+    const duplicati = computeDuplicatiDaRipulire(events, patients || [], cancellazioniNotCharged || []).filter((d) => !scartato("duplicato", d.eventId));
     const incassi = computeIncassiContantiDaRegistrare(events, patients || [], pagamentiContante || []);
-    return NextResponse.json({ ok: true, candidati, duplicati, incassi, dataMinima, dataMassima });
+    return NextResponse.json({ ok: true, candidati, duplicati, incassi, scartati, dataMinima, dataMassima });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
