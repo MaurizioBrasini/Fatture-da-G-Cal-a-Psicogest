@@ -63,10 +63,9 @@ export async function POST(request) {
     const { data: incassi, error: incassiError } = await supabase.from("contante_pagamenti").select("patient_id,importo,data");
     if (incassiError) throw new Error("Errore nel caricare gli incassi contanti: " + incassiError.message);
 
-    // Incassi "saldato"/"saldato N" scritti in nota e non ancora registrati
-    // (stessa procedura per tutti i pazienti, vedi incassi-confirm): da
-    // registrare PRIMA di confermare le note, perché la rinumerazione mostra
-    // "(deve X€ saldato)" solo dopo.
+    // Incassi "saldato"/"saldato N" dei pazienti con quota contanti, non ancora
+    // registrati (vedi incassi-confirm): il client li registra con la stessa
+    // conferma che scrive le note, poi rilegge questo piano.
     const idTarget = new Set(target.map((p) => p.id));
     // Solo le note recenti (stesso orizzonte di prima: 30 giorni indietro): la
     // lettura arriva fino all'ancora più vecchia, ma un "saldato" di mesi fa è

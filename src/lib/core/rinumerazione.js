@@ -1,5 +1,5 @@
 // Numerazione delle sedute nelle note di Google Calendar (R/A/S + numero) e quota contanti.
-import { matchPatientForEvent, contaNonFatturato, importoSedutaNonFatturato, numeraNonFatturato, SALDATO_REGEX } from "./pazienti.js";
+import { matchPatientForEvent, contaNonFatturato, numeraNonFatturato, SALDATO_REGEX } from "./pazienti.js";
 
 // ---------------------------------------------------------------------
 // Numerazione sedute su Google Calendar (R/A/S + numero progressivo)
@@ -265,8 +265,8 @@ export function incassaContante(saldoAttuale, importoPagato) {
 // contante_pagamenti, via incassaContante) — nessuna tabella nuova.
 // ---------------------------------------------------------------------
 
-// Scandisce gli eventi (stesso orizzonte già letto da "Registra disdette",
-// nessuna chiamata Google aggiuntiva) alla ricerca della nota "saldato"/
+// Scandisce gli eventi (quelli già letti da Rinumera, nessuna chiamata Google
+// aggiuntiva) alla ricerca della nota "saldato"/
 // "saldato N" su pazienti con una quota contanti impostata. Non modifica
 // nulla: solo l'elenco da mostrare in anteprima, con l'importo già proposto
 // (editabile) e il saldo attuale per un controllo a vista prima di
@@ -289,37 +289,27 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
     const match = SALDATO_REGEX.exec(e.descrizione || "");
     if (!match) continue;
     const patient = matchPatientForEvent(e.titolo, patients)?.patient;
-    if (!patient || !(patient.quota_contante_seduta > 0 || contaNonFatturato(patient))) continue;
+    // Solo chi ha una quota contanti a parte dalla fattura. I non fatturati non
+    // passano da qui: per loro la nota "saldato" basta (vedi numeraNonFatturato).
+    if (!patient || !(patient.quota_contante_seduta > 0) || contaNonFatturato(patient)) continue;
     if (giaRegistrati.has(`${patient.id}|${e.data}`)) continue;
     const saldoAttuale = patient.contante_dovuto || 0;
     const importoScritto = match[1] ? Number(match[1].replace(",", ".")) : null;
-    // Non fatturato (vedi computeRinumerazione): il dovuto è n × prezzo, con n
-    // il numero NF di quella seduta; il ciclo si chiude dalla nota, qui si
-    // registra solo l'incasso (storico) senza toccare contante_dovuto.
-    const nonFatturato = contaNonFatturato(patient);
-    // Altrimenti: il "(deve X€)" già scritto dall'app sulla nota (include la
-    // proiezione del ciclo non ancora fatturato, che il saldo in anagrafica
-    // non ha ancora), altrimenti il saldo se è un debito.
+    // Dovuto a quella seduta: il "(deve X€)" già scritto dall'app sulla nota
+    // (include la proiezione del ciclo non ancora fatturato, che il saldo in
+    // anagrafica non ha ancora), altrimenti il saldo se è un debito.
     const deveInNota = /\(deve\s*([\d.,]+)/i.exec(e.descrizione || "");
-    let deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
-    if (nonFatturato) {
-      const riga = computeRinumerazione(patient, events, {}, patients).find((r) => r.id === e.id);
-      // Una seduta fuori dal ciclo corrente (prima dell'ancora): vecchia nota
-      // di un ciclo già chiuso, niente da registrare (caso Michela M. 13/05).
-      if (!riga) continue;
-      deveAlGiorno = Math.round(importoSedutaNonFatturato(patient) * (riga?.numero || 0) * 100) / 100;
-    }
+    const deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
     // Senza numero si propone il dovuto; con saldo a zero o in credito (paga
     // in anticipo) mai 0 o un importo negativo — che aumenterebbe il debito —
     // ma una quota a seduta, correggibile in anteprima.
-    const importo = importoScritto != null ? importoScritto : deveAlGiorno > 0 ? deveAlGiorno : importoSedutaNonFatturato(patient);
+    const importo = importoScritto != null ? importoScritto : deveAlGiorno > 0 ? deveAlGiorno : patient.quota_contante_seduta;
     risultati.push({
       eventId: e.id,
       patientId: patient.id,
       nome: patient.nome_calendario || patient.fatturare_a,
       data: e.data,
       saldoAttuale,
-      nonFatturato,
       deveAlGiorno,
       importo,
       descrizioneOriginale: e.descrizione || "",
@@ -335,18 +325,6 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
 // nota scritta a mano.
 export function rimuoviMarcatoreSaldato(descrizione) {
   return (descrizione || "").replace(SALDATO_REGEX, "").replace(/\s{2,}/g, " ").trim();
-}
-
-// Non fatturati: "NF4 saldato" (pagato tutto il dovuto) o "NF4 saldato 120€"
-// (importo diverso dal dovuto, quindi parziale). Nessun "(deve X€)".
-export function annotaSaldatoNFInNota(descrizione, deveAlGiorno, importo) {
-  const originale = descrizione || "";
-  const resto = stripCodiceEsistente(originale);
-  const codice = originale.slice(0, originale.length - resto.length).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().replace(/\.$/, "");
-  const restoPulito = rimuoviMarcatoreSaldato(resto);
-  const tag = Math.round(importo * 100) === Math.round(deveAlGiorno * 100) ? "saldato" : `saldato ${formatEuro(importo)}€`;
-  const testaNota = codice ? `${codice} ${tag}` : tag;
-  return restoPulito ? `${testaNota} ${restoPulito}` : testaNota;
 }
 
 // Dopo aver registrato un incasso dalla nota: il "saldato" scritto a mano

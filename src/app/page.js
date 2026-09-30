@@ -738,7 +738,7 @@ export default function DashboardPage() {
               <span
                 className="small"
                 style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}
-                title={'Rilegge tutti gli eventi live di ogni paziente in ordine cronologico e riscrive il codice R/A/S + numero progressivo sulla nota di ciascuno (con "fatturare" quando si arriva alla soglia di 5). Va per ultimo apposta: deve vedere titoli ed eventi già sistemati dai passaggi precedenti.'}
+                title={'Rilegge tutti gli eventi live di ogni paziente in ordine cronologico e riscrive il codice R/A/S + numero progressivo sulla nota di ciascuno (con "fatturare" quando si arriva alla soglia di 5). Legge anche "saldato" scritto in nota: per i non fatturati il conteggio NF riparte da NF1 dopo quella seduta (con "saldato 40" riparte dal residuo), per i pazienti con quota contanti propone di registrare l\'incasso. Va per ultimo apposta: deve vedere titoli ed eventi già sistemati dai passaggi precedenti.'}
               >
                 4. Rinumera tutti
               </span>

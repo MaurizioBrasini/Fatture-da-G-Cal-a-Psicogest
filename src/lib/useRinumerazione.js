@@ -21,27 +21,29 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
   const [renumWriteResult, setRenumWriteResult] = useState(null);
   const [renumError, setRenumError] = useState("");
   const [renumProgress, setRenumProgress] = useState(null);
-  // Incassi "saldato"/"saldato N" letti dalle note, da registrare prima delle note
+  // Incassi "saldato"/"saldato N" dei pazienti con quota contanti (i non
+  // fatturati non ne hanno: per loro basta la nota). Vengono registrati dalla
+  // stessa conferma che scrive le note.
   const [renumIncassi, setRenumIncassi] = useState([]);
   const [renumIncassiEsclusi, setRenumIncassiEsclusi] = useState({}); // { eventId: true } = spunta tolta
   const [renumIncassiImporto, setRenumIncassiImporto] = useState({}); // { eventId: "testo" } = importo corretto a mano
-  const [renumIncassiBusy, setRenumIncassiBusy] = useState(false);
+
+  async function leggiAnteprima(patientId, giorni) {
+    const res = await fetch("/api/calendar/renumber-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientId, giorniAvanti: giorni }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Errore nel calcolo dell'anteprima.");
+    return data;
+  }
 
   async function caricaAnteprimaRinumerazione(patientId, giorni) {
     setRenumStep("loading");
     setRenumError("");
     try {
-      const res = await fetch("/api/calendar/renumber-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId, giorniAvanti: giorni }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setRenumError(data.error || "Errore nel calcolo dell'anteprima.");
-        setRenumStep("error");
-        return;
-      }
+      const data = await leggiAnteprima(patientId, giorni);
       setRenumData(data.pazienti || []);
       setRenumIncassi(data.incassi || []);
       setRenumIncassiEsclusi({});
@@ -54,31 +56,22 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
   }
 
   // Registra gli incassi con la spunta (importo editabile; 0 = solo pulisci la
-  // nota) e rilegge l'anteprima: le note con "(deve X€ saldato)" e la nuova
-  // ripartenza NF si vedono subito dopo.
-  async function registraIncassiRinumerazione() {
+  // nota). Senza incassi non fa nulla.
+  async function registraIncassiSelezionati() {
     const daRegistrare = renumIncassi
       .filter((inc) => !renumIncassiEsclusi[inc.eventId])
       .map((inc) => ({ ...inc, importo: parseFloat(String(renumIncassiImporto[inc.eventId] ?? inc.importo).replace(",", ".")) }))
       .filter((inc) => inc.importo >= 0);
-    if (!daRegistrare.length) return;
-    setRenumIncassiBusy(true);
-    try {
-      const res = await fetch("/api/calendar/incassi-confirm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ incassi: daRegistrare }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Registrazione incassi non riuscita.");
-      if (data.falliti > 0) throw new Error(`${data.falliti} incassi non registrati: ${(data.dettagli || []).filter((d) => !d.ok).map((d) => d.error).join("; ")}`);
-      await caricaAnteprimaRinumerazione(renumTarget, renumGiorni);
-    } catch (e) {
-      setRenumError(e.message);
-      setRenumStep("error");
-    } finally {
-      setRenumIncassiBusy(false);
-    }
+    if (!daRegistrare.length) return false;
+    const res = await fetch("/api/calendar/incassi-confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ incassi: daRegistrare }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Registrazione incassi non riuscita.");
+    if (data.falliti > 0) throw new Error(`${data.falliti} incassi non registrati: ${(data.dettagli || []).filter((d) => !d.ok).map((d) => d.error).join("; ")}`);
+    return true;
   }
 
   function apriRinumerazione(patientId) {
@@ -91,7 +84,17 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
 
   async function confermaRinumerazione() {
     setRenumStep("writing");
-    const aggiornamenti = (renumData || []).flatMap((p) =>
+    // Prima gli incassi; se ce n'erano il piano si rilegge, perché le note dei
+    // pazienti incassati cambiano ("(deve X€ saldato)") solo dopo.
+    let piani = renumData;
+    try {
+      if (await registraIncassiSelezionati()) piani = (await leggiAnteprima(renumTarget, renumGiorni)).pazienti || [];
+    } catch (e) {
+      setRenumError(e.message);
+      setRenumStep("error");
+      return;
+    }
+    const aggiornamenti = (piani || []).flatMap((p) =>
       p.piano.map((r) => ({ id: r.id, descrizioneNuova: r.descrizioneNuova }))
     );
 
@@ -180,8 +183,9 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
           {renumIncassi.length > 0 && (
             <div style={{ marginBottom: 16, padding: 10, border: "1px solid #7A9", borderRadius: 8, background: "#F3FAF5" }}>
               <p className="muted small" style={{ marginTop: 0 }}>
-                <strong>Incassi rilevati</strong> — nota &quot;saldato&quot; (tutto il dovuto) o &quot;saldato N&quot; (solo N€) su una
-                seduta. Importo modificabile; 0 = togli solo la dicitura dalla nota. Registrali prima di confermare le note.
+                <strong>Incassi rilevati</strong> (pazienti con quota contanti) — nota &quot;saldato&quot; (tutto il dovuto) o
+                &quot;saldato N&quot; (solo N€). Importo modificabile; 0 = togli solo la dicitura dalla nota. Con la conferma
+                vengono registrati, poi si scrivono le note.
               </p>
               <table style={{ width: "100%", fontSize: 13 }}>
                 <tbody>
@@ -211,11 +215,6 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
                   ))}
                 </tbody>
               </table>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                <button className="btn btn-primary" onClick={registraIncassiRinumerazione} disabled={renumIncassiBusy}>
-                  {renumIncassiBusy ? "Registrazione…" : "Registra incassi"}
-                </button>
-              </div>
             </div>
           )}
 
@@ -243,7 +242,7 @@ export function useRinumerazione({ onRinumeraTuttiCompletato } = {}) {
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
             <button className="btn btn-ghost" onClick={chiudiRinumerazione}>Annulla</button>
-            {renumData && renumData.length > 0 && (
+            {((renumData && renumData.length > 0) || renumIncassi.length > 0) && (
               <button className="btn btn-primary" onClick={confermaRinumerazione}>Conferma e scrivi su calendario</button>
             )}
           </div>

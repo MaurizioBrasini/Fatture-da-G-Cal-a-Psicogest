@@ -54,7 +54,6 @@ import {
   computeIncassiContantiDaRegistrare,
   rimuoviMarcatoreSaldato,
   annotaSaldatoInNota,
-  annotaSaldatoNFInNota,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -483,10 +482,6 @@ test("computeRinumerazione: non_fatturato (non 'altro') conta NF1, NF2... con (d
   assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2", "NF3"]);
   assert.equal(piano[0].descrizioneNuova, "NF1");
 });
-test("annotaSaldatoNFInNota: 'NF4 saldato' se paga tutto, importo se parziale, la parola semplice resta (è il segno che chiude il ciclo)", () => {
-  assert.equal(annotaSaldatoNFInNota("NF4 saldato", 240, 240), "NF4 saldato");
-  assert.equal(annotaSaldatoNFInNota("NF4 saldato 120 ciao", 240, 120), "NF4 saldato 120€ ciao");
-});
 const pazNF = { id: 1, nome_calendario: "Romano R.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0 };
 const evNF = (descrizioni) => descrizioni.map((d, i) => ({ id: `e${i}`, data: `2026-10-${String(5 + i * 7).padStart(2, "0")}`, ora: "10:00", titolo: "Romano R.", descrizione: d }));
 test("NF: 'saldato' chiude il ciclo, la seduta successiva riparte da NF1 (caso Romano)", () => {
@@ -511,24 +506,18 @@ test("computePatientState NF: il conteggio Dashboard riparte dopo la seduta 'sal
   const st = computePatientState(pz, passati, DEFAULT_SETTINGS, [], [pz]);
   assert.equal(st.count, 2);
 });
-test("computeIncassiContantiDaRegistrare: 'saldato' di un NF propone n × prezzo dal numero NF della seduta; tipologia 'altro' è esclusa", () => {
-  const events = [
-    { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Romano R.", descrizione: "NF1" },
-    { id: "b", data: "2026-10-12", ora: "10:00", titolo: "Romano R.", descrizione: "NF2 saldato" },
-  ];
-  const [inc] = computeIncassiContantiDaRegistrare(events, [pazNF], []);
-  assert.equal(inc.nonFatturato, true);
-  assert.equal(inc.deveAlGiorno, 120);
-  assert.equal(inc.importo, 120);
-  const altro = { ...pazNF, tipologia: "altro" };
-  assert.deepEqual(computeIncassiContantiDaRegistrare(events, [altro], []), []);
-  assert.deepEqual(computeRinumerazione(altro, events, DEFAULT_SETTINGS), []);
-});test("computeIncassiContantiDaRegistrare: un 'saldato' NF prima dell'ancora (ciclo già chiuso) non viene proposto (caso Michela M. 13/05)", () => {
+test("computeIncassiContantiDaRegistrare: i non fatturati NON passano dagli incassi (basta la nota 'saldato', anche vecchia: caso Michela M. 13/05)", () => {
   const events = [
     { id: "old", data: "2026-05-13", ora: "10:00", titolo: "Romano R.", descrizione: "NF3 saldato" },
     { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Romano R.", descrizione: "NF1" },
+    { id: "b", data: "2026-10-12", ora: "10:00", titolo: "Romano R.", descrizione: "NF2 saldato" },
   ];
   assert.deepEqual(computeIncassiContantiDaRegistrare(events, [pazNF], []), []);
+  // ...ma lo stesso paziente con la quota contanti e stato normale sì
+  const fatturato = { ...pazNF, stato: "attivo", quota_contante_seduta: 20, contante_dovuto: 40 };
+  assert.equal(computeIncassiContantiDaRegistrare(events, [fatturato], []).length > 0, true);
+  const altro = { ...pazNF, tipologia: "altro" };
+  assert.deepEqual(computeRinumerazione(altro, events, DEFAULT_SETTINGS), []);
 });
 test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
   const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };
