@@ -94,10 +94,16 @@ export function computeDuplicatiDaRipulire(events, patients, cancellazioniNotCha
   for (const c of cancellazioniNotCharged || []) {
     const patient = patients.find((p) => p.id === c.patient_id);
     if (!patient) continue;
-    const eventoReale = events.find(
+    const eventiStessoGiorno = events.filter(
       (e) => e.data === c.original_date && matchPatientForEvent(e.titolo, patients)?.patient.id === patient.id
     );
-    if (!eventoReale) continue;
+    // `cancellations` non registra l'ora: se la stessa persona ha più
+    // appuntamenti quel giorno (es. due slot, 11:30 e 17:30, disdetto solo
+    // uno — caso Michela M. 2026-10-12) non si può sapere quale sia il
+    // duplicato resuscitato, e proporre la rimozione a colpo sicuro
+    // colpirebbe un appuntamento legittimo. Solo un evento = il caso reale.
+    if (eventiStessoGiorno.length !== 1) continue;
+    const eventoReale = eventiStessoGiorno[0];
     risultati.push({
       eventId: eventoReale.id,
       patientId: patient.id,
