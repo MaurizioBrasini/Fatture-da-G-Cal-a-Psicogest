@@ -168,17 +168,19 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
   // passato — quello va tolto a mano una tantum se presente).
   // Non fatturati (Maurizio 2026-09-30, caso Michela M.): pagano in contanti
   // senza fattura, ogni tanto o ogni volta. Si conta "NF1, NF2, NF3...",
-  // senza mai "fatturare", con "(deve X€)" = costo_unitario × sedute
-  // dall'ancora. Il conteggio si azzera con "saldato" in nota (vedi
-  // aggiorna-confirm: sposta l'ancora al giorno dopo), quindi qui non servono
-  // né pagamenti né contante_dovuto. Unica eccezione: gli pseudo-pazienti
-  // tipologia "altro" (Riunione Scienziati), mai numerati.
+  // senza mai "fatturare": il numero × costo_unitario è il debito. Il
+  // conteggio riparte con "saldato" in nota (vedi aggiorna-confirm: sposta
+  // l'ancora al giorno dopo, con ancora_valore = debito residuo in sedute se
+  // il pagamento è parziale), quindi qui non servono né pagamenti né
+  // contante_dovuto. Unica eccezione: gli pseudo-pazienti tipologia "altro"
+  // (Riunione Scienziati), mai numerati.
   if (lettera === "NF") {
     if (!contaNonFatturato(patient)) return [];
-    const quotaNF = importoSedutaNonFatturato(patient);
     return eventiDiPazienteOrdinati(patient, allEvents, allPatients).map((ev, i) => {
       const numero = (patient.ancora_valore || 0) + i + 1;
-      const codice = formatCodice("NF", numero, false, Math.round(quotaNF * numero * 100) / 100);
+      // Nessun "(deve X€)": il numero stesso dice il debito (numero × prezzo
+      // unitario), richiesta di Maurizio 2026-09-30.
+      const codice = `NF${numero}`;
       const descrizioneNuova = buildNuovaDescrizione(ev.descrizione, codice);
       return {
         id: ev.id, data: ev.data, ora: ev.ora, titolo: ev.titolo, numero, fatturare: false, codice,
@@ -306,7 +308,7 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
     // è quota × sedute dall'ancora fino a questa; "saldato" chiude il ciclo.
     const chiudiCiclo = contaNonFatturato(patient);
     let deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
-    if (chiudiCiclo && !deveInNota) {
+    if (chiudiCiclo) {
       const sedute = eventiDiPazienteOrdinati(patient, events, patients).filter((x) => x.data <= e.data).length;
       deveAlGiorno = Math.round(importoSedutaNonFatturato(patient) * ((patient.ancora_valore || 0) + sedute) * 100) / 100;
     }
@@ -336,6 +338,26 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
 // nota scritta a mano.
 export function rimuoviMarcatoreSaldato(descrizione) {
   return (descrizione || "").replace(SALDATO_REGEX, "").replace(/\s{2,}/g, " ").trim();
+}
+
+// Non fatturati: "NF4 saldato" (pagato tutto il dovuto) o "NF4 saldato 120€"
+// (importo diverso dal dovuto, quindi parziale). Nessun "(deve X€)".
+export function annotaSaldatoNFInNota(descrizione, deveAlGiorno, importo) {
+  const originale = descrizione || "";
+  const resto = stripCodiceEsistente(originale);
+  const codice = originale.slice(0, originale.length - resto.length).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().replace(/\.$/, "");
+  const restoPulito = rimuoviMarcatoreSaldato(resto);
+  const tag = Math.round(importo * 100) === Math.round(deveAlGiorno * 100) ? "saldato" : `saldato ${formatEuro(importo)}€`;
+  const testaNota = codice ? `${codice} ${tag}` : tag;
+  return restoPulito ? `${testaNota} ${restoPulito}` : testaNota;
+}
+
+// Numero da cui riparte il conteggio NF dopo un incasso: debito residuo in
+// sedute al prezzo unitario (0 se saldato tutto o più del dovuto).
+export function ancoraValoreDopoIncassoNF(deveAlGiorno, importo, prezzoUnitario) {
+  const residuo = deveAlGiorno - importo;
+  if (!(residuo > 0) || !(prezzoUnitario > 0)) return 0;
+  return Math.round(residuo / prezzoUnitario);
 }
 
 // Dopo aver registrato un incasso dalla nota: il "saldato" scritto a mano

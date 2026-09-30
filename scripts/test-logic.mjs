@@ -54,6 +54,8 @@ import {
   computeIncassiContantiDaRegistrare,
   rimuoviMarcatoreSaldato,
   annotaSaldatoInNota,
+  annotaSaldatoNFInNota,
+  ancoraValoreDopoIncassoNF,
 } from "../src/lib/logic.js";
 
 let passed = 0;
@@ -479,8 +481,15 @@ test("computeRinumerazione: non_fatturato (non 'altro') conta NF1, NF2... con (d
   const patient = { id: 1, nome_calendario: "Michela M.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0, soglia_fatturazione: 2 };
   const events = ["2026-09-15", "2026-10-12", "2026-10-26"].map((data, i) => ({ id: `e${i}`, data, ora: "10:00", titolo: "Michela M.", descrizione: i === 0 ? "S1" : "" }));
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
-  assert.deepEqual(piano.map((r) => r.codice), ["NF1 (deve 60€)", "NF2 (deve 120€)", "NF3 (deve 180€)"]);
-  assert.equal(piano[0].descrizioneNuova, "NF1 (deve 60€)");
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1", "NF2", "NF3"]);
+  assert.equal(piano[0].descrizioneNuova, "NF1");
+});
+test("annotaSaldatoNFInNota / ancoraValoreDopoIncassoNF: 'NF4 saldato' se paga tutto, importo se parziale e il residuo in sedute diventa il nuovo punto di partenza", () => {
+  assert.equal(annotaSaldatoNFInNota("NF4 saldato", 240, 240), "NF4 saldato");
+  assert.equal(annotaSaldatoNFInNota("NF4 saldato 120 ciao", 240, 120), "NF4 saldato 120€ ciao");
+  assert.equal(ancoraValoreDopoIncassoNF(240, 240, 60), 0);
+  assert.equal(ancoraValoreDopoIncassoNF(240, 120, 60), 2);
+  assert.equal(ancoraValoreDopoIncassoNF(240, 300, 60), 0);
 });
 test("computeIncassiContantiDaRegistrare: 'saldato' di un non_fatturato chiude il ciclo e propone costo × sedute; tipologia 'altro' è esclusa", () => {
   const patient = { id: 1, nome_calendario: "Michela M.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0, contante_dovuto: 0 };

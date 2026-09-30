@@ -28,7 +28,7 @@
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { deleteGoogleCalendarEvent, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
-import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota, addDays } from "@/lib/logic";
+import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota, annotaSaldatoNFInNota, ancoraValoreDopoIncassoNF, importoSedutaNonFatturato, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -148,14 +148,20 @@ export async function POST(request) {
       // in Pazienti — caso reale Francesco Mer. 2026-09-22): senza questo,
       // la nota sarebbe rimasta bloccata per sempre, riproposta a ogni
       // scansione senza un modo per toglierla dall'app.
+      let notaSaldato = null;
       if (importo > 0) {
         // Non fatturato che paga in contanti: il saldo non passa da
-        // contante_dovuto (il dovuto è quota × sedute, vedi
-        // computeRinumerazione); "saldato" chiude il ciclo, cioè il
-        // conteggio riparte da zero dal giorno dopo. Lo stato si rilegge dal
-        // database, non ci si fida del client.
-        const { data: paz } = await supabase.from("patients").select("stato, tipologia").eq("id", inc.patientId).single();
+        // contante_dovuto (il dovuto è prezzo unitario × sedute, vedi
+        // computeRinumerazione); "saldato" chiude il ciclo: il conteggio
+        // riparte dal giorno dopo, dal debito residuo in sedute se il
+        // pagamento è parziale. Lo stato si rilegge dal database, non ci si
+        // fida del client.
+        const { data: paz } = await supabase.from("patients").select("stato, tipologia, costo_unitario, quota_contante_seduta").eq("id", inc.patientId).single();
         const chiudiCiclo = paz?.stato === "non_fatturato" && paz?.tipologia !== "altro";
+        const dovuto = Number(inc.deveAlGiorno) || 0;
+        notaSaldato = chiudiCiclo
+          ? annotaSaldatoNFInNota(inc.descrizioneOriginale, dovuto, importo)
+          : annotaSaldatoInNota(inc.descrizioneOriginale, dovuto, importo);
         const nuovoSaldo = chiudiCiclo ? inc.saldoAttuale : incassaContante(inc.saldoAttuale, importo);
         const { error: insertError } = await supabase.from("contante_pagamenti").insert({
           user_id: user.id,
@@ -166,7 +172,7 @@ export async function POST(request) {
         if (insertError) throw new Error(insertError.message);
         const { error: updateError } = await supabase
           .from("patients")
-          .update(chiudiCiclo ? { ancora_data: addDays(inc.data, 1), ancora_valore: 0 } : { contante_dovuto: nuovoSaldo })
+          .update(chiudiCiclo ? { ancora_data: addDays(inc.data, 1), ancora_valore: ancoraValoreDopoIncassoNF(dovuto, importo, importoSedutaNonFatturato(paz)) } : { contante_dovuto: nuovoSaldo })
           .eq("id", inc.patientId);
         if (updateError) throw new Error(updateError.message);
       }
@@ -177,9 +183,7 @@ export async function POST(request) {
       await updateGoogleCalendarEventDescription(
         tokenRow.refresh_token,
         inc.eventId,
-        importo > 0
-          ? annotaSaldatoInNota(inc.descrizioneOriginale, Number(inc.deveAlGiorno) || 0, importo)
-          : rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
+        notaSaldato ?? rimuoviMarcatoreSaldato(inc.descrizioneOriginale)
       );
       risultatiIncassi.push({ eventId: inc.eventId, patientId: inc.patientId, ok: true });
     } catch (e) {
