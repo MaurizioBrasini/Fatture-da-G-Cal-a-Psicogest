@@ -728,26 +728,13 @@ export default function DashboardPage() {
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
-              <span
-                className="small"
-                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
-                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
-              >
-                1. Aggiorna dal calendario
-              </span>
-              <button className="btn-small" onClick={handleSync} disabled={syncing}>
-                {syncing ? "Lettura…" : "Fai ora"}
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.disdette} onChange={() => segna("disdette", !routine.disdette)} />
               <span
                 className="small"
                 style={{ flex: 1, textDecoration: routine.disdette ? "line-through" : "none", color: routine.disdette ? "var(--ink-soft)" : "var(--ink)" }}
                 title={'Cerca gli eventi con la nota "disdetto" scritta sopra, calcola in automatico se vanno addebitati o no (regola delle 48h di preavviso, comunque modificabile a mano), e alla conferma: cancella l\'evento dal calendario se non addebitata, registra tutto nello storico. Include anche la sezione "Duplicati da ripulire" per i casi già registrati ma il cui evento è ancora fisicamente presente.'}
               >
-                2. Registra disdette
+                1. Registra disdette
               </span>
               <button className="btn-small" onClick={apriRegistraDisdette}>Apri</button>
             </div>
@@ -758,9 +745,22 @@ export default function DashboardPage() {
                 style={{ flex: 1, textDecoration: routine.prenotazioni ? "line-through" : "none", color: routine.prenotazioni ? "var(--ink-soft)" : "var(--ink)" }}
                 title={'Cerca gli appuntamenti presi dai pazienti tramite il link "Prenotazioni online dr. Brasini" (li riconosce dal titolo grezzo che mette Google). Per ognuno: lo colora vinaccia (per riconoscerlo a colpo d\'occhio), prova ad abbinarlo a un paziente esistente (via email, con margine anche solo su nome/cognome), e — se confermi l\'abbinamento — rinomina il titolo con il nome giusto e salva l\'email sul profilo paziente se mancava. Chi non è riconosciuto resta segnalato come "nuovo paziente da creare".'}
               >
-                3. Prenotazioni online
+                2. Prenotazioni online
               </span>
               <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
+              <span
+                className="small"
+                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
+                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
+              >
+                3. Aggiorna dal calendario
+              </span>
+              <button className="btn-small" onClick={handleSync} disabled={syncing}>
+                {syncing ? "Lettura…" : "Fai ora"}
+              </button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
