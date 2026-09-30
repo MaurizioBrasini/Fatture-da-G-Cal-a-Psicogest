@@ -28,7 +28,7 @@
 import { rispostaSenzaGoogle, utenteAutenticato } from "@/lib/apiAuth";
 import { deleteGoogleCalendarEvent, updateGoogleCalendarEventDescription } from "@/lib/googleCalendar";
 import { sendEmail, buildEmailRiprenotazioneHtml } from "@/lib/email";
-import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota } from "@/lib/logic";
+import { incassaContante, rimuoviMarcatoreSaldato, annotaSaldatoInNota, addDays } from "@/lib/logic";
 import { NextResponse } from "next/server";
 
 export async function POST(request) {
@@ -149,7 +149,14 @@ export async function POST(request) {
       // la nota sarebbe rimasta bloccata per sempre, riproposta a ogni
       // scansione senza un modo per toglierla dall'app.
       if (importo > 0) {
-        const nuovoSaldo = incassaContante(inc.saldoAttuale, importo);
+        // Non fatturato che paga in contanti: il saldo non passa da
+        // contante_dovuto (il dovuto è quota × sedute, vedi
+        // computeRinumerazione); "saldato" chiude il ciclo, cioè il
+        // conteggio riparte da zero dal giorno dopo. Lo stato si rilegge dal
+        // database, non ci si fida del client.
+        const { data: paz } = await supabase.from("patients").select("stato, tipologia").eq("id", inc.patientId).single();
+        const chiudiCiclo = paz?.stato === "non_fatturato" && paz?.tipologia !== "altro";
+        const nuovoSaldo = chiudiCiclo ? inc.saldoAttuale : incassaContante(inc.saldoAttuale, importo);
         const { error: insertError } = await supabase.from("contante_pagamenti").insert({
           user_id: user.id,
           patient_id: inc.patientId,
@@ -159,7 +166,7 @@ export async function POST(request) {
         if (insertError) throw new Error(insertError.message);
         const { error: updateError } = await supabase
           .from("patients")
-          .update({ contante_dovuto: nuovoSaldo })
+          .update(chiudiCiclo ? { ancora_data: addDays(inc.data, 1), ancora_valore: 0 } : { contante_dovuto: nuovoSaldo })
           .eq("id", inc.patientId);
         if (updateError) throw new Error(updateError.message);
       }

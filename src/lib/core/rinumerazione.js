@@ -13,6 +13,13 @@ import { matchPatientForEvent } from "./pazienti.js";
 // senza essere una persona da fatturare (es. una riunione ricorrente) — in
 // entrambi i casi la numerazione prosegue (per tenere un conteggio), ma non
 // scatta mai "fatturare" (vedi computeRinumerazione).
+export function contaNonFatturato(patient) {
+  return patient.stato === "non_fatturato" && patient.tipologia !== "altro";
+}
+export function importoSedutaNonFatturato(patient) {
+  return patient.quota_contante_seduta > 0 ? patient.quota_contante_seduta : patient.costo_unitario || 0;
+}
+
 export function letteraCodice(patient) {
   if (patient.stato === "non_fatturato") return "NF";
   if (patient.stato === "sospeso") return "S";
@@ -159,7 +166,27 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
   // "Rinumera" non tocca mai le note di questi pazienti/pseudo-pazienti (né
   // scrive un nuovo codice, né rimuove uno eventualmente già scritto in
   // passato — quello va tolto a mano una tantum se presente).
-  if (lettera === "NF") return [];
+  // Non fatturati (Maurizio 2026-09-30, caso Michela M.): pagano in contanti
+  // senza fattura, ogni tanto o ogni volta. Si conta "NF1, NF2, NF3...",
+  // senza mai "fatturare", con "(deve X€)" = costo_unitario × sedute
+  // dall'ancora. Il conteggio si azzera con "saldato" in nota (vedi
+  // aggiorna-confirm: sposta l'ancora al giorno dopo), quindi qui non servono
+  // né pagamenti né contante_dovuto. Unica eccezione: gli pseudo-pazienti
+  // tipologia "altro" (Riunione Scienziati), mai numerati.
+  if (lettera === "NF") {
+    if (!contaNonFatturato(patient)) return [];
+    const quotaNF = importoSedutaNonFatturato(patient);
+    return eventiDiPazienteOrdinati(patient, allEvents, allPatients).map((ev, i) => {
+      const numero = (patient.ancora_valore || 0) + i + 1;
+      const codice = formatCodice("NF", numero, false, Math.round(quotaNF * numero * 100) / 100);
+      const descrizioneNuova = buildNuovaDescrizione(ev.descrizione, codice);
+      return {
+        id: ev.id, data: ev.data, ora: ev.ora, titolo: ev.titolo, numero, fatturare: false, codice,
+        descrizioneOriginale: ev.descrizione || "", descrizioneNuova,
+        cambia: descrizioneNuova !== (ev.descrizione || ""),
+      };
+    });
+  }
   const soglia = patient.soglia_fatturazione || settings.soglia_default;
   const eventi = eventiDiPazienteOrdinati(patient, allEvents, allPatients);
   const quota = patient.quota_contante_seduta || 0;
@@ -267,7 +294,7 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
     const match = SALDATO_REGEX.exec(e.descrizione || "");
     if (!match) continue;
     const patient = matchPatientForEvent(e.titolo, patients)?.patient;
-    if (!patient || !(patient.quota_contante_seduta > 0)) continue;
+    if (!patient || !(patient.quota_contante_seduta > 0 || contaNonFatturato(patient))) continue;
     if (giaRegistrati.has(`${patient.id}|${e.data}`)) continue;
     const saldoAttuale = patient.contante_dovuto || 0;
     const importoScritto = match[1] ? Number(match[1].replace(",", ".")) : null;
@@ -275,17 +302,25 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
     // (include la proiezione del ciclo non ancora fatturato, che il saldo in
     // anagrafica non ha ancora), altrimenti il saldo se è un debito.
     const deveInNota = /\(deve\s*([\d.,]+)/i.exec(e.descrizione || "");
-    const deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
+    // Non fatturato che paga in contanti (vedi computeRinumerazione): il dovuto
+    // è quota × sedute dall'ancora fino a questa; "saldato" chiude il ciclo.
+    const chiudiCiclo = contaNonFatturato(patient);
+    let deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
+    if (chiudiCiclo && !deveInNota) {
+      const sedute = eventiDiPazienteOrdinati(patient, events, patients).filter((x) => x.data <= e.data).length;
+      deveAlGiorno = Math.round(importoSedutaNonFatturato(patient) * ((patient.ancora_valore || 0) + sedute) * 100) / 100;
+    }
     // Senza numero si propone il dovuto; con saldo a zero o in credito (paga
     // in anticipo) mai 0 o un importo negativo — che aumenterebbe il debito —
     // ma una quota a seduta, correggibile in anteprima.
-    const importo = importoScritto != null ? importoScritto : deveAlGiorno > 0 ? deveAlGiorno : patient.quota_contante_seduta;
+    const importo = importoScritto != null ? importoScritto : deveAlGiorno > 0 ? deveAlGiorno : importoSedutaNonFatturato(patient);
     risultati.push({
       eventId: e.id,
       patientId: patient.id,
       nome: patient.nome_calendario || patient.fatturare_a,
       data: e.data,
       saldoAttuale,
+      chiudiCiclo,
       deveAlGiorno,
       importo,
       descrizioneOriginale: e.descrizione || "",

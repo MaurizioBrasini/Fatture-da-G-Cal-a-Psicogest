@@ -464,7 +464,7 @@ test("formatCodice: nel giorno dell'incasso resta il dovuto accanto al saldato",
 
 // --- Stato "non_fatturato" (pro bono, supervisioni gratuite, pseudo-pazienti — 2026-09-22) ---
 test("computeRinumerazione: non_fatturato non genera alcun piano — nessuna tariffa applicabile, non serve contare (richiesta di Maurizio 2026-09-22)", () => {
-  const patient = { nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
+  const patient = { nome_calendario: "Riunione Scienziati", tipologia: "altro", stato: "non_fatturato", ancora_data: "2026-01-01", ancora_valore: 0, soglia_fatturazione: 5 };
   const events = Array.from({ length: 6 }, (_, i) => ({
     id: `e${i + 1}`,
     data: `2026-01-${String(5 + i * 7).padStart(2, "0")}`,
@@ -474,6 +474,26 @@ test("computeRinumerazione: non_fatturato non genera alcun piano — nessuna tar
   }));
   const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
   assert.deepEqual(piano, []);
+});
+test("computeRinumerazione: non_fatturato (non 'altro') conta NF1, NF2... con (deve costo×sedute €) e senza mai 'fatturare' (Michela M. 2026-09-30)", () => {
+  const patient = { id: 1, nome_calendario: "Michela M.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0, soglia_fatturazione: 2 };
+  const events = ["2026-09-15", "2026-10-12", "2026-10-26"].map((data, i) => ({ id: `e${i}`, data, ora: "10:00", titolo: "Michela M.", descrizione: i === 0 ? "S1" : "" }));
+  const piano = computeRinumerazione(patient, events, DEFAULT_SETTINGS);
+  assert.deepEqual(piano.map((r) => r.codice), ["NF1 (deve 60€)", "NF2 (deve 120€)", "NF3 (deve 180€)"]);
+  assert.equal(piano[0].descrizioneNuova, "NF1 (deve 60€)");
+});
+test("computeIncassiContantiDaRegistrare: 'saldato' di un non_fatturato chiude il ciclo e propone costo × sedute; tipologia 'altro' è esclusa", () => {
+  const patient = { id: 1, nome_calendario: "Michela M.", tipologia: "individuale", stato: "non_fatturato", ancora_data: "2026-09-14", ancora_valore: 0, costo_unitario: 60, quota_contante_seduta: 0, contante_dovuto: 0 };
+  const events = [
+    { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Michela M.", descrizione: "NF1" },
+    { id: "b", data: "2026-10-12", ora: "10:00", titolo: "Michela M.", descrizione: "NF2 saldato" },
+  ];
+  const [inc] = computeIncassiContantiDaRegistrare(events, [patient], []);
+  assert.equal(inc.chiudiCiclo, true);
+  assert.equal(inc.importo, 120);
+  const altro = { ...patient, tipologia: "altro" };
+  assert.deepEqual(computeIncassiContantiDaRegistrare(events, [altro], []), []);
+  assert.deepEqual(computeRinumerazione(altro, events, DEFAULT_SETTINGS), []);
 });
 test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
   const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };
