@@ -68,7 +68,11 @@ export async function POST(request) {
     // registrare PRIMA di confermare le note, perché la rinumerazione mostra
     // "(deve X€ saldato)" solo dopo.
     const idTarget = new Set(target.map((p) => p.id));
-    const incassiDaRegistrare = computeIncassiContantiDaRegistrare(events, patients || [], incassi || []).filter((i) => idTarget.has(i.patientId));
+    // Solo le note recenti (stesso orizzonte di prima: 30 giorni indietro): la
+    // lettura arriva fino all'ancora più vecchia, ma un "saldato" di mesi fa è
+    // storia, non un incasso da proporre.
+    const inizioIncassi = addDays(oggi, -30);
+    const incassiDaRegistrare = computeIncassiContantiDaRegistrare(events, patients || [], incassi || []).filter((i) => idTarget.has(i.patientId) && i.data >= inizioIncassi);
 
     const risultato = target
       .map((p) => ({

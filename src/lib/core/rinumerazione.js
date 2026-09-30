@@ -304,6 +304,9 @@ export function computeIncassiContantiDaRegistrare(events, patients, pagamenti =
     let deveAlGiorno = deveInNota ? Number(deveInNota[1].replace(",", ".")) : Math.max(saldoAttuale, 0);
     if (nonFatturato) {
       const riga = computeRinumerazione(patient, events, {}, patients).find((r) => r.id === e.id);
+      // Una seduta fuori dal ciclo corrente (prima dell'ancora): vecchia nota
+      // di un ciclo già chiuso, niente da registrare (caso Michela M. 13/05).
+      if (!riga) continue;
       deveAlGiorno = Math.round(importoSedutaNonFatturato(patient) * (riga?.numero || 0) * 100) / 100;
     }
     // Senza numero si propone il dovuto; con saldo a zero o in credito (paga

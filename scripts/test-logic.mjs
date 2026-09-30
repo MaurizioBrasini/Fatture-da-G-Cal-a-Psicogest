@@ -523,7 +523,14 @@ test("computeIncassiContantiDaRegistrare: 'saldato' di un NF propone n × prezzo
   const altro = { ...pazNF, tipologia: "altro" };
   assert.deepEqual(computeIncassiContantiDaRegistrare(events, [altro], []), []);
   assert.deepEqual(computeRinumerazione(altro, events, DEFAULT_SETTINGS), []);
-});test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
+});test("computeIncassiContantiDaRegistrare: un 'saldato' NF prima dell'ancora (ciclo già chiuso) non viene proposto (caso Michela M. 13/05)", () => {
+  const events = [
+    { id: "old", data: "2026-05-13", ora: "10:00", titolo: "Romano R.", descrizione: "NF3 saldato" },
+    { id: "a", data: "2026-09-15", ora: "10:00", titolo: "Romano R.", descrizione: "NF1" },
+  ];
+  assert.deepEqual(computeIncassiContantiDaRegistrare(events, [pazNF], []), []);
+});
+test("computePatientState: non_fatturato non è mai 'pronto' né 'da_valutare', anche molto oltre soglia/giorni_stale", () => {
   const patient = { id: 1, nome_calendario: "Riunione Scienziati", stato: "non_fatturato", ancora_data: "2020-01-01", ancora_valore: 50, soglia_fatturazione: 5, giorni_stale_override: null };
   const events = [{ data: "2020-01-05", titolo: "Riunione Scienziati" }];
   const st = computePatientState(patient, events, DEFAULT_SETTINGS, [], [patient]);
