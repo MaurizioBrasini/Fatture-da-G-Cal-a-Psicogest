@@ -37,7 +37,9 @@ export async function middleware(request) {
     request.nextUrl.pathname.startsWith("/consenso") ||
     request.nextUrl.pathname.startsWith("/privacy") ||
     request.nextUrl.pathname.startsWith("/termini") ||
-    request.nextUrl.pathname.startsWith("/api/consensi/pubblico");
+    request.nextUrl.pathname.startsWith("/api/consensi/pubblico") ||
+    // Cron di Vercel: non ha una sessione, la rotta si protegge da sola con CRON_SECRET.
+    request.nextUrl.pathname.startsWith("/api/cron/");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();

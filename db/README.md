@@ -28,6 +28,7 @@ zero o per capire da dove viene una colonna.
 | 19 | `schema_addendum18.sql` | Durata esplicita di uno slot fisso (`patient_slots.durata_minuti`), ha la precedenza sull'inferenza dall'ultimo evento reale. |
 | 20 | `schema_addendum19.sql` | Moduli di consenso informato (`consensi`): link univoco pre-primo-incontro, anagrafica + consensi, coda di revisione prima di toccare `patients`. Firma professionista e URL base dell'app in `settings`. |
 | 21 | `schema_addendum20.sql` | Disdette/duplicati scartati in "Registra disdette" (`disdette_scartate`): non vengono più riproposti, ripristinabili dall'elenco "Scartati". |
+| 22 | `schema_addendum21.sql` | Esito dell'ultimo giro automatico di "Genera occorrenze future" (`settings.ultima_generazione_auto`). |
 | – | `schema_contante.sql` | Quota in contanti non fatturata: `quota_contante_seduta`, `contante_dovuto`, `contante_pagamenti`. Eseguito dopo `schema_addendum.sql`. |
 
 Le intestazioni dei singoli file spiegano nel dettaglio il perché di ogni modifica.

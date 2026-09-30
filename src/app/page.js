@@ -716,6 +716,11 @@ export default function DashboardPage() {
   const readyIds = groups.pronto.map((p) => p.id);
   const chosenIds = readyIds.filter((id) => selected[id] !== false);
   const disabled = !!pendingBatch;
+  // Esito dell'ultimo giro automatico di "Genera occorrenze future" (cron
+  // settimanale): si nota solo se c'è qualcosa da guardare, altrimenti una riga
+  // discreta.
+  const genAuto = settings?.ultima_generazione_auto;
+  const genAutoDaGuardare = !!genAuto && (!!genAuto.errore || genAuto.anomalie > 0);
 
   return (
     <div className="app-root">
@@ -771,6 +776,14 @@ export default function DashboardPage() {
           {groups.pronto.length > 0 && (
             <p className="muted small" style={{ marginTop: 12, marginBottom: 0 }}>
               + {groups.pronto.length} {groups.pronto.length === 1 ? "paziente pronto" : "pazienti pronti"} per la fattura qui sotto.
+            </p>
+          )}
+          {genAuto && (
+            <p className={genAutoDaGuardare ? "" : "muted small"} style={{ marginTop: 12, marginBottom: 0, ...(genAutoDaGuardare ? { color: "crimson", fontSize: 13 } : {}) }}>
+              Occorrenze future generate in automatico il {new Date(genAuto.eseguito_il).toLocaleDateString("it-IT")}: {genAuto.creati} create
+              {genAuto.anomalie > 0 && `, ${genAuto.anomalie} da controllare a mano (Pazienti → Genera occorrenze future: sono date sparite senza una disdetta registrata)`}
+              {genAuto.errore && `. Problema: ${genAuto.errore}`}
+              {!genAuto.errore && "."}
             </p>
           )}
         </div>

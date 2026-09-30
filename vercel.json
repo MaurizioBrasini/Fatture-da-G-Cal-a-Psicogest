@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/cron/genera-occorrenze", "schedule": "0 18 * * 0" }
+  ]
+}
