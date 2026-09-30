@@ -1,5 +1,5 @@
 "use client";
-import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import * as XLSX from "xlsx";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -106,7 +106,10 @@ export default function DashboardPage() {
   // scrittura di segnaRoutine dentro l'hook non aggiorna da sola lo useState
   // di questa pagina.
   const { apriRinumerazione, renumerazioneModal } = useRinumerazione({
-    onRinumeraTuttiCompletato: () => setRoutine(leggiRoutine(todayISO())),
+    onRinumeraTuttiCompletato: () => {
+      setRoutine(leggiRoutine(todayISO()));
+      handleSync(); // le note sono cambiate: riallinea la copia del calendario
+    },
   });
 
   // --- Modale numero fattura (sostituisce window.prompt) ---
@@ -173,6 +176,18 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
+  // Lettura fresca del calendario in automatico (era il passo "Aggiorna dal
+  // calendario" della routine): all'apertura della Dashboard, se la copia
+  // salvata ha più di 10 minuti, e dopo ogni passo che cambia il calendario.
+  // I conteggi (anche quelli NF, che leggono "saldato" dalle note) vengono da
+  // quella copia. Il pulsante manuale nella barra delle date resta.
+  const autoSyncFatto = useRef(false);
+  useEffect(() => {
+    if (loading || autoSyncFatto.current || !eventsMeta) return;
+    autoSyncFatto.current = true;
+    if (Date.now() - new Date(eventsMeta.fetchedAt).getTime() > 10 * 60 * 1000) handleSync();
+  }, [loading, eventsMeta]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleSync() {
     setSyncing(true);
     setSyncError(null);
@@ -205,7 +220,6 @@ export default function DashboardPage() {
         events: filtered,
         fetched_at: fetchedAt,
       });
-      segna("sync");
     } catch (e) {
       setSyncError(e.message);
     } finally {
@@ -438,6 +452,14 @@ export default function DashboardPage() {
         return;
       }
       setAggCandidati(data.candidati || []);
+      // Email di riprenotazione già spuntata per chi ha un indirizzo (si può
+      // togliere riga per riga): era la ragione per cui si finiva in
+      // Comunicazioni a mandarla a parte.
+      setAggEmailSelezionate(
+        Object.fromEntries(
+          (data.candidati || []).filter((c) => patients.find((p) => p.id === c.patientId)?.email).map((c) => [c.eventId, true])
+        )
+      );
       setAggDuplicati(data.duplicati || []);
       setAggScartati(data.scartati || []);
       setAggStep("preview");
@@ -485,7 +507,21 @@ export default function DashboardPage() {
       setAggRisultato(data);
       setAggStep("done");
       segna("disdette");
-      load();
+      // Numerazione dei pazienti toccati aggiornata subito, in silenzio (stesso
+      // richiamo usato dopo una fattura o un incasso): togliere un evento
+      // sposta i numeri degli altri. Poi si riallinea la copia del calendario.
+      const pazientiToccati = [...new Set(tutte.map((c) => c.patientId))];
+      (async () => {
+        for (const id of pazientiToccati) {
+          try {
+            await rinumeraPazienteSilenzioso(id);
+          } catch (e) {
+            console.error("Rinumerazione automatica fallita:", e);
+          }
+        }
+        await load();
+        handleSync();
+      })();
     } catch (e) {
       setAggErrore(e.message);
       setAggStep("error");
@@ -668,7 +704,7 @@ export default function DashboardPage() {
 
       setPrenRisultato({ ...esito, nuovi: nuovi.length });
       setPrenStep("done");
-      load();
+      load().then(() => handleSync());
     } catch (e) {
       setPrenErrore(e.message);
       setPrenStep("error");
@@ -721,26 +757,13 @@ export default function DashboardPage() {
               <button className="btn-small" onClick={apriPrenotazioni}>Controlla</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input type="checkbox" checked={!!routine.sync} onChange={() => segna("sync", !routine.sync)} />
-              <span
-                className="small"
-                style={{ flex: 1, textDecoration: routine.sync ? "line-through" : "none", color: routine.sync ? "var(--ink-soft)" : "var(--ink)" }}
-                title="Solo una lettura fresca degli eventi da Google, per aggiornare quello che vedi nelle tabelle dell'app. Non scrive nulla né su calendario né sul database."
-              >
-                3. Aggiorna dal calendario
-              </span>
-              <button className="btn-small" onClick={handleSync} disabled={syncing}>
-                {syncing ? "Lettura…" : "Fai ora"}
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <input type="checkbox" checked={!!routine.rinumera} onChange={() => segna("rinumera", !routine.rinumera)} />
               <span
                 className="small"
                 style={{ flex: 1, textDecoration: routine.rinumera ? "line-through" : "none", color: routine.rinumera ? "var(--ink-soft)" : "var(--ink)" }}
                 title={'Rilegge tutti gli eventi live di ogni paziente in ordine cronologico e riscrive il codice R/A/S + numero progressivo sulla nota di ciascuno (con "fatturare" quando si arriva alla soglia di 5). Legge anche "saldato" scritto in nota: per i non fatturati il conteggio NF riparte da NF1 dopo quella seduta (con "saldato 40" riparte dal residuo), per i pazienti con quota contanti propone di registrare l\'incasso. Va per ultimo apposta: deve vedere titoli ed eventi già sistemati dai passaggi precedenti.'}
               >
-                4. Rinumera tutti
+                3. Rinumera tutti <span className="muted">(solo se hai scritto &quot;saldato&quot;)</span>
               </span>
               <button className="btn-small" onClick={() => apriRinumerazione(null)}>Fai ora</button>
             </div>
