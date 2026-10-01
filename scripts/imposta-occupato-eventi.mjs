@@ -1,14 +1,15 @@
-// One-off 2026-10-01: Chiara C. ha prenotato online martedì 13/10 alle 10:30,
-// fascia già occupata da Valeria B. — il suo evento era segnato "Libero"
-// (transparency: transparent) e Google Appointment Schedule ignora gli eventi
-// "Libero". Questo script trova tutti gli eventi con orario (non "tutto il
-// giorno") da oggi in poi segnati "Libero" e li rimette "Occupato".
-// Anteprima di default; con --apply scrive. Tocca solo il campo transparency.
+// Controllo/correzione degli eventi con orario segnati "Libero" da oggi a un
+// anno: Google Appointment Schedule li ignora e offre la fascia ai pazienti
+// (caso Valeria B./Chiara C., 13/10/2026). Anteprima di default; con --apply li
+// rimette "Occupato" (tocca solo il campo transparency); con --solo "Titolo"
+// limita ai soli eventi con quel titolo esatto.
 import fs from "node:fs";
 import { todayISO, addDays } from "../src/lib/logic.js";
 import { fetchGoogleCalendarEvents, setGoogleCalendarEventBusy } from "../src/lib/googleCalendar.js";
 
 const APPLY = process.argv.includes("--apply");
+const iSolo = process.argv.indexOf("--solo");
+const SOLO = iSolo >= 0 ? process.argv[iSolo + 1] : null;
 
 const envRaw = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const env = {};
@@ -26,7 +27,7 @@ const [{ refresh_token: refreshToken }] = await res.json();
 
 const oggi = todayISO();
 const events = await fetchGoogleCalendarEvents(refreshToken, oggi, addDays(oggi, 365));
-const liberi = events.filter((e) => e.libero && e.ora && (!process.env.ONLY || e.titolo === process.env.ONLY));
+const liberi = events.filter((e) => e.libero && e.ora && (!SOLO || e.titolo === SOLO));
 
 console.log(`${events.length} eventi da ${oggi} a +365 gg, di cui ${liberi.length} con orario segnati "Libero":`);
 for (const e of liberi) console.log(`  ${e.data} ${e.ora}  ${e.titolo}`);
