@@ -76,6 +76,10 @@ export async function fetchGoogleCalendarEvents(refreshToken, fromDate, toDate) 
           // null/assente = colore di default (confermato); "6" = Tangerine/
           // mandarino (da confermare) — vedi updateGoogleCalendarEventColor.
           colorId: ev.colorId || null,
+          // "transparent" = evento segnato "Libero": le prenotazioni online
+          // Google lo ignorano e offrono la fascia come disponibile (bug
+          // Valeria B./Chiara C. 13/10/2026). Assente = "opaque" (Occupato).
+          libero: ev.transparency === "transparent",
         };
       }).filter((e) => e.data)
     );
@@ -183,6 +187,8 @@ export async function createGoogleCalendarEvent(refreshToken, { data, ora, durat
     description: descrizione || "",
     start: { dateTime: inizio, timeZone: "Europe/Rome" },
     end: { dateTime: fine, timeZone: "Europe/Rome" },
+    // Sempre "Occupato": un evento "Libero" non blocca le prenotazioni online.
+    transparency: "opaque",
   };
   // colorId omesso = colore di default dell'evento (confermato); valorizzato
   // (es. "6" Tangerine/mandarino) per segnalare "da confermare".
@@ -223,6 +229,27 @@ export async function updateGoogleCalendarEventColor(refreshToken, eventId, colo
   if (!res.ok) {
     const text = await res.text();
     throw new Error("Scrittura del colore sull'evento del calendario fallita: " + text);
+  }
+  return res.json();
+}
+
+// Segna un evento esistente come "Occupato" (transparency opaque), senza
+// toccare nessun altro campo. Serve a correggere gli eventi rimasti "Libero".
+export async function setGoogleCalendarEventBusy(refreshToken, eventId) {
+  const accessToken = await getAccessToken(refreshToken);
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ transparency: "opaque" }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error("Impostazione 'Occupato' sull'evento fallita: " + text);
   }
   return res.json();
 }

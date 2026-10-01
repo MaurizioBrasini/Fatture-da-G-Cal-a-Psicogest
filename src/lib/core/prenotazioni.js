@@ -341,5 +341,29 @@ export function computeConflittiPrenotazioni(righe, events, patients, slots, opz
     if (altri.length) conflitti[r.eventId] = altri;
     else (tenute[r.patientId] ||= []).push(r);
   }
+
+  // --- Sovrapposizione con un qualsiasi evento già in agenda (di chiunque):
+  // vale per tutti e ha la precedenza sulle altre regole. Google Appointment
+  // Schedule offre la fascia comunque se l'evento è segnato "Libero" (caso
+  // Valeria B./Chiara C., 13/10/2026), quindi qui non ci si fida di quel flag.
+  const finisce = (e) => minuti(e.ora) + (e.durataMinuti || 60);
+  for (const r of ordinate) {
+    if (!r.ora) continue;
+    const durataPren = (events || []).find((e) => e.id === r.eventId)?.durataMinuti || 60;
+    const inizio = minuti(r.ora);
+    const sopra = (events || []).filter(
+      (e) =>
+        e.id !== r.eventId &&
+        e.ora &&
+        e.data === r.data &&
+        !BOOKING_TITLE_REGEX.test(e.titolo || "") &&
+        !DISDETTA_REGEX.test(e.descrizione || "") &&
+        minuti(e.ora) < inizio + durataPren &&
+        inizio < finisce(e)
+    );
+    if (sopra.length) {
+      conflitti[r.eventId] = sopra.map((e) => ({ data: e.data, ora: e.ora, tipo: "appuntamento", sovrapposto: true, titolo: e.titolo }));
+    }
+  }
   return conflitti;
 }

@@ -64,7 +64,17 @@ export function buildEmailRiprenotazioneHtml({ nomePaziente, linkPrenotazioni })
 // appuntamento a meno di due settimane (regola "un solo appuntamento ogni due
 // settimane"). `conflitti` = [{data "YYYY-MM-DD", ora}] già formattati come
 // testo dal chiamante; `dataPrenotazione`/`oraPrenotazione` idem.
-export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa, oltreOrizzonte, riservato, unaSola }) {
+export function buildEmailPrenotazioneAnnullataHtml({ nomePaziente, dataPrenotazione, oraPrenotazione, conflittiTesto, linkPrenotazioni, frequenzaFissa, oltreOrizzonte, riservato, unaSola, sovrapposto }) {
+  // Fascia già occupata da un altro appuntamento (non mostrato come occupato da Google).
+  if (sovrapposto) {
+    return testoInHtml(
+      `Gentile ${nomePaziente},\n\n` +
+        `la prenotazione che ha effettuato per il ${dataPrenotazione}${oraPrenotazione ? ` alle ${oraPrenotazione}` : ""} è stata annullata, ` +
+        `perché quell'orario risulta già occupato da un altro appuntamento.\n\n` +
+        (linkPrenotazioni ? `Potrà scegliere un altro orario da questo link:\n\n${linkPrenotazioni}\n\n` : "\n") +
+        `Cordiali saluti,\nDr. Maurizio Brasini`
+    );
+  }
   // Giorno/orario non ancora aperto: il calendario è popolato solo fino a una certa data.
   if (riservato) {
     return testoInHtml(

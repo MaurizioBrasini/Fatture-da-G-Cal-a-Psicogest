@@ -133,6 +133,7 @@ export async function POST(request) {
               frequenzaFissa: !!conflitto[0]?.cadenza,
               oltreOrizzonte: !!conflitto[0]?.oltreOrizzonte,
               riservato: !!conflitto[0]?.riservato,
+              sovrapposto: !!conflitto[0]?.sovrapposto,
               unaSola: !!conflitto[0]?.unaSola,
             }),
           });

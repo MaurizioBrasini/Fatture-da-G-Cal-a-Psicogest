@@ -1466,7 +1466,12 @@ export default function DashboardPage() {
                                 <tr>
                                   <td colSpan={3}>
                                     <div className="error-box" style={{ marginBottom: 8 }}>
-                                      {r.conflitto[0]?.riservato ? (
+                                      {r.conflitto[0]?.sovrapposto ? (
+                                        <>
+                                          <strong>Sovrapposta a un altro appuntamento</strong> — in agenda alla stessa ora
+                                          c&apos;è già: {r.conflitto.map((c) => c.titolo).join(", ")}. Già presente:
+                                        </>
+                                      ) : r.conflitto[0]?.riservato ? (
                                         <>
                                           <strong>Fascia riservata a un paziente a schema fisso</strong> — questo giorno e
                                           orario risultano liberi solo perché il calendario non è ancora popolato fin lì.
@@ -1537,7 +1542,7 @@ export default function DashboardPage() {
                             return (
                               <li key={r.eventId}>
                                 {r.bookerNome} ({r.data}) → {p ? `${p.nome || ""} ${p.cognome || ""}`.trim() : `paziente #${r.patientId}`}
-                                {r.conflitto && (r.conflitto[0]?.riservato ? " — ⚠ fascia riservata, calendario non ancora popolato" : r.conflitto[0]?.unaSola ? " — ⚠ ha già un altro appuntamento futuro" : r.conflitto[0]?.oltreOrizzonte ? " — ⚠ oltre il periodo già programmato" : r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
+                                {r.conflitto && (r.conflitto[0]?.sovrapposto ? " — ⚠ sovrapposta a un altro appuntamento" : r.conflitto[0]?.riservato ? " — ⚠ fascia riservata, calendario non ancora popolato" : r.conflitto[0]?.unaSola ? " — ⚠ ha già un altro appuntamento futuro" : r.conflitto[0]?.oltreOrizzonte ? " — ⚠ oltre il periodo già programmato" : r.conflitto[0]?.cadenza ? " — ⚠ frequenza già coperta, nessuna seduta da recuperare" : " — ⚠ troppo vicina a un altro appuntamento (regola: uno ogni due settimane)")}
                               </li>
                             );
                           })}

@@ -1018,6 +1018,23 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.deepEqual(c.a, [{ data: "2026-10-10", ora: "10:00", tipo: "appuntamento" }]);
   });
 
+  test("computeConflittiPrenotazioni: prenotazione sovrapposta a un evento di un ALTRO paziente (anche segnato Libero) è in conflitto", () => {
+    // caso Valeria B./Chiara C. 13/10/2026: evento 10:30-11:30 "Libero", prenotazione online stessa ora
+    const events = [
+      { id: "v", data: "2026-10-13", ora: "10:30", durataMinuti: 60, titolo: "Valeria B.", libero: true },
+      { id: "p", data: "2026-10-13", ora: "10:30", durataMinuti: 60, titolo: "Prenotazioni online dr. Brasini (Chiara Casali)" },
+      { id: "x", data: "2026-10-13", ora: "11:30", durataMinuti: 60, titolo: "Francesca F." }, // adiacente: nessuna sovrapposizione
+    ];
+    const righe = [{ eventId: "p", data: "2026-10-13", ora: "10:30", patientId: null }];
+    const c = computeConflittiPrenotazioni(righe, events, patients, slots, { oggi: "2026-10-01" });
+    assert.equal(c.p.length, 1);
+    assert.equal(c.p[0].sovrapposto, true);
+    assert.equal(c.p[0].titolo, "Valeria B.");
+    // un evento disdetto non occupa più la fascia
+    const d = computeConflittiPrenotazioni(righe, [{ ...events[0], descrizione: "disdetta" }, events[1]], patients, slots, { oggi: "2026-10-01" });
+    assert.deepEqual(d, {});
+  });
+
   test("computeConflittiPrenotazioni: paziente libero, un solo appuntamento futuro alla volta (anche oltre i 14 giorni)", () => {
     // ha già un appuntamento futuro il 10/10: una prenotazione il 24/10 (14 gg dopo) è comunque la seconda
     const c = computeConflittiPrenotazioni([riga("a", "2026-10-24")], [ev("2026-10-10")], patients, slots, { oggi: "2026-10-01" });
@@ -1103,7 +1120,9 @@ test("computeRiprenotazioniPendenti ignora pazienti senza email", () => {
     assert.equal(conf("2026-11-09"), undefined); // lunedì della settimana "libera" del ciclo quindicinale: davvero libero
     assert.equal(conf("2026-11-17"), undefined); // altro giorno della settimana
     assert.equal(conf("2026-11-16", "15:00"), undefined); // altro orario
-    assert.equal(conf("2026-10-19"), undefined); // gia' popolato (evento di Luca a calendario)
+    // gia' popolato (evento di Luca a calendario): non e' "riservato" ma sovrapposto. Google di norma
+    // non la offrirebbe, ma se l'evento e' segnato "Libero" si'; il controllo non si fida (13/10/2026).
+    assert.equal(conf("2026-10-19")[0].sovrapposto, true);
     // vale anche per chi non e' ancora abbinato a un paziente
     assert.equal(conf("2026-11-16", "10:00", null)[0].riservato, true);
   });
