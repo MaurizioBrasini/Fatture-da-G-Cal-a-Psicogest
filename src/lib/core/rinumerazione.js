@@ -1,5 +1,6 @@
 // Numerazione delle sedute nelle note di Google Calendar (R/A/S + numero) e quota contanti.
-import { matchPatientForEvent, contaNonFatturato, numeraNonFatturato, SALDATO_REGEX } from "./pazienti.js";
+import { matchPatientForEvent, contaNonFatturato, numeraNonFatturato, notaChiedeFattura, SALDATO_REGEX } from "./pazienti.js";
+import { todayISO } from "./util.js";
 
 // ---------------------------------------------------------------------
 // Numerazione sedute su Google Calendar (R/A/S + numero progressivo)
@@ -198,9 +199,20 @@ export function computeRinumerazione(patient, allEvents, settings, allPatients, 
   let contatore = patient.ancora_valore || 0;
   const piano = [];
 
-  for (const ev of eventi) {
+  // Le due strade per fatturare prima della soglia si parlano (Maurizio
+  // 2026-10-01): (a) "fatturare" scritto a mano in nota (notaChiedeFattura)
+  // chiude il ciclo a quella seduta, che resta "fatturare" e da cui il conteggio
+  // riparte; (b) paziente "concluso" nell'app: la fattura è dovuta, quindi
+  // l'ultima seduta già svolta porta "fatturare" (le eventuali future no).
+  const oggi = opzioni.oggi || todayISO();
+  let ultimaConclusione = -1;
+  if (patient.stato === "concluso") eventi.forEach((e, i) => { if (e.data <= oggi) ultimaConclusione = i; });
+
+  for (const [i, ev] of eventi.entries()) {
     contatore += 1;
-    const fatturare = lettera !== "S" && contatore >= soglia; // "NF" è già uscito sopra, mai qui
+    // "NF" è già uscito sopra, mai qui
+    const fatturare =
+      lettera !== "S" && (contatore >= soglia || notaChiedeFattura(ev.descrizione, soglia) || i === ultimaConclusione);
     // Incassi dei giorni precedenti: già sottratti prima di questa seduta.
     // Senza tetto a zero: un incasso in anticipo (prima che il debito sia
     // maturato) è un credito che il prossimo accumulo compensa; formatCodice

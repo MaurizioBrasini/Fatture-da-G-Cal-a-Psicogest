@@ -11,6 +11,7 @@ import {
   titleCaseNomeCalendario,
   matchPatientForEvent,
   computePatientState,
+  notaChiedeFattura,
   buildInvoiceRow,
   buildPsicogestAnagraficaRow,
   letteraCodice,
@@ -155,6 +156,62 @@ test("computePatientState: paziente concluso sotto soglia -> 'pronto' (fine rapp
   const poche = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 5 };
   assert.equal(computePatientState(poche, events, DEFAULT_SETTINGS).stato, "pronto");
 });
+// --- "fatturare" scritto a mano in nota + stato concluso: le due strade si parlano (2026-10-01) ---
+{
+  const paz = { nome_calendario: "Mario Rossi", ancora_valore: 0, soglia_fatturazione: 5, regime_tariffario: "standard" };
+  const mk = (note) => note.map((d, i) => ({ id: `e${i}`, data: `2026-09-${String(1 + i * 7).padStart(2, "0")}`, ora: "10:00", titolo: "Mario Rossi", descrizione: d }));
+
+  test("notaChiedeFattura: numero sotto soglia o senza numero = manuale; numero a soglia = scritto dall'app; 'non fatturare' = no", () => {
+    assert.equal(notaChiedeFattura("R3 fatturare", 5), true);
+    assert.equal(notaChiedeFattura("fatturare", 5), true);
+    assert.equal(notaChiedeFattura("A2 fatturare (deve 40€)", 5), true);
+    assert.equal(notaChiedeFattura("R5 fatturare", 5), false); // lo scrive l'app alla soglia
+    assert.equal(notaChiedeFattura("R3", 5), false);
+    assert.equal(notaChiedeFattura("non fatturare", 5), false);
+    assert.equal(notaChiedeFattura("", 5), false);
+  });
+
+  test("computePatientState: 'R3 fatturare' a mano su paziente in corso (3 su 5) -> 'pronto', fattura sulle 3 sedute", () => {
+    const st = computePatientState(paz, mk(["R1", "R2", "R3 fatturare"]), DEFAULT_SETTINGS);
+    assert.equal(st.stato, "pronto");
+    assert.equal(st.count, 3);
+    assert.equal(st.fatturaRichiesta, true);
+  });
+
+  test("computePatientState: le sedute dopo la nota 'fatturare' restano per il ciclo successivo", () => {
+    const st = computePatientState(paz, mk(["R1", "R2 fatturare", "R3", "R4"]), DEFAULT_SETTINGS);
+    assert.equal(st.count, 2);
+    assert.equal(st.usati[st.usati.length - 1].data, "2026-09-08"); // l'ancora andrà al giorno dopo
+  });
+
+  test("computePatientState: senza nota (3 su 5) resta 'in_corso'; 'R5 fatturare' dell'app non conta come manuale", () => {
+    assert.notEqual(computePatientState(paz, mk(["R1", "R2", "R3"]), DEFAULT_SETTINGS).stato, "pronto");
+    assert.equal(computePatientState(paz, mk(["R1", "R2", "R3", "R4"].map((x, i) => (i === 3 ? "R5 fatturare" : x))), DEFAULT_SETTINGS).fatturaRichiesta, false);
+  });
+
+  test("Rinumera: il 'fatturare' a mano resta (non viene riscritto 'R3') e il conteggio riparte da 1", () => {
+    const piano = computeRinumerazione(paz, mk(["R1", "R2", "R3 fatturare", "", ""]), DEFAULT_SETTINGS, [paz], { oggi: "2026-10-01" });
+    assert.deepEqual(piano.map((r) => r.codice), ["R1", "R2", "R3 fatturare", "R1", "R2"]);
+    // idempotente: rilanciata sul risultato non cambia nulla
+    const rilancio = computeRinumerazione(paz, mk(piano.map((r) => r.descrizioneNuova)), DEFAULT_SETTINGS, [paz], { oggi: "2026-10-01" });
+    assert.equal(rilancio.filter((r) => r.cambia).length, 0);
+  });
+
+  test("Rinumera: paziente concluso -> l'ultima seduta già svolta porta 'fatturare' (anche sotto soglia), le future no", () => {
+    const concluso = { ...paz, stato: "concluso" };
+    const eventi = [...mk(["", "", ""]), { id: "fut", data: "2026-12-01", ora: "10:00", titolo: "Mario Rossi", descrizione: "" }];
+    const piano = computeRinumerazione(concluso, eventi, DEFAULT_SETTINGS, [concluso], { oggi: "2026-10-01" });
+    assert.deepEqual(piano.slice(0, 3).map((r) => r.codice), ["R1", "R2", "R3 fatturare"]);
+    assert.equal(piano[3].fatturare, false);
+  });
+
+  test("computePatientState: sospeso/non fatturato ignorano la nota 'fatturare'", () => {
+    for (const stato of ["sospeso", "non_fatturato"]) {
+      const st = computePatientState({ ...paz, stato }, mk(["R1", "R2 fatturare"]), DEFAULT_SETTINGS);
+      assert.notEqual(st.stato, "pronto");
+    }
+  });
+}
 test("computePatientState: paziente concluso che ha raggiunto la soglia -> 'pronto' (caso reale Paola e Antonello, soglia 1)", () => {
   const events = [{ data: "2020-01-01", titolo: "Mario Rossi" }];
   const patient = { nome_calendario: "Mario Rossi", stato: "concluso", ancora_valore: 0, soglia_fatturazione: 1 };

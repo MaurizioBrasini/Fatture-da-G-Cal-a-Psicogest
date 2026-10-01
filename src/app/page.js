@@ -893,6 +893,11 @@ export default function DashboardPage() {
                           <td>
                             <div className="name">{p.nome_calendario || p.fatturare_a}</div>
                             {!p.codice_fiscale && <div className="tag tag-danger">manca CF</div>}
+                            {c.fatturaRichiesta && c.count < c.soglia && (
+                              <div className="tag" title="Hai scritto «fatturare» nella nota di una seduta: la fattura copre le sedute fino a quella">
+                                da nota «fatturare» — sotto soglia
+                              </div>
+                            )}
                             {p.stato === "concluso" && (
                               <div className="tag" title="Percorso concluso: fatturato a fine rapporto anche sotto soglia">
                                 concluso{c.count < c.soglia ? " — sotto soglia" : ""}

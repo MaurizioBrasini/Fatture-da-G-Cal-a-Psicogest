@@ -63,6 +63,21 @@ export function importoSedutaNonFatturato(patient) {
 export const SALDATO_REGEX =
   /(?<!\bnon\s)\b(?:(?:saldat|pagat)[oaie]|dat[oi](?!\s+(?:che|di|del|dei|della|delle|dal|dai|fiscal\w*|anagrafic\w*|personal\w*|sensibil\w*|clinic\w*)\b))\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
 
+// "fatturare" scritto a mano in nota (es. "R3 fatturare"): fa partire la fattura
+// sulle sedute fin lì anche a terapia in corso e prima della soglia (richiesta di
+// Maurizio 2026-10-01; lo stato "concluso" è l'altra strada, vedi
+// computePatientState e computeRinumerazione). L'app scrive "fatturare" da sola
+// solo col numero già a soglia: un codice con numero SOTTO la soglia può quindi
+// essere solo scritto a mano — così non si scambia per manuale una proiezione
+// dell'app rimasta in nota dopo uno spostamento di numeri. Senza numero
+// ("fatturare" da solo) è sempre manuale. "non fatturare" dice l'opposto.
+export function notaChiedeFattura(descrizione, soglia) {
+  const d = descrizione || "";
+  if (!/(?<!\bnon\s)\bfatturare\b/i.test(d)) return false;
+  const m = /^\s*(?:[ras]|np|npa|pc)?\s*(\d+)\s*fatturare\b/i.exec(d);
+  return !m || Number(m[1]) < soglia;
+}
+
 // Numerazione NF di una sequenza di sedute (già ordinate, dalla più vecchia):
 // si conta NF1, NF2... partendo da ancora_valore. La seduta con "saldato" in
 // nota chiude il ciclo: resta NFn e dalla successiva il conteggio riparte da
@@ -119,10 +134,28 @@ export function computePatientState(patient, events, settings, cancellazioni = [
       .map((c) => c.original_date)
   );
 
-  const usati = passate
+  let usati = passate
     .filter((e) => !patient.ancora_data || e.data >= patient.ancora_data)
     .filter((e) => !nonAddebitate.has(e.data))
     .sort((a, b) => (a.data < b.data ? -1 : 1));
+
+  const soglia = patient.soglia_fatturazione || settings.soglia_default;
+  // "fatturare" a mano in nota (vedi notaChiedeFattura): le sedute da fatturare
+  // arrivano fino all'ultima così segnata, le successive restano per il ciclo
+  // dopo (l'ancora si sposta al giorno dopo l'ultima seduta di `usati`). Per
+  // sospesi, non fatturati e conclusi non serve: i primi due non si fatturano,
+  // il terzo è già "pronto" con tutte le sedute.
+  let fatturaRichiesta = false;
+  if (!["sospeso", "non_fatturato", "concluso"].includes(patient.stato)) {
+    let ultimaRichiesta = -1;
+    usati.forEach((e, i) => {
+      if (notaChiedeFattura(e.descrizione, soglia)) ultimaRichiesta = i;
+    });
+    if (ultimaRichiesta >= 0) {
+      usati = usati.slice(0, ultimaRichiesta + 1);
+      fatturaRichiesta = true;
+    }
+  }
 
   let count = (patient.ancora_valore || 0) + usati.length;
   if (contaNonFatturato(patient)) {
@@ -132,7 +165,6 @@ export function computePatientState(patient, events, settings, cancellazioni = [
   }
   const ultimaData = passate.length ? passate.map((e) => e.data).sort().slice(-1)[0] : null;
   const prossimaData = future.length ? future.map((e) => e.data).sort()[0] : null;
-  const soglia = patient.soglia_fatturazione || settings.soglia_default;
   const giorniStale = patient.giorni_stale_override || settings.giorni_stale;
 
   let stato = "senza_sedute";
@@ -156,9 +188,9 @@ export function computePatientState(patient, events, settings, cancellazioni = [
     // Maurizio 2026-09-20 — quasi immancabilmente si fattura). Sotto soglia
     // la Dashboard chiede una conferma esplicita prima di generare il file.
     stato = count > 0 ? "pronto" : "senza_sedute";
-  } else if (count > 0 && count >= soglia) stato = "pronto";
+  } else if (count > 0 && (count >= soglia || fatturaRichiesta)) stato = "pronto";
   else if (count > 0 && ultimaData && daysBetween(ultimaData, oggi) >= giorniStale) stato = "da_valutare";
   else if (count > 0) stato = "in_corso";
 
-  return { count, soglia, ultimaData, prossimaData, usati, stato };
+  return { count, soglia, ultimaData, prossimaData, usati, stato, fatturaRichiesta };
 }
