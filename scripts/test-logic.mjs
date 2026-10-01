@@ -571,6 +571,34 @@ test("computeIncassiContantiDaRegistrare ignora pazienti senza quota contanti im
   const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "R3 fatturare saldato" }];
   assert.equal(computeIncassiContantiDaRegistrare(events, patients).length, 0);
 });
+test("incasso da nota: saldato/saldati, pagato/pagati, dato/dati sono sinonimi, con o senza importo (2026-10-01)", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
+  const importo = (descrizione) => computeIncassiContantiDaRegistrare([{ id: "e", data: "2026-01-05", titolo: "Mario Rossi", descrizione }], patients)[0]?.importo;
+  for (const parola of ["saldato", "saldati", "pagato", "pagati", "dato", "dati", "Pagato", "A3 fatturare (deve 60€) dati"]) {
+    assert.equal(importo(parola), 60, parola);
+  }
+  assert.equal(importo("pagati 30"), 30);
+  assert.equal(importo("dato 40€"), 40);
+  assert.equal(importo("dati 25 grazie"), 25);
+  assert.equal(importo("R3 dato."), 60);
+  // usi reali nel calendario
+  assert.equal(importo("NpA 4 deve 100 dati oggi"), 60);
+  assert.equal(importo("Np 5 già dato contante"), 60);
+  assert.equal(importo("A5 fatturare deve 100 dati oggi"), 60);
+});
+test("incasso da nota: 'dato/dati' come parola comune e le negazioni NON contano", () => {
+  const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
+  const trovato = (descrizione) => computeIncassiContantiDaRegistrare([{ id: "e", data: "2026-01-05", titolo: "Mario Rossi", descrizione }], patients).length;
+  for (const nota of ["dato che arriva tardi", "i dati fiscali sono da controllare", "non pagato", "non pagati", "non dato", "non saldato", "pagatore", "R3 fatturare (deve 60€)"]) {
+    assert.equal(trovato(nota), 0, nota);
+  }
+});
+test("NF: 'pagato' e 'pagati' chiudono il ciclo come 'saldato'", () => {
+  for (const parola of ["NF1 pagato", "NF1 pagati", "NF1 dato", "NF1 saldati"]) {
+    const piano = computeRinumerazione(pazNF, evNF([parola, "", ""]), DEFAULT_SETTINGS, [pazNF]);
+    assert.equal(piano[1].codice, "NF1", parola);
+  }
+});
 test("computeIncassiContantiDaRegistrare ignora note senza il marcatore 'saldato'", () => {
   const patients = [{ id: 1, nome_calendario: "Mario Rossi", quota_contante_seduta: 20, contante_dovuto: 60 }];
   const events = [{ id: "ev1", data: "2026-01-05", titolo: "Mario Rossi", descrizione: "A3 fatturare (deve 60€)" }];

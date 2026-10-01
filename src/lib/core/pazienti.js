@@ -54,8 +54,14 @@ export function importoSedutaNonFatturato(patient) {
 }
 
 // "saldato" / "saldato N" scritto a mano sulla nota di una seduta: il
-// paziente ha pagato. Stessa parola per tutti; "non saldato" dice l'opposto.
-export const SALDATO_REGEX = /(?<!\bnon\s)\bsaldat[oa]\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
+// paziente ha pagato. Sinonimi (richiesta di Maurizio 2026-10-01), singolare e
+// plurale: saldato/saldati, pagato/pagati, dato/dati. "non saldato", "non
+// pagato", "non dato" dicono l'opposto. "dato/dati" sono anche parole comuni:
+// nelle note reali valgono "ha pagato" ("deve 100 dati oggi", "già dato
+// contante", "dati 50"), quindi contano sempre, tranne davanti alle parole che
+// ne fanno un'altra cosa ("dato che", "dati fiscali", "dati del paziente").
+export const SALDATO_REGEX =
+  /(?<!\bnon\s)\b(?:(?:saldat|pagat)[oaie]|dat[oi](?!\s+(?:che|di|del|dei|della|delle|dal|dai|fiscal\w*|anagrafic\w*|personal\w*|sensibil\w*|clinic\w*)\b))\s*(\d+(?:[.,]\d+)?)?\s*€?\b/i;
 
 // Numerazione NF di una sequenza di sedute (già ordinate, dalla più vecchia):
 // si conta NF1, NF2... partendo da ancora_valore. La seduta con "saldato" in
